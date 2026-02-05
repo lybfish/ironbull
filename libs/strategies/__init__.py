@@ -34,6 +34,7 @@ from .reversal_hedge import ReversalHedgeStrategy
 
 # 高级策略
 from .smc import SMCStrategy
+from .smc_fibo import SMCFiboStrategy
 from .mtf import MTFStrategy
 from .sr_break import SRBreakStrategy
 from .grid import GridStrategy
@@ -48,6 +49,9 @@ from .supertrend import SuperTrendStrategy
 
 # 策略组合
 from .portfolio import PortfolioStrategy
+
+# 市场状态识别
+from .market_regime import MarketRegimeStrategy
 
 __all__ = [
     "StrategyBase",
@@ -74,6 +78,7 @@ __all__ = [
     "ReversalHedgeStrategy",
     # 高级策略
     "SMCStrategy",
+    "SMCFiboStrategy",
     "MTFStrategy",
     "SRBreakStrategy",
     "GridStrategy",
@@ -86,6 +91,8 @@ __all__ = [
     "SuperTrendStrategy",
     # 策略组合
     "PortfolioStrategy",
+    # 市场状态识别
+    "MarketRegimeStrategy",
 ]
 
 # 策略注册表（strategy_code -> Strategy Class）
@@ -113,6 +120,7 @@ STRATEGY_REGISTRY = {
     "reversal_hedge": ReversalHedgeStrategy,
     # 高级策略
     "smc": SMCStrategy,
+    "smc_fibo": SMCFiboStrategy,
     "mtf": MTFStrategy,
     "sr_break": SRBreakStrategy,
     "grid": GridStrategy,
@@ -125,6 +133,8 @@ STRATEGY_REGISTRY = {
     "supertrend": SuperTrendStrategy,
     # 策略组合
     "portfolio": PortfolioStrategy,
+    # 市场状态识别
+    "market_regime": MarketRegimeStrategy,
 }
 
 

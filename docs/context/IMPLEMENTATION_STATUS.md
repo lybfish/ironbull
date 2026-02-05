@@ -244,10 +244,202 @@
 - 验证脚本：`scripts/demo_live_data.sh`
 - 依赖：ccxt>=4.0.0
 
-## 未开始（Todo）
-### 真实交易执行
-- 连接真实交易所（Binance/MT5）
-- 真实下单、撤单、查询订单状态
+## 已完成（Done）- v1 Phase 7 ✅
+
+### 真实合约交易执行 ✅
+- 状态：已实现并验证（Binance USDT 永续合约）
+- 组件：
+  - `libs/trading/live_trader.py`：真实交易执行器
+    - 支持 Binance USDT 永续合约（binanceusdm）
+    - 支持双向持仓模式（LONG/SHORT）
+    - 市价开仓 + 自动止盈止损
+  - `libs/trading/auto_trader.py`：自动交易管理器
+    - 三种模式：notify_only / confirm_each / auto_execute
+    - 风控限制：单笔金额/每日次数/最大持仓/最低置信度
+    - 交易记录管理
+  - `libs/notify/telegram.py`：Telegram 通知
+    - 信号推送、交易通知、系统告警
+- 功能：
+  - ✅ 市价开仓（MARKET）
+  - ✅ 自动止损单（STOP_MARKET）
+  - ✅ 自动止盈单（TAKE_PROFIT_MARKET）
+  - ✅ 持仓查询
+  - ✅ 订单查询
+- 配置：`config/default.yaml` 新增：
+  - exchange_api_key / exchange_api_secret
+  - exchange_market_type: future
+  - auto_trade_* 系列配置
+- 验证：真实 Binance 合约交易测试通过
+
+### services/signal-monitor ✅
+- 状态：已实现并可跑
+- 功能：
+  - 信号监控服务（HTTP API）
+  - Telegram 通知集成
+  - 自动交易执行
+- 端点：
+  - GET /health
+  - GET /api/status（监控状态）
+  - POST /api/trading/enable（启用交易）
+  - POST /api/trading/disable（禁用交易）
+  - POST /api/trading/mode（切换模式）
+  - POST /api/trading/execute（执行交易）
+  - GET /api/trading/positions（当前持仓）
+  - GET /api/trading/history（交易历史）
+- 端口：8026
+
+### 本地监控脚本 ✅
+- 脚本：`scripts/local_monitor.py`
+- 功能：
+  - 定期运行策略检测信号
+  - 自动执行交易（带止盈止损）
+  - 监控持仓盈亏
+  - 发送 Telegram 通知
+- 用法：
+  ```bash
+  # 仅通知模式
+  python3 scripts/local_monitor.py
+  
+  # 自动交易模式
+  python3 scripts/local_monitor.py -m auto -i 60
+  ```
+- 参数：
+  - `-s`：监控的交易对
+  - `-t`：K线周期
+  - `-m`：模式（notify/confirm/auto）
+  - `-i`：检查间隔（秒）
+
+### 策略置信度优化 ✅
+- `libs/strategies/market_regime.py`：使用多因子加权评分
+- `libs/strategies/smc_fibo.py`：综合多维度计算置信度
+
+## 已完成（Done）- v1 Phase 8 ✅
+
+### SaaS 核心模块重建 ✅
+- 状态：已实现并验证（按 SaaS Blueprint 重建高风险模块）
+- 遵循不变量：
+  - 成交 ≤ 订单
+  - 可用 + 冻结 = 总持仓/总余额
+  - 变动有来源（append-only 流水）
+  - 租户隔离
+
+### libs/order_trade（订单/成交模块）✅
+- 表结构：
+  - **fact_order**：订单表（生命周期管理）
+  - **fact_fill**：成交表（append-only）
+- 组件：
+  - `models.py`：Order/Fill 数据模型
+  - `states.py`：OrderStatus 状态机 + FillValidation
+  - `contracts.py`：DTOs（CreateOrderDTO/RecordFillDTO 等）
+  - `exceptions.py`：异常定义
+  - `repository.py`：数据访问层
+  - `service.py`：OrderTradeService 业务逻辑
+- 迁移脚本：`migrations/003_order_trade.sql`
+
+### libs/position（持仓模块）✅
+- 表结构：
+  - **fact_position**：持仓状态表
+  - **fact_position_change**：持仓变动历史（append-only）
+- 组件：
+  - `models.py`：Position/PositionChange 数据模型
+  - `states.py`：PositionSide/ChangeType + 校验规则
+  - `contracts.py`：DTOs（PositionDTO/UpdatePositionDTO 等）
+  - `exceptions.py`：异常定义
+  - `repository.py`：数据访问层
+  - `service.py`：PositionService 业务逻辑
+- 功能：
+  - ✅ 成交驱动持仓更新（开仓/加仓/减仓/平仓）
+  - ✅ 冻结/解冻机制
+  - ✅ 加权平均成本计算
+  - ✅ 已实现盈亏计算
+  - ✅ 完整变动审计追踪
+- 迁移脚本：`migrations/004_position.sql`
+
+### libs/ledger（资金/账务模块）✅
+- 表结构：
+  - **fact_account**：资金账户表
+  - **fact_transaction**：交易流水表（append-only）
+  - **fact_equity_snapshot**：权益快照表
+- 组件：
+  - `models.py`：Account/Transaction/EquitySnapshot 数据模型
+  - `states.py`：TransactionType/AccountStatus + 校验规则
+  - `contracts.py`：DTOs（AccountDTO/TradeSettlementDTO 等）
+  - `exceptions.py`：异常定义
+  - `repository.py`：数据访问层
+  - `service.py`：LedgerService 业务逻辑
+- 功能：
+  - ✅ 入金/出金管理
+  - ✅ 交易结算（买入扣款/卖出入账/手续费）
+  - ✅ 冻结/解冻机制
+  - ✅ 权益快照（净值、收益率）
+  - ✅ 完整流水审计追踪
+- 迁移脚本：`migrations/005_ledger.sql`
+
+### libs/trading/settlement.py（交易结算服务）✅
+- 组件：TradeSettlementService
+- 功能：
+  - ✅ 协调 OrderTrade → Position → Ledger 三模块
+  - ✅ 成交驱动的完整交易闭环
+  - ✅ 幂等性保证（通过 fill_id 去重）
+  - ✅ 原子性事务（同一 session）
+
+### LiveTrader 集成 ✅
+- 状态：已集成 TradeSettlementService
+- 功能：
+  - ✅ 支持 settlement_service 参数（完整交易闭环）
+  - ✅ 向后兼容 order_trade_service（旧版）
+  - ✅ 成交后自动更新持仓和资金
+
+### signal-monitor / local_monitor 集成 ✅
+- 状态：已集成 TradeSettlementService
+- 功能：
+  - ✅ 真实交易数据自动持久化到数据库
+  - ✅ `--no-persist` 参数支持（可选关闭持久化）
+  - ✅ 订单/成交/持仓/资金完整记录
+
+## 已完成（Done）- v1 Phase 9 ✅
+
+### libs/analytics（分析模块）✅
+- 状态：已实现并验证
+- 表结构：
+  - **fact_performance_snapshot**：绩效快照（每日净值、收益率）
+  - **fact_trade_statistics**：交易统计（胜率、盈亏比）
+  - **fact_risk_metrics**：风险指标（夏普、回撤、VaR）
+- 组件：
+  - `models.py`：PerformanceSnapshot/TradeStatistics/RiskMetrics 数据模型
+  - `states.py`：PeriodType 枚举 + MetricCalculator 计算器
+  - `contracts.py`：DTOs（PerformanceSnapshotDTO/RiskMetricsDTO 等）
+  - `exceptions.py`：异常定义
+  - `repository.py`：数据访问层
+  - `service.py`：AnalyticsService 业务逻辑
+- 功能：
+  - ✅ 绩效快照（每日净值、收益率、累计收益）
+  - ✅ 风险指标计算：
+    - 夏普比率 (Sharpe Ratio)
+    - 索提诺比率 (Sortino Ratio)
+    - 卡玛比率 (Calmar Ratio)
+    - 最大回撤 (Max Drawdown)
+    - VaR / CVaR
+    - 年化收益率 / 年化波动率
+  - ✅ 交易统计：
+    - 胜率 / 盈亏比 / 获利因子
+    - 最大连胜 / 最大连亏
+    - 平均盈亏 / 最大单笔盈亏
+  - ✅ 净值曲线生成
+  - ✅ 绩效汇总
+- 迁移脚本：`migrations/006_analytics.sql`
+
+### SaaS 蓝图 9 大能力域 ✅
+- **模块层完成度: 100% (9/9)**
+  1. Strategy ✅ - libs/strategies
+  2. MarketData ✅ - libs/exchange, data-provider
+  3. Signal ✅ - 策略产出信号
+  4. Backtest ✅ - services/backtest
+  5. Execution ✅ - libs/trading/live_trader
+  6. OrderTrade ✅ - libs/order_trade
+  7. Position ✅ - libs/position
+  8. Ledger ✅ - libs/ledger
+  9. Analytics ✅ - libs/analytics
 
 ## 风险/技术债（Known Debts）
 - MTF 策略与宏观数据：v0 可先做“接口预留 + mock 数据”，不阻塞最小链路

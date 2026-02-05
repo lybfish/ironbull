@@ -105,7 +105,8 @@ def run_backtest():
         "candles": [...],  // K线数据（按时间升序）
         "initial_balance": 10000.0,  // 可选，默认 10000
         "commission_rate": 0.001,    // 可选，默认 0.001
-        "lookback": 50               // 可选，默认 50
+        "lookback": 50,              // 可选，默认 50
+        "risk_per_trade": 100        // 可选，以损定仓：每笔最大亏损（0=固定仓位）
     }
     
     Response:
@@ -138,6 +139,7 @@ def run_backtest():
         initial_balance = data.get("initial_balance", 10000.0)
         commission_rate = data.get("commission_rate", 0.001)
         lookback = data.get("lookback", 50)
+        risk_per_trade = data.get("risk_per_trade", 0.0)  # 以损定仓
         
         # 加载策略
         try:
@@ -155,6 +157,7 @@ def run_backtest():
         engine = BacktestEngine(
             initial_balance=initial_balance,
             commission_rate=commission_rate,
+            risk_per_trade=risk_per_trade,
         )
         
         log.info(
@@ -350,6 +353,7 @@ def run_backtest_live():
         initial_balance = data.get("initial_balance", 10000.0)
         commission_rate = data.get("commission_rate", 0.001)
         lookback = data.get("lookback", 50)
+        risk_per_trade = data.get("risk_per_trade", 0.0)  # 以损定仓
         
         # 1. 从 data-provider 获取真实 K 线
         log.info(
@@ -400,11 +404,13 @@ def run_backtest_live():
         engine = BacktestEngine(
             initial_balance=initial_balance,
             commission_rate=commission_rate,
+            risk_per_trade=risk_per_trade,
         )
         
+        risk_mode = "以损定仓" if risk_per_trade > 0 else "固定仓位"
         log.info(
             f"开始真实数据回测: strategy={strategy_code}, symbol={symbol}, "
-            f"timeframe={timeframe}, candles={len(candles)}"
+            f"timeframe={timeframe}, candles={len(candles)}, mode={risk_mode}"
         )
         
         # 4. 运行回测

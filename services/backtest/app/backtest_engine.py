@@ -94,10 +94,12 @@ class BacktestEngine:
         initial_balance: float = 10000.0,
         commission_rate: float = 0.001,  # 0.1% 手续费
         hedge_mode: bool = False,        # 对冲模式（双向持仓）
+        risk_per_trade: float = 0.0,     # 每笔交易最大亏损金额（0=固定仓位，>0=以损定仓）
     ):
         self.initial_balance = initial_balance
         self.commission_rate = commission_rate
         self.hedge_mode = hedge_mode
+        self.risk_per_trade = risk_per_trade  # 以损定仓：每笔最大亏损
         
         # 账户状态
         self.balance = initial_balance
@@ -117,6 +119,24 @@ class BacktestEngine:
         
         # 权益曲线
         self.equity_curve: List[Dict] = []
+    
+    def _calc_position_size(self, entry_price: float, stop_loss: float, base_qty: float = 1.0) -> float:
+        """
+        计算仓位大小
+        
+        以损定仓模式：仓位 = 最大亏损 / 止损距离
+        固定仓位模式：返回 base_qty
+        """
+        if self.risk_per_trade <= 0 or stop_loss is None:
+            return base_qty
+        
+        sl_distance = abs(entry_price - stop_loss)
+        if sl_distance == 0:
+            return base_qty
+        
+        # 以损定仓计算
+        position_size = self.risk_per_trade / sl_distance
+        return round(position_size, 6)
     
     def run(
         self,
@@ -301,7 +321,13 @@ class BacktestEngine:
     
     def _open_position(self, signal, entry_price: float, entry_time: datetime):
         """单向模式开仓"""
-        commission = entry_price * 1.0 * self.commission_rate
+        stop_loss = getattr(signal, "stop_loss", None)
+        take_profit = getattr(signal, "take_profit", None)
+        
+        # 以损定仓计算仓位
+        quantity = self._calc_position_size(entry_price, stop_loss, base_qty=1.0)
+        
+        commission = entry_price * quantity * self.commission_rate
         self.balance -= commission
         
         self.trade_id_counter += 1
@@ -311,14 +337,20 @@ class BacktestEngine:
             side=signal.side,
             entry_price=entry_price,
             entry_time=entry_time,
-            quantity=1.0,
-            stop_loss=getattr(signal, "stop_loss", None),
-            take_profit=getattr(signal, "take_profit", None),
+            quantity=quantity,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
         )
     
     def _open_long(self, signal, entry_price: float, entry_time: datetime):
         """开多仓"""
-        commission = entry_price * 0.5 * self.commission_rate  # 对冲模式每边 0.5 仓位
+        stop_loss = getattr(signal, "stop_loss", None)
+        take_profit = getattr(signal, "take_profit", None)
+        
+        # 以损定仓计算仓位（对冲模式基础仓位0.5）
+        quantity = self._calc_position_size(entry_price, stop_loss, base_qty=0.5)
+        
+        commission = entry_price * quantity * self.commission_rate
         self.balance -= commission
         
         self.trade_id_counter += 1
@@ -328,14 +360,20 @@ class BacktestEngine:
             side="BUY",
             entry_price=entry_price,
             entry_time=entry_time,
-            quantity=0.5,  # 对冲模式每边 0.5
-            stop_loss=getattr(signal, "stop_loss", None),
-            take_profit=getattr(signal, "take_profit", None),
+            quantity=quantity,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
         )
     
     def _open_short(self, signal, entry_price: float, entry_time: datetime):
         """开空仓"""
-        commission = entry_price * 0.5 * self.commission_rate
+        stop_loss = getattr(signal, "stop_loss", None)
+        take_profit = getattr(signal, "take_profit", None)
+        
+        # 以损定仓计算仓位
+        quantity = self._calc_position_size(entry_price, stop_loss, base_qty=0.5)
+        
+        commission = entry_price * quantity * self.commission_rate
         self.balance -= commission
         
         self.trade_id_counter += 1
@@ -345,8 +383,8 @@ class BacktestEngine:
             side="SELL",
             entry_price=entry_price,
             entry_time=entry_time,
-            quantity=0.5,
-            stop_loss=getattr(signal, "stop_loss", None),
+            quantity=quantity,
+            stop_loss=stop_loss,
             take_profit=getattr(signal, "take_profit", None),
         )
     

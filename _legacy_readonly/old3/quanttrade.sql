@@ -11,7 +11,7 @@
  Target Server Version : 90001 (9.0.1)
  File Encoding         : 65001
 
- Date: 04/02/2026 14:23:04
+ Date: 06/02/2026 01:01:23
 */
 
 SET NAMES utf8mb4;
@@ -40,12 +40,20 @@ CREATE TABLE `action_log_2026_02` (
   `create_time` int unsigned DEFAULT '0' COMMENT '添加时间',
   `mark` tinyint unsigned NOT NULL DEFAULT '1' COMMENT '有效标识：1正常 0删除',
   PRIMARY KEY (`id`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=COMPACT COMMENT='系统行为日志表';
+) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci ROW_FORMAT=COMPACT COMMENT='系统行为日志表';
 
 -- ----------------------------
 -- Records of action_log_2026_02
 -- ----------------------------
 BEGIN;
+INSERT INTO `action_log_2026_02` (`id`, `username`, `method`, `module`, `url`, `param`, `title`, `type`, `content`, `ip`, `ip_city`, `os`, `browser`, `user_agent`, `create_user`, `create_time`, `mark`) VALUES (1, '管理员', 'POST', 'admin', 'http://localhost:8080/admin/lightweightserver/edit', '{\"id\":1,\"server_id\":\"local_server_001\",\"server_token\":\"3729167e6c7470e19e949c97d70a2586\",\"bound_ip\":\"127.0.0.1\",\"name\":\"\\u6d4b\\u8bd5\",\"region\":\"local\",\"package_type\":\"standard\",\"status\":1,\"exchange\":null,\"inventory_id\":null,\"ip_address\":\"54.179.75.253\",\"error_msg\":null,\"remark\":null,\"create_user\":0,\"create_time\":1769653749,\"update_user\":1,\"update_time\":1770132800,\"mark\":1,\"last_heartbeat\":1770132800,\"current_load\":\"0.00\",\"task_count\":0,\"member_count\":1,\"status_text\":\"\\u6b63\\u5e38\",\"ssh_password\":\"\"}', '操作日志', 3, '', '127.0.0.1', NULL, 'MAC', 'Chrome', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36', 1, 1770192291, 1);
+INSERT INTO `action_log_2026_02` (`id`, `username`, `method`, `module`, `url`, `param`, `title`, `type`, `content`, `ip`, `ip_city`, `os`, `browser`, `user_agent`, `create_user`, `create_time`, `mark`) VALUES (2, '管理员', 'POST', 'admin', 'http://localhost:8080/admin/lightweightserver/addManual', '{\"name\":\"2\",\"ip_address\":\"13.250.40.47\",\"ssh_port\":22,\"ssh_user\":\"root\",\"ssh_password\":\"\",\"exchange\":\"\",\"remark\":\"\"}', '操作日志', 3, '', '127.0.0.1', NULL, 'MAC', 'Chrome', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36', 1, 1770192299, 1);
+INSERT INTO `action_log_2026_02` (`id`, `username`, `method`, `module`, `url`, `param`, `title`, `type`, `content`, `ip`, `ip_city`, `os`, `browser`, `user_agent`, `create_user`, `create_time`, `mark`) VALUES (3, '管理员', 'POST', 'admin', 'http://localhost:8080/admin/lightweightserver/addManual', '{\"name\":\"2\",\"ip_address\":\"13.250.40.47\",\"ssh_port\":22,\"ssh_user\":\"root\",\"ssh_password\":\"\",\"exchange\":\"\",\"remark\":\"\"}', '操作日志', 3, '', '127.0.0.1', NULL, 'MAC', 'Chrome', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36', 1, 1770192300, 1);
+INSERT INTO `action_log_2026_02` (`id`, `username`, `method`, `module`, `url`, `param`, `title`, `type`, `content`, `ip`, `ip_city`, `os`, `browser`, `user_agent`, `create_user`, `create_time`, `mark`) VALUES (4, '管理员', 'POST', 'admin', 'http://localhost:8080/admin/lightweightserver/addManual', '{\"name\":\"2\",\"ip_address\":\"13.250.40.47\",\"ssh_port\":22,\"ssh_user\":\"root\",\"ssh_password\":\"\",\"exchange\":\"\",\"remark\":\"\"}', '操作日志', 3, '', '127.0.0.1', NULL, 'MAC', 'Chrome', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36', 1, 1770192302, 1);
+INSERT INTO `action_log_2026_02` (`id`, `username`, `method`, `module`, `url`, `param`, `title`, `type`, `content`, `ip`, `ip_city`, `os`, `browser`, `user_agent`, `create_user`, `create_time`, `mark`) VALUES (5, '管理员', 'POST', 'admin', 'http://localhost:8080/admin/lightweightserver/addManual', '{\"name\":\"2\",\"ip_address\":\"13.250.40.47\",\"ssh_port\":22,\"ssh_user\":\"root\",\"ssh_password\":\"\",\"exchange\":\"\",\"remark\":\"\"}', '操作日志', 3, '', '127.0.0.1', NULL, 'MAC', 'Chrome', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36', 1, 1770192374, 1);
+INSERT INTO `action_log_2026_02` (`id`, `username`, `method`, `module`, `url`, `param`, `title`, `type`, `content`, `ip`, `ip_city`, `os`, `browser`, `user_agent`, `create_user`, `create_time`, `mark`) VALUES (6, '管理员', 'POST', 'admin', 'http://localhost:8080/admin/lightweightserver/edit', '{\"id\":1,\"server_id\":\"local_server_001\",\"server_token\":\"3729167e6c7470e19e949c97d70a2586\",\"bound_ip\":\"127.0.0.1\",\"name\":\"\\u5b501\",\"region\":\"local\",\"package_type\":\"standard\",\"status\":1,\"exchange\":null,\"inventory_id\":null,\"ip_address\":\"54.179.75.253\",\"error_msg\":null,\"remark\":null,\"create_user\":0,\"create_time\":1769653749,\"update_user\":1,\"update_time\":1770192291,\"mark\":1,\"last_heartbeat\":1770132800,\"current_load\":\"0.00\",\"task_count\":0,\"member_count\":1,\"status_text\":\"\\u6b63\\u5e38\",\"ssh_password\":\"\"}', '操作日志', 3, '', '127.0.0.1', NULL, 'MAC', 'Chrome', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36', 1, 1770192386, 1);
+INSERT INTO `action_log_2026_02` (`id`, `username`, `method`, `module`, `url`, `param`, `title`, `type`, `content`, `ip`, `ip_city`, `os`, `browser`, `user_agent`, `create_user`, `create_time`, `mark`) VALUES (7, '管理员', 'POST', 'admin', 'http://localhost:8080/admin/lightweightserver/edit', '{\"id\":6,\"server_id\":\"\",\"server_token\":null,\"bound_ip\":null,\"name\":\"\\u5b502\",\"region\":null,\"package_type\":null,\"status\":3,\"exchange\":\"\",\"inventory_id\":null,\"ip_address\":\"13.250.40.47\",\"error_msg\":null,\"remark\":null,\"create_user\":0,\"create_time\":1770192374,\"update_user\":0,\"update_time\":1770192374,\"mark\":1,\"last_heartbeat\":0,\"current_load\":\"0.00\",\"task_count\":0,\"member_count\":0,\"status_text\":\"\\u521b\\u5efa\\u4e2d\",\"exchange_name\":\"\",\"ssh_password\":\"\"}', '操作日志', 3, '', '127.0.0.1', NULL, 'MAC', 'Chrome', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36', 1, 1770192392, 1);
+INSERT INTO `action_log_2026_02` (`id`, `username`, `method`, `module`, `url`, `param`, `title`, `type`, `content`, `ip`, `ip_city`, `os`, `browser`, `user_agent`, `create_user`, `create_time`, `mark`) VALUES (8, '管理员', 'POST', 'admin', 'http://localhost:8080/admin/lightweightserver/addManual', '{\"name\":\"\\u5b503\",\"ip_address\":\"54.151.220.154\",\"ssh_port\":22,\"ssh_user\":\"root\",\"ssh_password\":\"\",\"exchange\":\"\",\"remark\":\"\"}', '操作日志', 3, '', '127.0.0.1', NULL, 'MAC', 'Chrome', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36', 1, 1770192406, 1);
 COMMIT;
 
 -- ----------------------------
@@ -1975,18 +1983,18 @@ CREATE TABLE `think_lightweight_server` (
   `task_count` int unsigned DEFAULT '0' COMMENT '已处理任务数',
   `member_count` int DEFAULT '0' COMMENT '绑定会员数',
   PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE KEY `uk_server_id` (`server_id`) USING BTREE,
   UNIQUE KEY `idx_server_token` (`server_token`),
   KEY `idx_status` (`status`) USING BTREE,
   KEY `idx_inventory_id` (`inventory_id`) USING BTREE
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='轻量服务器表';
+) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='轻量服务器表';
 
 -- ----------------------------
 -- Records of think_lightweight_server
 -- ----------------------------
 BEGIN;
-INSERT INTO `think_lightweight_server` (`id`, `server_id`, `server_token`, `bound_ip`, `name`, `region`, `package_type`, `status`, `exchange`, `inventory_id`, `ip_address`, `error_msg`, `remark`, `create_user`, `create_time`, `update_user`, `update_time`, `mark`, `last_heartbeat`, `current_load`, `task_count`, `member_count`) VALUES (1, 'local_server_001', '3729167e6c7470e19e949c97d70a2586', '127.0.0.1', '测试', 'local', 'standard', 1, NULL, NULL, '127.0.0.1', NULL, NULL, 0, 1769653749, 1, 1770132800, 1, 1770132800, 0.00, 0, 0);
-INSERT INTO `think_lightweight_server` (`id`, `server_id`, `server_token`, `bound_ip`, `name`, `region`, `package_type`, `status`, `exchange`, `inventory_id`, `ip_address`, `error_msg`, `remark`, `create_user`, `create_time`, `update_user`, `update_time`, `mark`, `last_heartbeat`, `current_load`, `task_count`, `member_count`) VALUES (2, '', NULL, NULL, 'ddd', NULL, NULL, 1, '', NULL, '199.123.192.100', NULL, NULL, 0, 1769959894, 0, 1769960490, 0, 1769960490, 0.00, 0, 0);
+INSERT INTO `think_lightweight_server` (`id`, `server_id`, `server_token`, `bound_ip`, `name`, `region`, `package_type`, `status`, `exchange`, `inventory_id`, `ip_address`, `error_msg`, `remark`, `create_user`, `create_time`, `update_user`, `update_time`, `mark`, `last_heartbeat`, `current_load`, `task_count`, `member_count`) VALUES (1, 'local_server_001', '265adb3d4f08bbf198f11ff3acd3497d', NULL, '子1', 'local', 'standard', 1, NULL, NULL, '54.179.75.253', NULL, NULL, 0, 1769653749, 1, 1770192415, 1, 1770132800, 0.00, 0, 1);
+INSERT INTO `think_lightweight_server` (`id`, `server_id`, `server_token`, `bound_ip`, `name`, `region`, `package_type`, `status`, `exchange`, `inventory_id`, `ip_address`, `error_msg`, `remark`, `create_user`, `create_time`, `update_user`, `update_time`, `mark`, `last_heartbeat`, `current_load`, `task_count`, `member_count`) VALUES (6, 'local_server_002', 'c5b2eaec3f4853228995d4f42c8d007b', NULL, '子2', NULL, NULL, 3, '', NULL, '13.250.40.47', NULL, NULL, 0, 1770192374, 1, 1770192450, 1, 0, 0.00, 0, 0);
+INSERT INTO `think_lightweight_server` (`id`, `server_id`, `server_token`, `bound_ip`, `name`, `region`, `package_type`, `status`, `exchange`, `inventory_id`, `ip_address`, `error_msg`, `remark`, `create_user`, `create_time`, `update_user`, `update_time`, `mark`, `last_heartbeat`, `current_load`, `task_count`, `member_count`) VALUES (7, 'local_server_003', '7a7356e1487fbaf3e39d16c900adb1dc', NULL, '子3', NULL, NULL, 3, '', NULL, '54.151.220.154', NULL, NULL, 0, 1770192406, 0, 1770192454, 1, 0, 0.00, 0, 0);
 COMMIT;
 
 -- ----------------------------
@@ -2062,6 +2070,13 @@ CREATE TABLE `think_member` (
   `email` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '邮箱',
   `password` char(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '密码',
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否启用 1、启用  2、停用',
+  `member_level` tinyint(1) NOT NULL DEFAULT '0' COMMENT '会员等级0-7(S0-S7)',
+  `is_market_node` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否市场节点 0否 1是',
+  `team_performance` decimal(20,4) NOT NULL DEFAULT '0.0000' COMMENT '团队业绩快照',
+  `reward_usdt` decimal(20,4) NOT NULL DEFAULT '0.0000' COMMENT '奖励余额USDT',
+  `total_reward` decimal(20,4) NOT NULL DEFAULT '0.0000' COMMENT '累计获得奖励',
+  `withdrawn_reward` decimal(20,4) NOT NULL DEFAULT '0.0000' COMMENT '已提现奖励',
+  `level_updated_at` int DEFAULT NULL COMMENT '等级最后更新时间',
   `inviter_id` int unsigned NOT NULL DEFAULT '0' COMMENT '邀请人ID',
   `agent_id` int unsigned DEFAULT NULL COMMENT '所属代理商ID',
   `is_root` tinyint unsigned NOT NULL DEFAULT '0' COMMENT '是否根用户：1是 0否',
@@ -2083,15 +2098,52 @@ CREATE TABLE `think_member` (
   KEY `idx_status` (`status`) USING BTREE,
   KEY `idx_inviter_id` (`inviter_id`) USING BTREE,
   KEY `idx_agent_id` (`agent_id`) USING BTREE,
-  KEY `idx_email` (`email`)
+  KEY `idx_email` (`email`),
+  KEY `idx_member_level` (`member_level`),
+  KEY `idx_is_market_node` (`is_market_node`)
 ) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户表';
 
 -- ----------------------------
 -- Records of think_member
 -- ----------------------------
 BEGIN;
-INSERT INTO `think_member` (`id`, `username`, `email`, `password`, `status`, `inviter_id`, `agent_id`, `is_root`, `inviter_path`, `invite_code`, `point_card_self`, `point_card_gift`, `account_balance`, `available_balance`, `create_user`, `create_time`, `update_user`, `update_time`, `mark`) VALUES (1, '1@1.com', '1@1.com', '626236e665ba2d08eba8064692798f7d', 1, 0, 1, 1, '', '16269445', 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0, 1769884581, 0, 1769884581, 1);
-INSERT INTO `think_member` (`id`, `username`, `email`, `password`, `status`, `inviter_id`, `agent_id`, `is_root`, `inviter_path`, `invite_code`, `point_card_self`, `point_card_gift`, `account_balance`, `available_balance`, `create_user`, `create_time`, `update_user`, `update_time`, `mark`) VALUES (2, '1@1.con', '1@1.con', 'df03227c4629acf52059ee7055c48fe1', 1, 0, 1, 0, '', '93985874', 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0, 1769884993, 0, 1769884993, 1);
+INSERT INTO `think_member` (`id`, `username`, `email`, `password`, `status`, `member_level`, `is_market_node`, `team_performance`, `reward_usdt`, `total_reward`, `withdrawn_reward`, `level_updated_at`, `inviter_id`, `agent_id`, `is_root`, `inviter_path`, `invite_code`, `point_card_self`, `point_card_gift`, `account_balance`, `available_balance`, `create_user`, `create_time`, `update_user`, `update_time`, `mark`) VALUES (1, '1@1.com', '1@1.com', '626236e665ba2d08eba8064692798f7d', 1, 0, 0, 0.0000, 0.0000, 0.0000, 0.0000, 1770300073, 0, 1, 1, '', '16269445', 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0, 1769884581, 0, 1770300073, 1);
+INSERT INTO `think_member` (`id`, `username`, `email`, `password`, `status`, `member_level`, `is_market_node`, `team_performance`, `reward_usdt`, `total_reward`, `withdrawn_reward`, `level_updated_at`, `inviter_id`, `agent_id`, `is_root`, `inviter_path`, `invite_code`, `point_card_self`, `point_card_gift`, `account_balance`, `available_balance`, `create_user`, `create_time`, `update_user`, `update_time`, `mark`) VALUES (2, '1@1.con', '1@1.con', 'df03227c4629acf52059ee7055c48fe1', 1, 0, 0, 0.0000, 0.0000, 0.0000, 0.0000, NULL, 0, 1, 0, '', '93985874', 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0, 1769884993, 0, 1769884993, 1);
+COMMIT;
+
+-- ----------------------------
+-- Table structure for think_member_level
+-- ----------------------------
+DROP TABLE IF EXISTS `think_member_level`;
+CREATE TABLE `think_member_level` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `level` tinyint(1) NOT NULL COMMENT '等级 0-7',
+  `name` varchar(20) NOT NULL COMMENT '等级名称',
+  `performance_required` decimal(20,4) NOT NULL DEFAULT '0.0000' COMMENT '团队业绩要求',
+  `level_bonus_rate` decimal(5,4) NOT NULL DEFAULT '0.0000' COMMENT '级差奖比例',
+  `self_hold_required` decimal(20,4) NOT NULL DEFAULT '1000.0000' COMMENT '自持要求',
+  `sort` int NOT NULL DEFAULT '0',
+  `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '1启用 2禁用',
+  `create_user` int NOT NULL DEFAULT '0',
+  `create_time` int NOT NULL DEFAULT '0',
+  `update_time` int NOT NULL DEFAULT '0',
+  `mark` tinyint(1) NOT NULL DEFAULT '1',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_level` (`level`)
+) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='会员等级配置表';
+
+-- ----------------------------
+-- Records of think_member_level
+-- ----------------------------
+BEGIN;
+INSERT INTO `think_member_level` (`id`, `level`, `name`, `performance_required`, `level_bonus_rate`, `self_hold_required`, `sort`, `status`, `create_user`, `create_time`, `update_time`, `mark`) VALUES (1, 0, 'S0', 0.0000, 0.0000, 0.0000, 0, 1, 0, 1770299499, 1770299499, 1);
+INSERT INTO `think_member_level` (`id`, `level`, `name`, `performance_required`, `level_bonus_rate`, `self_hold_required`, `sort`, `status`, `create_user`, `create_time`, `update_time`, `mark`) VALUES (2, 1, 'S1', 10000.0000, 0.2000, 1000.0000, 1, 1, 0, 1770299499, 1770299499, 1);
+INSERT INTO `think_member_level` (`id`, `level`, `name`, `performance_required`, `level_bonus_rate`, `self_hold_required`, `sort`, `status`, `create_user`, `create_time`, `update_time`, `mark`) VALUES (3, 2, 'S2', 50000.0000, 0.3000, 1000.0000, 2, 1, 0, 1770299499, 1770299499, 1);
+INSERT INTO `think_member_level` (`id`, `level`, `name`, `performance_required`, `level_bonus_rate`, `self_hold_required`, `sort`, `status`, `create_user`, `create_time`, `update_time`, `mark`) VALUES (4, 3, 'S3', 200000.0000, 0.4000, 1000.0000, 3, 1, 0, 1770299499, 1770299499, 1);
+INSERT INTO `think_member_level` (`id`, `level`, `name`, `performance_required`, `level_bonus_rate`, `self_hold_required`, `sort`, `status`, `create_user`, `create_time`, `update_time`, `mark`) VALUES (5, 4, 'S4', 500000.0000, 0.5000, 1000.0000, 4, 1, 0, 1770299499, 1770299499, 1);
+INSERT INTO `think_member_level` (`id`, `level`, `name`, `performance_required`, `level_bonus_rate`, `self_hold_required`, `sort`, `status`, `create_user`, `create_time`, `update_time`, `mark`) VALUES (6, 5, 'S5', 1000000.0000, 0.6000, 1000.0000, 5, 1, 0, 1770299499, 1770299499, 1);
+INSERT INTO `think_member_level` (`id`, `level`, `name`, `performance_required`, `level_bonus_rate`, `self_hold_required`, `sort`, `status`, `create_user`, `create_time`, `update_time`, `mark`) VALUES (7, 6, 'S6', 2000000.0000, 0.7000, 1000.0000, 6, 1, 0, 1770299499, 1770299499, 1);
+INSERT INTO `think_member_level` (`id`, `level`, `name`, `performance_required`, `level_bonus_rate`, `self_hold_required`, `sort`, `status`, `create_user`, `create_time`, `update_time`, `mark`) VALUES (8, 7, 'S7', 5000000.0000, 0.8000, 1000.0000, 7, 1, 0, 1770299499, 1770299499, 1);
 COMMIT;
 
 -- ----------------------------
@@ -2118,6 +2170,39 @@ CREATE TABLE `think_member_loss_limit` (
 -- ----------------------------
 BEGIN;
 INSERT INTO `think_member_loss_limit` (`id`, `member_id`, `daily_loss_limit`, `daily_loss_ratio`, `warning_threshold`, `auto_stop_trading`, `reset_time`, `create_time`, `update_time`, `mark`) VALUES (1, 1, 500.00, 0.1000, 0.7000, 1, '00:00:00', 1769674548, 1769679222, 1);
+COMMIT;
+
+-- ----------------------------
+-- Table structure for think_member_reward
+-- ----------------------------
+DROP TABLE IF EXISTS `think_member_reward`;
+CREATE TABLE `think_member_reward` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `member_id` int NOT NULL COMMENT '获奖会员ID',
+  `source_member_id` int NOT NULL COMMENT '来源会员ID',
+  `profit_pool_id` bigint NOT NULL DEFAULT '0',
+  `reward_type` enum('direct','level_diff','peer','tech_team') NOT NULL COMMENT '奖励类型',
+  `amount` decimal(20,4) NOT NULL COMMENT '奖励金额',
+  `pool_amount` decimal(20,4) NOT NULL DEFAULT '0.0000',
+  `from_level` tinyint(1) NOT NULL DEFAULT '0',
+  `to_level` tinyint(1) NOT NULL DEFAULT '0',
+  `rate` decimal(5,4) NOT NULL DEFAULT '0.0000',
+  `settle_batch` varchar(32) DEFAULT NULL,
+  `remark` varchar(255) DEFAULT NULL,
+  `create_time` int NOT NULL DEFAULT '0',
+  `update_time` int NOT NULL DEFAULT '0',
+  `mark` tinyint(1) NOT NULL DEFAULT '1',
+  PRIMARY KEY (`id`),
+  KEY `idx_member_id` (`member_id`),
+  KEY `idx_source_member_id` (`source_member_id`),
+  KEY `idx_reward_type` (`reward_type`),
+  KEY `idx_settle_batch` (`settle_batch`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='会员奖励流水表';
+
+-- ----------------------------
+-- Records of think_member_reward
+-- ----------------------------
+BEGIN;
 COMMIT;
 
 -- ----------------------------
@@ -2386,6 +2471,9 @@ INSERT INTO `think_menu` (`id`, `pid`, `title`, `icon`, `path`, `component`, `ta
 INSERT INTO `think_menu` (`id`, `pid`, `title`, `icon`, `path`, `component`, `target`, `permission`, `type`, `status`, `hide`, `note`, `sort`, `create_user`, `create_time`, `update_user`, `update_time`, `mark`) VALUES (1009, 2, '信号通知', 'el-icon-bell', '/trade/signal-notify', '@/views/trade/signal-notify/index', '_self', '', 0, 1, 0, NULL, 26, 0, 1769821546, 0, 1769821546, 1);
 INSERT INTO `think_menu` (`id`, `pid`, `title`, `icon`, `path`, `component`, `target`, `permission`, `type`, `status`, `hide`, `note`, `sort`, `create_user`, `create_time`, `update_user`, `update_time`, `mark`) VALUES (1010, 2, '策略推荐', 'el-icon-magic-stick', '/trade/strategy-recommend', '@/views/trade/strategy-recommend/index', '_self', '', 0, 1, 0, NULL, 27, 0, 1769821546, 0, 1769821546, 1);
 INSERT INTO `think_menu` (`id`, `pid`, `title`, `icon`, `path`, `component`, `target`, `permission`, `type`, `status`, `hide`, `note`, `sort`, `create_user`, `create_time`, `update_user`, `update_time`, `mark`) VALUES (1011, 2, '策略账户绑定', 'el-icon-connection', '/trade/strategy-account', NULL, NULL, NULL, 0, 1, 0, NULL, 234, 0, 1770102931, 0, 1770102931, 1);
+INSERT INTO `think_menu` (`id`, `pid`, `title`, `icon`, `path`, `component`, `target`, `permission`, `type`, `status`, `hide`, `note`, `sort`, `create_user`, `create_time`, `update_user`, `update_time`, `mark`) VALUES (1012, 3, '会员等级', 'el-icon-medal', '/member/level', '/member/level/index', NULL, 'sys:memberlevel:view', 0, 1, 0, '会员等级管理', 120, 1, 1770299798, 0, 1770299798, 1);
+INSERT INTO `think_menu` (`id`, `pid`, `title`, `icon`, `path`, `component`, `target`, `permission`, `type`, `status`, `hide`, `note`, `sort`, `create_user`, `create_time`, `update_user`, `update_time`, `mark`) VALUES (1013, 3, '奖励结算', 'el-icon-present', '/member/reward', '/member/reward/index', NULL, 'sys:memberreward:view', 0, 1, 0, '会员奖励结算管理', 121, 1, 1770299798, 0, 1770299798, 1);
+INSERT INTO `think_menu` (`id`, `pid`, `title`, `icon`, `path`, `component`, `target`, `permission`, `type`, `status`, `hide`, `note`, `sort`, `create_user`, `create_time`, `update_user`, `update_time`, `mark`) VALUES (1014, 3, '提现管理', 'el-icon-bank-card', '/member/withdrawal', '/member/withdrawal/index', NULL, 'sys:rewardwithdrawal:view', 0, 1, 0, '奖励提现审核管理', 122, 1, 1770299798, 0, 1770299798, 1);
 COMMIT;
 
 -- ----------------------------
@@ -2962,6 +3050,36 @@ BEGIN;
 COMMIT;
 
 -- ----------------------------
+-- Table structure for think_profit_pool
+-- ----------------------------
+DROP TABLE IF EXISTS `think_profit_pool`;
+CREATE TABLE `think_profit_pool` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `member_id` int NOT NULL COMMENT '会员ID',
+  `order_id` int NOT NULL DEFAULT '0' COMMENT '订单ID',
+  `profit_amount` decimal(20,4) NOT NULL COMMENT '盈利金额',
+  `deduct_amount` decimal(20,4) NOT NULL COMMENT '扣除点卡金额',
+  `point_card_type` enum('self','gift') NOT NULL COMMENT '点卡类型',
+  `pool_amount` decimal(20,4) NOT NULL DEFAULT '0.0000' COMMENT '进入分配池金额',
+  `is_settled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '0待结算 1已结算',
+  `settle_time` int DEFAULT NULL,
+  `settle_batch` varchar(32) DEFAULT NULL COMMENT '结算批次号',
+  `create_time` int NOT NULL DEFAULT '0',
+  `update_time` int NOT NULL DEFAULT '0',
+  `mark` tinyint(1) NOT NULL DEFAULT '1',
+  PRIMARY KEY (`id`),
+  KEY `idx_member_id` (`member_id`),
+  KEY `idx_is_settled` (`is_settled`),
+  KEY `idx_settle_batch` (`settle_batch`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='利润池表';
+
+-- ----------------------------
+-- Records of think_profit_pool
+-- ----------------------------
+BEGIN;
+COMMIT;
+
+-- ----------------------------
 -- Table structure for think_profit_record
 -- ----------------------------
 DROP TABLE IF EXISTS `think_profit_record`;
@@ -3025,6 +3143,39 @@ INSERT INTO `think_push_channel` (`id`, `channel_code`, `channel_name`, `config`
 INSERT INTO `think_push_channel` (`id`, `channel_code`, `channel_name`, `config`, `template`, `status`, `sort`, `create_time`, `update_time`, `mark`) VALUES (2, 'wechat', '企业微信', '{\"corpid\":\"\",\"corpsecret\":\"\",\"agentid\":\"\",\"enabled\":false}', '【{signal_type_name}】{leader_name} {symbol} {side_name} 入场${entry_price} 杠杆{leverage}x', 1, 2, 1769495481, 1769495481, 1);
 INSERT INTO `think_push_channel` (`id`, `channel_code`, `channel_name`, `config`, `template`, `status`, `sort`, `create_time`, `update_time`, `mark`) VALUES (3, 'email', '邮件', '{\"smtp_host\":\"\",\"smtp_port\":465,\"smtp_user\":\"\",\"smtp_pass\":\"\",\"from_name\":\"交易信号\",\"enabled\":false}', '', 1, 3, 1769495481, 1769495481, 1);
 INSERT INTO `think_push_channel` (`id`, `channel_code`, `channel_name`, `config`, `template`, `status`, `sort`, `create_time`, `update_time`, `mark`) VALUES (4, 'websocket', 'WebSocket', '{\"enabled\":true}', '', 1, 4, 1769495481, 1769495481, 1);
+COMMIT;
+
+-- ----------------------------
+-- Table structure for think_reward_withdrawal
+-- ----------------------------
+DROP TABLE IF EXISTS `think_reward_withdrawal`;
+CREATE TABLE `think_reward_withdrawal` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `member_id` int NOT NULL,
+  `amount` decimal(20,4) NOT NULL COMMENT '申请金额',
+  `fee` decimal(20,4) NOT NULL COMMENT '技术服务费5%',
+  `actual_amount` decimal(20,4) NOT NULL COMMENT '实际到账',
+  `wallet_address` varchar(100) DEFAULT NULL,
+  `wallet_network` varchar(20) DEFAULT NULL,
+  `status` tinyint(1) NOT NULL DEFAULT '0' COMMENT '0待审核 1已通过 2已拒绝 3已完成',
+  `audit_time` int DEFAULT NULL,
+  `audit_by` int DEFAULT NULL,
+  `audit_remark` varchar(255) DEFAULT NULL,
+  `complete_time` int DEFAULT NULL,
+  `tx_hash` varchar(100) DEFAULT NULL,
+  `remark` varchar(255) DEFAULT NULL,
+  `create_time` int NOT NULL DEFAULT '0',
+  `update_time` int NOT NULL DEFAULT '0',
+  `mark` tinyint(1) NOT NULL DEFAULT '1',
+  PRIMARY KEY (`id`),
+  KEY `idx_member_id` (`member_id`),
+  KEY `idx_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='奖励提现申请表';
+
+-- ----------------------------
+-- Records of think_reward_withdrawal
+-- ----------------------------
+BEGIN;
 COMMIT;
 
 -- ----------------------------
