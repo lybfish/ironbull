@@ -376,6 +376,37 @@ class PositionService:
         
         return self._to_dto(position)
     
+    # ========== 同步（从交易所/节点回报写入） ==========
+
+    def sync_position_from_exchange(
+        self,
+        tenant_id: int,
+        account_id: int,
+        symbol: str,
+        exchange: str,
+        market_type: str,
+        position_side: str,
+        quantity: Decimal,
+        avg_cost: Decimal,
+    ) -> PositionDTO:
+        """从交易所同步单条持仓到 fact_position（按 key 存在则更新）"""
+        position, _ = self.position_repo.get_or_create(
+            tenant_id=tenant_id,
+            account_id=account_id,
+            symbol=symbol,
+            exchange=exchange,
+            market_type=market_type,
+            position_side=position_side,
+        )
+        position.quantity = quantity
+        position.available = quantity
+        position.frozen = Decimal("0")
+        position.avg_cost = avg_cost
+        position.total_cost = quantity * avg_cost
+        position.status = "OPEN" if quantity > 0 else "CLOSED"
+        self.position_repo.update(position)
+        return self._to_dto(position)
+    
     # ========== 查询 ==========
     
     def get_position(

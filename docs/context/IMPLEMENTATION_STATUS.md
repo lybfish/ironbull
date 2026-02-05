@@ -441,6 +441,29 @@
   8. Ledger ✅ - libs/ledger
   9. Analytics ✅ - libs/analytics
 
+## 已完成（Done）- 执行节点扩展（Phase 1–5）✅
+
+### 目标与约束
+- 支持多台执行节点（子服务器）；中心按账户将执行任务下发到对应节点；节点只执行、不连库；凭证随请求下发，结果由中心写库与结算。
+
+### Phase 1–3 ✅
+- **dim_execution_node** 表；**fact_exchange_account.execution_node_id**；data-api：POST /api/nodes/{node_code}/heartbeat、GET /api/nodes。
+- **services/execution-node**：POST /api/execute，接收 signal + tasks（含凭证），LiveTrader 执行，同步返回 results；不写库。
+- **signal-monitor**：按 execution_node_id 分组，本机 LiveTrader、远程 POST 到节点；中心用 `libs/execution_node/apply_results.py` 写 fact_order/fact_fill 并触发结算。
+
+### Phase 4 ✅
+- execution-node：POST /api/sync-balance、POST /api/sync-positions（查交易所并返回，不写库）。
+- **libs/sync_node**：向各节点请求余额/持仓，中心写 fact_account、fact_position。
+- data-api：POST /api/sync/balance、POST /api/sync/positions 触发同步。
+
+### Phase 5 ✅
+- **NODE_EXECUTE_QUEUE**（Redis）：signal-monitor 配置 **use_node_execution_queue=True** 时，将远程节点任务投递到队列；否则直接 POST。
+- **scripts/node_execute_worker.py**：消费队列，向节点 POST /api/execute，收到结果后调用 apply_remote_results 在中心写库与结算；支持 ack/nack 与死信。
+
+详见 [docs/context/PLAN_EXECUTION_NODES.md](context/PLAN_EXECUTION_NODES.md)。
+
+---
+
 ## 风险/技术债（Known Debts）
 - MTF 策略与宏观数据：v0 可先做“接口预留 + mock 数据”，不阻塞最小链路
 - queue/持久化：v0 可先用内存队列或直接同步调用，v1 再换 Redis/Kafka

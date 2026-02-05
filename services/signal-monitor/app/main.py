@@ -25,7 +25,9 @@ import os
 import time
 import threading
 import httpx
+from collections import defaultdict
 from datetime import datetime
+from decimal import Decimal
 from typing import Dict, List, Optional, Any
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
@@ -35,8 +37,22 @@ from libs.core import get_config, get_logger, setup_logging, gen_id
 from libs.core.database import get_session
 from libs.strategies import get_strategy, list_strategies
 from libs.notify import TelegramNotifier
-from libs.trading import AutoTrader, TradeMode, RiskLimits, TradeSettlementService
+from libs.trading import (
+    AutoTrader,
+    TradeMode,
+    RiskLimits,
+    TradeSettlementService,
+    LiveTrader,
+    OrderSide,
+    OrderType,
+    OrderStatus,
+)
+from libs.member import MemberService, ExecutionTarget
+from libs.execution_node import ExecutionNodeRepository
+from libs.execution_node.apply_results import apply_remote_results as apply_remote_results_to_db
+from libs.queue import get_node_execute_queue, TaskMessage
 import asyncio
+from dataclasses import asdict
 
 # Flask App
 app = Flask(__name__)
@@ -197,6 +213,18 @@ def monitor_loop():
                             monitor_state["last_signal"] = signal
                             monitor_state["total_signals"] += 1
                             
+                            # 按策略多账户分发（若启用）
+                            if DISPATCH_BY_STRATEGY and signal.get("strategy"):
+                                try:
+                                    dispatch_result = execute_signal_by_strategy(signal)
+                                    log.info(
+                                        "strategy dispatch: targets=%s success_count=%s",
+                                        dispatch_result.get("targets", 0),
+                                        dispatch_result.get("success_count", 0),
+                                    )
+                                except Exception as e:
+                                    log.error("strategy dispatch error: %s", e)
+                            
                             # 推送通知
                             if monitor_config.get("notify_on_signal", True):
                                 result = notifier.send_signal(signal)
@@ -237,6 +265,8 @@ def get_status():
             "strategies_count": len(monitor_config.get("strategies", [])),
             "min_confidence": monitor_config.get("min_confidence"),
             "notify_enabled": monitor_config.get("notify_on_signal"),
+            "dispatch_by_strategy": DISPATCH_BY_STRATEGY,
+            "strategy_dispatch_amount": STRATEGY_DISPATCH_AMOUNT,
         },
     })
 
@@ -267,8 +297,8 @@ def update_config():
         monitor_config["notify_on_signal"] = bool(data["notify_on_signal"])
     if "cooldown_minutes" in data:
         monitor_config["cooldown_minutes"] = int(data["cooldown_minutes"])
-    
-    log.info(f"配置已更新")
+    # 按策略分发由环境/配置文件控制，不通过 API 动态改，仅展示在 status
+    log.info("配置已更新")
     
     return jsonify({
         "success": True,
@@ -372,12 +402,224 @@ def get_strategies():
 
 # ========== 自动交易 API ==========
 
+# 按策略多账户分发：为 True 时，有 strategy_code 的信号将查 dim_strategy_binding 并对每个绑定账户执行
+DISPATCH_BY_STRATEGY = config.get_bool("dispatch_by_strategy", False)
+# 按策略分发时，每账户下单金额（USDT）
+STRATEGY_DISPATCH_AMOUNT = config.get_float("strategy_dispatch_amount", 100.0)
+# 为 True 时，远程节点任务投递到 NODE_EXECUTE_QUEUE，由 worker 消费并 POST 到节点；否则直接 POST
+USE_NODE_EXECUTION_QUEUE = config.get_bool("use_node_execution_queue", False)
+
 # 自动交易器（全局单例）
 auto_trader: Optional[AutoTrader] = None
 # 数据库 session（用于交易持久化）
 _db_session = None
 # 结算服务
 _settlement_service: Optional[TradeSettlementService] = None
+
+
+async def _execute_signal_for_target(
+    session,
+    target: ExecutionTarget,
+    signal: Dict[str, Any],
+    amount_usdt: float,
+    sandbox: bool,
+) -> Dict[str, Any]:
+    """
+    对单个绑定账户执行信号：创建带 settlement 的 LiveTrader，下单并可选设置止盈止损。
+    仅服务端使用，勿暴露 target 中的凭证。
+    """
+    symbol = signal.get("symbol", "")
+    side_str = signal.get("side", "BUY")
+    entry_price = float(signal.get("entry_price") or 0)
+    stop_loss = float(signal.get("stop_loss") or 0)
+    take_profit = float(signal.get("take_profit") or 0)
+    if not symbol or not entry_price:
+        return {"account_id": target.account_id, "success": False, "error": "missing symbol or entry_price"}
+    quantity = round(amount_usdt / entry_price, 6)
+    if quantity <= 0:
+        return {"account_id": target.account_id, "success": False, "error": "quantity <= 0"}
+    order_side = OrderSide.BUY if side_str.upper() == "BUY" else OrderSide.SELL
+    settlement_svc = TradeSettlementService(
+        session=session,
+        tenant_id=target.tenant_id,
+        account_id=target.account_id,
+        currency="USDT",
+    )
+    trader = LiveTrader(
+        exchange=target.exchange,
+        api_key=target.api_key,
+        api_secret=target.api_secret,
+        passphrase=target.passphrase,
+        sandbox=sandbox,
+        market_type=target.market_type,
+        settlement_service=settlement_svc,
+        tenant_id=target.tenant_id,
+        account_id=target.account_id,
+    )
+    try:
+        order_result = await trader.create_order(
+            symbol=symbol,
+            side=order_side,
+            order_type=OrderType.MARKET,
+            quantity=quantity,
+            signal_id=signal.get("signal_id"),
+        )
+        ok = order_result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
+        filled_qty = order_result.filled_quantity or 0
+        filled_price = order_result.filled_price or entry_price
+        sl_tp_ok = False
+        if ok and (stop_loss or take_profit) and filled_qty > 0:
+            try:
+                await trader.set_sl_tp(
+                    symbol=symbol,
+                    side=order_side,
+                    quantity=filled_qty,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                )
+                sl_tp_ok = True
+            except Exception as e:
+                log.warning("set_sl_tp failed for account %s: %s", target.account_id, e)
+        await trader.close()
+        return {
+            "account_id": target.account_id,
+            "user_id": target.user_id,
+            "success": ok,
+            "order_id": getattr(order_result, "order_id", None),
+            "filled_quantity": filled_qty,
+            "filled_price": filled_price,
+            "sl_tp_set": sl_tp_ok,
+        }
+    except Exception as e:
+        try:
+            await trader.close()
+        except Exception:
+            pass
+        log.error("execute_signal_for_target account_id=%s error=%s", target.account_id, e)
+        return {"account_id": target.account_id, "user_id": target.user_id, "success": False, "error": str(e)}
+
+
+def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    按策略分发：根据 signal["strategy"] 查 dim_strategy_binding，对每个绑定账户执行。
+    本机账户：进程内 LiveTrader；远程节点账户：POST 到节点，再根据响应在中心写库与结算。
+    """
+    strategy_code = (signal or {}).get("strategy") or (signal or {}).get("strategy_code")
+    if not strategy_code:
+        return {"success": False, "action": "no_strategy", "message": "signal 缺少 strategy/strategy_code"}
+    session = get_session()
+    try:
+        member_svc = MemberService(session)
+        targets = member_svc.get_execution_targets_by_strategy_code(strategy_code)
+        if not targets:
+            return {
+                "success": True,
+                "action": "no_bindings",
+                "targets": 0,
+                "message": "该策略暂无绑定账户，将走单账户逻辑（若已配置）",
+            }
+        amount = STRATEGY_DISPATCH_AMOUNT
+        sandbox = config.get_bool("exchange_sandbox", True)
+        results = []
+
+        # 按 execution_node_id 分组：None/0=本机，其余=远程节点
+        by_node = defaultdict(list)
+        for t in targets:
+            nid = (t.execution_node_id or 0) or 0
+            by_node[nid].append(t)
+
+        local_targets = by_node.get(0, [])
+        for target in local_targets:
+            r = run_async(
+                _execute_signal_for_target(session, target, signal, amount, sandbox)
+            )
+            results.append(r)
+
+        node_repo = ExecutionNodeRepository(session)
+        for node_id, remote_targets in by_node.items():
+            if node_id == 0 or not remote_targets:
+                continue
+            node = node_repo.get_by_id(node_id)
+            if not node or node.status != 1:
+                for t in remote_targets:
+                    results.append({"account_id": t.account_id, "user_id": t.user_id, "success": False, "error": "节点不可用"})
+                continue
+            base_url = (node.base_url or "").rstrip("/")
+            if not base_url:
+                for t in remote_targets:
+                    results.append({"account_id": t.account_id, "user_id": t.user_id, "success": False, "error": "节点 base_url 为空"})
+                continue
+            payload = {
+                "signal": signal,
+                "amount_usdt": amount,
+                "sandbox": sandbox,
+                "tasks": [
+                    {
+                        "account_id": t.account_id,
+                        "tenant_id": t.tenant_id,
+                        "user_id": t.user_id,
+                        "exchange": t.exchange,
+                        "api_key": t.api_key,
+                        "api_secret": t.api_secret,
+                        "passphrase": t.passphrase,
+                        "market_type": t.market_type,
+                    }
+                    for t in remote_targets
+                ],
+            }
+            if USE_NODE_EXECUTION_QUEUE:
+                try:
+                    queue = get_node_execute_queue()
+                    task_id = gen_id("TASK")
+                    message = TaskMessage(
+                        task_id=task_id,
+                        task_type="node_execute",
+                        payload={
+                            "node_id": node_id,
+                            "base_url": base_url,
+                            "signal": signal,
+                            "amount_usdt": amount,
+                            "sandbox": sandbox,
+                            "tasks": [asdict(t) for t in remote_targets],
+                        },
+                        signal_id=signal.get("signal_id"),
+                    )
+                    queue.push(message)
+                    for t in remote_targets:
+                        results.append({"account_id": t.account_id, "user_id": t.user_id, "queued": True, "node_id": node_id})
+                    continue
+                except Exception as eq:
+                    log.warning("node execute queue push failed node_id=%s, fallback to direct POST: %s", node_id, eq)
+            try:
+                with httpx.Client(timeout=30.0) as client:
+                    resp = client.post(f"{base_url}/api/execute", json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+            except Exception as e:
+                log.warning("remote node POST node_id=%s error=%s", node_id, e)
+                for t in remote_targets:
+                    results.append({"account_id": t.account_id, "user_id": t.user_id, "success": False, "error": str(e)})
+                continue
+            response_results = data.get("results") or []
+            targets_by_account = {t.account_id: t for t in remote_targets}
+            applied = apply_remote_results_to_db(session, signal, targets_by_account, response_results)
+            results.extend(applied)
+
+        session.commit()
+        success_count = sum(1 for r in results if r.get("success"))
+        return {
+            "success": True,
+            "action": "dispatched",
+            "targets": len(targets),
+            "success_count": success_count,
+            "results": results,
+        }
+    except Exception as e:
+        session.rollback()
+        log.error("execute_signal_by_strategy error: %s", e)
+        return {"success": False, "action": "error", "message": str(e)}
+    finally:
+        session.close()
 
 
 def get_settlement_service() -> Optional[TradeSettlementService]:
@@ -564,12 +806,7 @@ def run_async(coro):
 
 @app.route("/api/trading/execute", methods=["POST"])
 def trading_execute():
-    """手动执行交易信号"""
-    trader = get_auto_trader()
-    
-    if trader is None:
-        return jsonify({"success": False, "error": "交易所 API 未配置"})
-    
+    """手动执行交易信号。若启用按策略分发且传入 strategy，则对绑定账户执行；否则走单账户 AutoTrader。"""
     data = request.get_json() or {}
     
     # 必填字段
@@ -585,13 +822,33 @@ def trading_execute():
         "stop_loss": float(data["stop_loss"]),
         "take_profit": float(data["take_profit"]),
         "confidence": data.get("confidence", 80),
+        "strategy": data.get("strategy"),
+        "signal_id": data.get("signal_id"),
     }
     
-    # 异步执行
+    # 按策略分发：有 strategy 且配置启用时，对绑定账户执行；无绑定时回退到单账户
+    if DISPATCH_BY_STRATEGY and signal.get("strategy"):
+        try:
+            result = execute_signal_by_strategy(signal)
+            if result.get("action") == "no_bindings" and result.get("targets", 0) == 0:
+                trader = get_auto_trader()
+                if trader is not None:
+                    result = run_async(trader.process_signal(signal))
+                    return jsonify({"success": result.get("success", False), **result})
+            return jsonify(result)
+        except Exception as e:
+            log.error("execute_signal_by_strategy error: %s", e)
+            return jsonify({"success": False, "action": "error", "message": str(e)})
+    
+    # 单账户逻辑
+    trader = get_auto_trader()
+    if trader is None:
+        return jsonify({"success": False, "error": "交易所 API 未配置"})
+    
     try:
         result = run_async(trader.process_signal(signal))
     except Exception as e:
-        log.error(f"执行交易失败: {e}")
+        log.error("执行交易失败: %s", e)
         result = {"success": False, "message": str(e)}
     
     return jsonify({

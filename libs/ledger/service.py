@@ -418,6 +418,27 @@ class LedgerService:
             currency=currency,
         )
         return self._to_account_dto(account)
+
+    def sync_balance_from_exchange(
+        self,
+        tenant_id: int,
+        account_id: int,
+        currency: str,
+        balance: Decimal,
+        available: Decimal,
+        frozen: Decimal,
+    ) -> AccountDTO:
+        """从交易所同步余额到 fact_account（仅更新 balance/available/frozen 快照）"""
+        account, _ = self.account_repo.get_or_create(
+            tenant_id=tenant_id,
+            account_id=account_id,
+            currency=currency,
+        )
+        account.balance = balance
+        account.available = available
+        account.frozen = frozen
+        self.account_repo.update(account)
+        return self._to_account_dto(account)
     
     def list_accounts(self, filter: AccountFilter) -> List[AccountDTO]:
         """查询账户列表"""

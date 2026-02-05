@@ -34,6 +34,7 @@ data_source: mock                 # 数据源: mock / live
 default_exchange: binance         # 默认交易所: binance / okx
 data_cache_enabled: true          # 是否启用数据缓存
 data_provider_url: http://127.0.0.1:8010  # data-provider 服务地址
+signal_monitor_url: http://127.0.0.1:8020  # signal-monitor 状态代理（管理后台用）
 
 # Trading (v1 Phase 6)
 trading_mode: paper               # 交易模式: paper(模拟) / live(真实)

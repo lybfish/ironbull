@@ -214,6 +214,10 @@ class TradeSettlementService:
                 price=float(price),
                 realized_pnl=float(realized_pnl) if realized_pnl else 0,
             )
+
+            # 4. 盈利时扣点卡（30%）：仅当 account 对应平台用户且 realized_pnl > 0 时
+            if realized_pnl is not None and realized_pnl > 0:
+                self._deduct_point_card_for_profit(realized_pnl)
             
             return SettlementResult(
                 success=True,
@@ -359,6 +363,34 @@ class TradeSettlementService:
         except Exception as e:
             logger.warning("settle ledger failed", error=str(e))
             return None
+
+    def _deduct_point_card_for_profit(self, realized_pnl: Decimal) -> None:
+        """
+        盈利时扣点卡 30%（自充进利润池，赠送销毁）。
+        仅当 self.account_id 对应 fact_exchange_account 且能解析出 user_id 时执行。
+        """
+        try:
+            from libs.member.models import ExchangeAccount
+            from libs.pointcard.service import PointCardService
+            acc = self.session.query(ExchangeAccount).filter(
+                ExchangeAccount.id == self.account_id,
+                ExchangeAccount.tenant_id == self.tenant_id,
+                ExchangeAccount.status == 1,
+            ).first()
+            if not acc or not acc.user_id:
+                return
+            svc = PointCardService(self.session)
+            ok, err, _ = svc.deduct_for_profit(acc.user_id, realized_pnl)
+            if ok:
+                logger.info(
+                    "point_card deducted for profit",
+                    user_id=acc.user_id,
+                    profit=float(realized_pnl),
+                )
+            else:
+                logger.warning("point_card deduct failed", user_id=acc.user_id, msg=err)
+        except Exception as e:
+            logger.warning("point_card deduct error", error=str(e))
     
     # ========== 便捷方法 ==========
     

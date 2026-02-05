@@ -198,6 +198,7 @@ class TaskQueue:
 # 预定义队列
 EXECUTION_QUEUE = "execution"      # 执行任务队列
 NOTIFICATION_QUEUE = "notification" # 通知队列
+NODE_EXECUTE_QUEUE = "node-execute" # 按节点下发的执行队列（Phase 5）
 
 
 def get_execution_queue() -> TaskQueue:
@@ -208,3 +209,8 @@ def get_execution_queue() -> TaskQueue:
 def get_notification_queue() -> TaskQueue:
     """获取通知队列"""
     return TaskQueue(NOTIFICATION_QUEUE)
+
+
+def get_node_execute_queue() -> TaskQueue:
+    """获取节点执行队列（中心投递，worker 消费并 POST 到各节点）"""
+    return TaskQueue(NODE_EXECUTE_QUEUE)

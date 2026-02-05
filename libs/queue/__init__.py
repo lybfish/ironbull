@@ -17,8 +17,10 @@ from .task_queue import (
     TaskMessage,
     EXECUTION_QUEUE,
     NOTIFICATION_QUEUE,
+    NODE_EXECUTE_QUEUE,
     get_execution_queue,
     get_notification_queue,
+    get_node_execute_queue,
 )
 from .idempotency import IdempotencyChecker, TaskState, IdempotencyRecord, get_signal_idempotency
 from .worker import TaskWorker, TaskHandler, FunctionHandler
@@ -29,8 +31,10 @@ __all__ = [
     "TaskMessage",
     "EXECUTION_QUEUE",
     "NOTIFICATION_QUEUE",
+    "NODE_EXECUTE_QUEUE",
     "get_execution_queue",
     "get_notification_queue",
+    "get_node_execute_queue",
     # Idempotency
     "IdempotencyChecker",
     "TaskState",
