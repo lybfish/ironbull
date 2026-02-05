@@ -1,0 +1,30 @@
+# IronBull v1 Dependencies
+# ========================
+
+# Web Framework
+fastapi>=0.100.0
+uvicorn>=0.23.0
+pydantic>=2.0.0
+
+# HTTP Client
+requests>=2.31.0
+
+# Config
+pyyaml>=6.0
+
+# Database (v1 Facts Layer)
+sqlalchemy>=2.0.0
+pymysql>=1.1.0
+
+# Redis (v1 Queue)
+redis>=5.0.0
+
+# Exchange Data (v1 Phase 5)
+ccxt>=4.0.0
+
+# Utilities
+python-dateutil>=2.8.0
+
+# Development
+pytest>=7.0.0
+httpx>=0.24.0

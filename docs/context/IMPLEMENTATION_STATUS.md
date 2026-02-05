@@ -1,0 +1,265 @@
+# IronBull v0 — Implementation Status
+
+> 本文件是唯一可信的“当前进度”来源。每做完一个模块就在这里登记。
+
+## 已冻结基线（Frozen Baselines）
+- ✅ v0 Project Directory Structure: Frozen
+- ✅ v0.1 Module Contract: Frozen
+- ✅ v1 Blueprint（事实层）: 冻结，仅作参考（v0 不展开）
+
+## 已完成（Done）
+### libs/core ✅
+- 状态：已实现并可 import（config/logger/exceptions/utils）
+- 说明：支持 default.yaml + env override；日志包含 service_name/request_id
+
+### libs/contracts ✅
+- 状态：已实现并验证通过（11 个 dataclass）
+- 注意：__init__.py 未定义 __all__ 属于可选工程项，不影响 Contract
+
+### libs/indicators ✅
+- 状态：已实现并通过 import/基础计算验证
+- 约束：纯计算，无 IO/网络/DB（已满足）
+
+### services / nodes（骨架）✅
+- services/signal-hub：已可跑（/health, /api/signals）
+- services/risk-control：已可跑（/health, /api/risk/check）
+- services/execution-dispatcher：已可跑（/health, /api/execution/submit, /api/execution/result/{task_id}）
+- nodes/crypto-node：已可跑（/health, /api/node/execute）
+- nodes/mt5-node：已可跑（/health, /api/node/execute）
+
+### 最小链路 Demo ✅
+- `scripts/demo_flow.sh` 本机跑通（Signal → Risk → Dispatcher → Node → Result）
+- `scripts/demo_strategy_engine.sh` 本机跑通（Strategy → SignalHub → Risk → Dispatcher → Node → Result）
+
+## 进行中（In Progress）
+- （空）
+
+## 已完成（Done）- v1 Phase 1 ✅
+
+### libs/core/database.py ✅
+- 状态：已实现（MySQL 连接池 + Session 管理）
+- 功能：
+  - 基于 SQLAlchemy 2.0 的数据库连接管理
+  - 支持配置文件 + 环境变量
+  - 连接池配置（pool_size/max_overflow/timeout/recycle）
+  - get_db() 上下文管理器
+- 配置：config/default.yaml 新增 db_* 配置项
+
+### libs/facts (事实层) ✅
+- 状态：已实现（4 个事实表 + Repository）
+- 表结构：
+  - **fact_trade**：交易记录（signal_id/task_id/account_id 索引）
+  - **fact_ledger**：账本流水（手续费/盈亏等资金变动）
+  - **fact_freeze**：冻结记录（保证金/风控冻结）
+  - **fact_signal_event**：信号状态事件（完整链路追踪）
+- Repository：FactsRepository 封装 CRUD + 链路查询
+- 迁移脚本：migrations/001_facts_layer.sql
+
+### 服务落库集成 ✅
+- signal-hub：创建信号时记录 CREATED 事件
+- risk-control：风控检查时记录 RISK_PASSED/RISK_REJECTED 事件
+- execution-dispatcher：执行完成时记录 Trade + Ledger + EXECUTED/FAILED 事件
+- 原则：落库失败不阻塞主流程（v0 兼容）
+
+### 链路查询 API ✅
+- GET /api/signals/{signal_id}/chain - 获取信号完整链路
+- 返回：events + trades + ledgers
+
+### 验证脚本 ✅
+- scripts/init_facts_db.py - 初始化数据库表
+- scripts/demo_facts_chain.sh - 验证完整链路
+
+## 已完成（Done）- Phase 6 ✅
+
+### services/backtest ✅
+- 状态：已实现并可跑
+- 功能：
+  - BacktestEngine：回测引擎核心（历史数据回放 + 模拟交易）
+  - 支持止损止盈检查
+  - 计算基础指标（胜率/收益/回撤）
+- 端点：
+  - GET /health
+  - POST /api/backtest/run（运行回测）
+- 演示脚本：scripts/demo_backtest.sh, scripts/test_backtest_simple.py
+- 验收：demo_backtest.sh 本机跑通
+- 端口：8030
+- 说明：v0 实现最小功能，支持 ma_cross 等策略
+
+### 工程规范 ✅
+- 日志规范：所有服务/节点日志统一包含 `service_name`/`request_id`
+- 错误码统一：HTTP 错误统一返回 `{code, message, detail, request_id}`
+
+## 已完成（Done）- v1 Phase 1 ✅
+### Facts Layer（MySQL）✅
+- 状态：已实现并接入（Trade/Ledger/FreezeRecord/SignalEvent）
+- 迁移脚本：`migrations/001_facts_layer.sql`
+- 初始化脚本：`scripts/init_facts_db.py`
+- 说明：execution-dispatcher 在执行完成后写入事实层
+
+## 已完成（Done）- Phase 5 ✅
+
+### libs/strategies ✅
+- 状态：已实现 21 个策略（完整迁移 old3）
+- 策略分类：
+  - **基础策略(6)**：ma_cross, macd, rsi_boll, boll_squeeze, breakout, momentum
+  - **趋势策略(4)**：trend_aggressive, trend_add, swing, ma_dense
+  - **震荡/反转策略(3)**：reversal, scalping, arbitrage
+  - **对冲策略(3)**：hedge, hedge_conservative, reversal_hedge
+  - **高级策略(5)**：smc, mtf, sr_break, grid, hft
+- 功能：get_strategy(code) 动态加载，list_strategies() 列出所有
+- 验证：全部 21 个策略导入和分析测试通过
+
+### services/strategy-engine ✅
+- 状态：已实现并可跑
+- 端点：
+  - GET /health
+  - GET /api/strategies（列出可用策略）
+  - POST /api/analyze（带 K 线数据触发分析）
+  - POST /api/run（从 data-provider 获取数据并分析）
+- 演示脚本：scripts/demo_strategy_engine.sh
+
+### services/data-provider ✅
+- 状态：已实现并可跑（mock 数据）
+- 端点：
+  - GET /health
+  - GET /api/candles?symbol=...&timeframe=...&limit=...（单周期 K 线）
+  - GET /api/mtf/candles?symbol=...&timeframes=...&limit=...（多周期 K 线）
+  - GET /api/macro/events?from=...&to=...&country=...&impact=...（宏观事件）
+- 演示脚本：scripts/demo_data_provider.sh
+- 说明：v0 使用 mock 数据，后续可替换为真实数据源
+
+### services/follow-service ✅
+- 状态：已实现并可跑（mock 跟单关系 + 广播）
+- 端点：
+  - GET /health
+  - POST /api/relations（创建跟单关系）
+  - GET /api/relations（查询跟单关系）
+  - DELETE /api/relations/{relation_id}
+  - POST /api/broadcast（广播信号并提交到 dispatcher）
+  - GET /api/tasks/{task_id}
+- 演示脚本：scripts/demo_follow_service.sh
+- 说明：v0 使用内存存储，后续可替换为 DB
+
+### libs/runner + services/strategy-runner ✅
+- 状态：已实现并可跑
+- 功能：
+  - StrategyRunner：定时/事件驱动的策略执行器
+  - StrategyTask：策略任务配置
+  - HTTP API 管理策略任务
+- 端点（services/strategy-runner）：
+  - GET /health
+  - GET /api/strategies（获取可用策略列表）
+  - POST /api/tasks（创建策略任务）
+  - GET /api/tasks（列出所有任务）
+  - GET /api/tasks/{task_id}（获取单个任务）
+  - DELETE /api/tasks/{task_id}（删除任务）
+  - POST /api/tasks/{task_id}/run（手动运行一次）
+  - POST /api/tasks/{task_id}/enable（启用任务）
+  - POST /api/tasks/{task_id}/disable（禁用任务）
+  - POST /api/runner/start（启动调度循环）
+  - POST /api/runner/stop（停止调度循环）
+  - GET /api/runner/stats（获取运行统计）
+- 演示脚本：scripts/demo_strategy_runner.sh
+
+## 已完成（Done）- v1 Phase 2 ✅
+
+### 状态机与审计 ✅
+- 状态：已实现
+- 状态机：`libs/facts/states.py`
+  - SignalStatus：信号状态流转（PENDING → EXECUTED/FAILED）
+  - ExecutionStatus：执行状态流转（PENDING → FILLED/FAILED）
+  - TradeStatus：交易记录状态
+  - AuditAction：审计动作枚举
+- 审计表：`fact_audit_log`（追踪所有状态变更）
+- 迁移脚本：`migrations/002_audit_log.sql`
+- 服务集成：signal-hub、risk-control、execution-dispatcher
+
+## 已完成（Done）- v1 Phase 3 ✅
+
+### 队列与异步 ✅
+- 状态：已实现并验证
+- 组件：
+  - `libs/core/redis_client.py`：Redis 连接池 + 常用操作
+  - `libs/queue/task_queue.py`：任务队列（支持 DLQ、重试）
+  - `libs/queue/idempotency.py`：幂等性检查器
+  - `libs/queue/worker.py`：消费者 Worker 基类
+- API（execution-dispatcher）：
+  - POST /api/execution/submit-async：异步提交任务
+  - GET /api/execution/queue/stats：队列状态
+  - GET /api/execution/idempotency/{signal_id}：幂等性查询
+- Worker：`services/execution-dispatcher/app/worker.py`
+- 配置：`config/default.yaml` 新增 redis_* 配置
+- 验证脚本：`scripts/demo_async_queue.sh`
+- 功能：
+  - 任务入队/出队（Redis List）
+  - 幂等性检查（SETNX + TTL）
+  - 处理队列 + 死信队列
+  - 重试机制（max_retries=3）
+
+## 已完成（Done）- v1 Phase 4 ✅
+
+### 风控增强 ✅
+- 状态：已实现并验证
+- 组件：
+  - `libs/risk/engine.py`：风控规则引擎
+  - `libs/risk/rules.py`：内置规则实现
+- 内置规则：
+  - **MinBalanceRule**：最小余额检查
+  - **MaxPositionRule**：最大持仓数量
+  - **MaxPositionValueRule**：单仓最大价值
+  - **DailyTradeLimitRule**：每日交易限额
+  - **DailyLossLimitRule**：每日亏损限额
+  - **WeeklyTradeLimitRule**：每周交易限额
+  - **ConsecutiveLossCooldownRule**：连续亏损冷却
+  - **TradeCooldownRule**：交易间隔冷却
+  - **SymbolWhitelistRule**：品种白名单
+  - **SymbolBlacklistRule**：品种黑名单
+- API（risk-control）：
+  - GET /api/risk/rules：列出所有规则
+  - GET /api/risk/stats/{account_id}：账户风控统计
+  - POST /api/risk/rules/{name}/enable：启用规则
+  - POST /api/risk/rules/{name}/disable：禁用规则
+- 配置：`config/default.yaml` 新增 risk_* 配置项
+- 验证脚本：`scripts/demo_risk_rules.sh`
+
+## 已完成（Done）- v1 Phase 5 ✅
+
+### 数据与回测升级 ✅
+- 状态：已实现并验证
+- 组件：
+  - `libs/exchange/client.py`：交易所客户端基类
+  - `libs/exchange/binance.py`：Binance 客户端（ccxt）
+  - `libs/exchange/okx.py`：OKX 客户端（ccxt）
+  - `libs/exchange/utils.py`：工具函数（symbol 标准化等）
+- 支持交易所：Binance, OKX
+- data-provider 新增功能：
+  - 真实 K 线数据（通过 ccxt）
+  - 最新行情 API
+  - 数据源切换（mock/live）
+- 新增 API：
+  - GET /api/exchanges：列出支持的交易所
+  - GET /api/ticker：获取最新行情
+  - GET /api/source：获取数据源配置
+- 配置：`config/default.yaml` 新增 data_source, default_exchange
+- 验证脚本：`scripts/demo_live_data.sh`
+- 依赖：ccxt>=4.0.0
+
+## 未开始（Todo）
+### 真实交易执行
+- 连接真实交易所（Binance/MT5）
+- 真实下单、撤单、查询订单状态
+
+## 风险/技术债（Known Debts）
+- MTF 策略与宏观数据：v0 可先做“接口预留 + mock 数据”，不阻塞最小链路
+- queue/持久化：v0 可先用内存队列或直接同步调用，v1 再换 Redis/Kafka
+- 订单/成交审计：v1 才补（Trade/Ledger/FreezeRecord）
+
+## 当前最小链路目标（MVP）
+1) strategy-engine 生成 StrategyOutput
+2) signal-hub 标准化为 Signal（status=pending）
+3) risk-control 返回 RiskResult(passed=true) 并补齐 quantity/stop/tp（可先写死或最简规则）
+4) dispatcher 路由到 node
+5) node 返回 NodeResult(success=true)
+6) dispatcher 输出 ExecutionResult(success=true)
+
+完成标准：本机一键跑 demo，日志可追踪 request_id/signal_id/task_id。

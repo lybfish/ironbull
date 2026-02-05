@@ -1,0 +1,49 @@
+service_name: ironbull
+log_level: INFO
+log_structured: false
+
+# Service Ports
+signal_hub_port: 8001
+risk_control_port: 8002
+execution_dispatcher_port: 8003
+crypto_node_port: 9101
+mt5_node_port: 9102
+backtest_port: 8030
+
+# MySQL Database (v1 Facts Layer)
+db_host: 127.0.0.1
+db_port: 3306
+db_user: root
+db_password: "root123456"
+db_name: ironbull
+db_charset: utf8mb4
+db_pool_size: 5
+db_max_overflow: 10
+db_pool_timeout: 30
+db_pool_recycle: 3600
+
+# Redis (v1 Phase 3 - Queue)
+redis_host: 127.0.0.1
+redis_port: 6379
+redis_db: 0
+redis_password: ""
+redis_pool_size: 10
+
+# Data Provider (v1 Phase 5)
+data_source: mock                 # 数据源: mock / live
+default_exchange: binance         # 默认交易所: binance / okx
+data_cache_enabled: true          # 是否启用数据缓存
+data_provider_url: http://127.0.0.1:8010  # data-provider 服务地址
+
+# Trading (v1 Phase 6)
+trading_mode: paper               # 交易模式: paper(模拟) / live(真实)
+
+# Risk Control (v1 Phase 4)
+risk_min_balance: 100.0           # 最小可用余额
+risk_max_positions: 10            # 最大持仓数量
+risk_max_position_value: 50000.0  # 单仓最大价值
+risk_daily_trade_limit: 100       # 每日交易次数上限
+risk_daily_loss_limit: 1000.0     # 每日亏损上限
+risk_max_consecutive_losses: 5    # 连续亏损次数上限
+risk_loss_cooldown_minutes: 30    # 连续亏损后冷却时间（分钟）
+risk_trade_cooldown_seconds: 0    # 两次交易间隔（秒，0=不限制）
