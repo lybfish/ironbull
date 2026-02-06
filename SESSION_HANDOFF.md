@@ -138,12 +138,18 @@
 - **订单/成交分页 total**：`count_orders` / `count_fills` 与 `list_orders` / `list_fills` 使用相同过滤条件；`list_orders` / `list_fills` 返回 `(list, total)`；`GET /api/orders`、`GET /api/fills` 的 `total` 为符合条件的总条数（不再为当前页条数）
 - **索引迁移**：`migrations/013_perf_order_fill_list_indexes.sql` 新增 `idx_order_tenant_account_time`、`idx_fill_tenant_account_time`，优化按租户+账户+时间排序的列表查询
 
+### admin-web UI 与策略详情（已完成）
+- **订单页**：标的/状态筛选、查询按钮、无数据空状态
+- **成交页**：标的筛选、无数据空状态
+- **策略管理页**：策略目录与绑定列表空状态；点击策略行打开详情抽屉（只读：描述、标的、周期、最小资金、风险等级等）
+- **构建验证**：`npm run build` 已通过，产物在 `services/admin-web/dist/`
+
 ## 下次可以做的
 
 - **平台层 100% + 模块层 100%**：核心功能全部完成
 - 可选方向：
-  - admin-web 构建验证（`npm run build`）
-  - UI 优化 / 更多策略 / 多语言
+  - 构建体积优化（大 chunk 代码分割）
+  - 多语言 / 监控告警增强
   - 监控告警增强（更多服务端点、历史告警日志、邮件通道）
   - 文档持续同步
 
