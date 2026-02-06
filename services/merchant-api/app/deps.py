@@ -35,9 +35,9 @@ def get_tenant(
 ) -> Tenant:
     try:
         app_key, timestamp, sign = extract_sign_headers(x_app_key, x_timestamp, x_sign)
+        verify_timestamp(timestamp)
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
-    verify_timestamp(timestamp)
     tenant_service = TenantService(db)
     tenant = tenant_service.get_by_app_key(app_key)
     if not tenant:

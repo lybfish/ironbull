@@ -43,8 +43,11 @@ def test_decode_returns_correct_payload():
 def test_decode_rejects_tampered_token():
     """篡改 token 后 decode 应返回 None"""
     token = encode(admin_id=1, username="admin")
-    # 翻转最后一个字符
-    tampered = token[:-1] + ("A" if token[-1] != "A" else "B")
+    # 在签名部分中间插入字符，确保破坏签名
+    parts = token.split(".")
+    sig = parts[2]
+    tampered_sig = sig[:4] + ("X" if sig[4] != "X" else "Y") + sig[5:]
+    tampered = parts[0] + "." + parts[1] + "." + tampered_sig
     assert decode(tampered) is None
 
 

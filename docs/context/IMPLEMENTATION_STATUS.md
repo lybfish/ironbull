@@ -528,17 +528,29 @@
 - `test_withdrawal.py`（8 例）：申请/余额不足/低于最小/通过/拒绝退回+流水/重复拒绝/完成/未审核完成
 - 全量 44 测试通过
 
-## 已完成（Done）- Merchant API 对齐文档 ✅
+## 已完成（Done）- Merchant API 全量对齐文档 v1.3.1 ✅
 
-### 接口修正（6 处差异）✅
+### 第一轮：接口修正（6 处差异）✅
 - 对照 `_legacy_readonly/old3/quanttrade/docs/merchant-api.md` 逐一修正：
-  1. `POST /merchant/user/create`：`inviter_id`(int) → `invite_code`(string)，通过邀请码查邀请人
-  2. `GET /merchant/user/info`：补全 11 个字段（`inviter_invite_code`、`level`、`level_name`、`is_market_node`、`self_hold`、`team_direct_count`、`team_total_count`、`team_performance`、`reward_usdt`、`total_reward`、`withdrawn_reward`）
+  1. `POST /merchant/user/create`：`inviter_id`(int) → `invite_code`(string)
+  2. `GET /merchant/user/info`：补全 11 个字段（level/team/reward 等）
   3. `POST /merchant/user/transfer-point-card`：`from_user_id`/`to_user_id` → `from_email`/`to_email`
-  4. `GET /merchant/user/rewards`：`source_email` 批量查询填充实际邮箱
+  4. `GET /merchant/user/rewards`：`source_email` 批量查询填充
   5. `GET /merchant/strategies`：补 `status` 字段
-  6. 删除 3 个冗余接口：`user/balance`、`user/level`、`user/reward-balance`（数据已合并到 `user/info`）
-- Merchant API 总接口数：22 → 19 个
+  6. 删除 3 个冗余接口，22 → 19 个
+
+### 第二轮：member_id 统一 + 字段修正 ✅
+- 全项目 `member_id` → `user_id`（libs/facts/models + repository、libs/contracts、execution-dispatcher、risk-control、follow-service、merchant-api routers、demo scripts）
+- 迁移脚本：`migrations/012_rename_member_id_to_user_id.sql`（fact_audit_log.member_id → user_id）
+- `GET /user/team` 列表移除 `self_hold`，`team_stats.team_performance` → `total_performance`
+- `GET /point-card/logs` 分发记录用 `CHANGE_DISTRIBUTE=3` + `related_user_id`
+
+### 第三轮：v1.3.0 + v1.3.1 全量对齐 ✅
+- **12 个接口入参 `user_id` 统一改为 `email`**（user/info、apikey、unbind、recharge、point-card/logs、strategy open/close/strategies、team、set-market-node、rewards、withdraw、withdrawals）
+- **点卡转账改为类型分开**：新增 `type` 参数（1=自充互转 self→self，2=赠送互转 gift→gift），返回 `type`/`type_name`/`from_self_after`/`from_gift_after`/`to_self_after`/`to_gift_after`
+- 点卡流水响应字段 `user_id` → `member_id`（仅返回层映射）
+- 19 个接口请求参数和返回字段全部与文档 v1.3.1 一致
+- **测试**：47 个用例全部通过（含 3 个转账类型测试）
 
 ---
 

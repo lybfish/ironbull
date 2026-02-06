@@ -47,7 +47,7 @@
 - **财务流水**：libs/pointcard/（models + service）、libs/reward/（models + service + withdrawal_service + repository）
 - **提现管理**：libs/reward/withdrawal_service.py、services/data-api/app/routers/withdrawals.py、admin-web/views/Withdrawals.vue
 - **Merchant API**：services/merchant-api/app/routers/（user/reward/pointcard/strategy）— 19 个接口
-- **迁移脚本**：migrations/（001–011），最新 011_reward_log.sql
+- **迁移脚本**：migrations/（001–012），最新 012_rename_member_id_to_user_id.sql
 
 ### 中心-节点联调（已完成）
 - **全链路已验证**：
@@ -88,31 +88,41 @@
   - `admin-web/views/Withdrawals.vue`：提现管理页面（状态筛选、通过确认、拒绝弹窗、完成弹窗填 TxHash）
 - **测试**：`test_recharge_log.py`（2例）+ `test_withdrawal.py`（8例），全量 44 测试通过
 
-### Merchant API 对齐文档（已完成）
-- 对照 `_legacy_readonly/old3/quanttrade/docs/merchant-api.md`，修正 6 处差异：
-  1. `POST /merchant/user/create`：参数从 `inviter_id`(int) 改为 `invite_code`(string)，通过邀请码查找邀请人
-  2. `GET /merchant/user/info`：补全 `inviter_invite_code`、`level`、`level_name`、`is_market_node`、`self_hold`、`team_direct_count`、`team_total_count`、`team_performance`、`reward_usdt`、`total_reward`、`withdrawn_reward` 共 11 个字段
-  3. `POST /merchant/user/transfer-point-card`：参数从 `from_user_id`/`to_user_id` 改为 `from_email`/`to_email`
-  4. `GET /merchant/user/rewards`：`source_email` 从空字符串改为批量查询实际邮箱
+### Merchant API 全量对齐文档 v1.3.1（已完成）
+- 对照 `_legacy_readonly/old3/quanttrade/docs/merchant-api.md` v1.3.1，分三轮完成全部对齐：
+- **第一轮（6 处差异）**：
+  1. `POST /merchant/user/create`：`inviter_id`(int) → `invite_code`(string)
+  2. `GET /merchant/user/info`：补全 11 个字段（level/team/reward 等）
+  3. `POST /merchant/user/transfer-point-card`：`from_user_id`/`to_user_id` → `from_email`/`to_email`
+  4. `GET /merchant/user/rewards`：`source_email` 批量查询填充
   5. `GET /merchant/strategies`：补 `status` 字段
-  6. 删除 3 个冗余接口（`user/balance`、`user/level`、`user/reward-balance`），数据已合并到 `user/info`
-- 接口总数从 22 精简为 19 个
+  6. 删除 3 个冗余接口，22 → 19 个
+- **第二轮（member_id 统一 + 字段修正）**：
+  7. 全项目 `member_id` → `user_id`（模型/仓库/合约/服务/脚本），迁移 `012_rename_member_id_to_user_id.sql`
+  8. `GET /user/team` 列表移除 `self_hold`，`team_stats` 改用 `total_performance`
+  9. `GET /point-card/logs` 分发记录用 `CHANGE_DISTRIBUTE=3` + `related_user_id`
+- **第三轮（v1.3.0 + v1.3.1 对齐）**：
+  10. **12 个接口入参 `user_id` 统一改为 `email`**（user/info、apikey、unbind、recharge、logs、strategy open/close/strategies、team、set-market-node、rewards、withdraw、withdrawals）
+  11. **点卡转账改为类型分开**：新增 `type` 参数（1=自充互转 self→self，2=赠送互转 gift→gift），返回 `type`/`type_name`/`from_self_after`/`from_gift_after`/`to_self_after`/`to_gift_after`
+  12. 点卡流水响应字段 `user_id` → `member_id`（仅返回层映射，内部统一 `user_id`）
+- 19 个接口请求参数和返回字段全部与文档 v1.3.1 一致
 
 ## 当前代码状态
 
 - **admin-web 前端**：共 16 页（新增提现管理页）
-- **Merchant API**：19 个接口，与文档完全对齐
+- **Merchant API**：19 个接口，与文档 v1.3.1 完全对齐（全部 email 化、转账分类型）
 - **财务闭环**：所有余额变动（点卡、奖励）均有流水记录；提现有完整审核流程
-- **测试**：44 个用例全部通过
+- **命名统一**：全项目 `member_id` → `user_id`，仅 point-card/logs 返回层映射为 `member_id`
+- **测试**：47 个用例全部通过
 
 ## 下次可以做的
 
 - **平台层 100% + 模块层 100%**：核心功能全部完成
 - 可选方向：
-  - Merchant API 接口级测试
+  - Merchant API 接口级测试（TestClient 验证签名、参数、返回格式）
   - admin-web 构建验证（`npm run build`）
   - UI 优化 / 性能优化 / 更多策略 / 监控告警 / 多语言
-  - SESSION_HANDOFF / IMPLEMENTATION_STATUS / NEXT_TASK 文档持续同步
+  - 文档持续同步
 
 ---
 *新开聊天时：@SESSION_HANDOFF.md 然后说「按这个继续」即可接上进度。*
