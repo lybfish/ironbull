@@ -33,7 +33,7 @@ def node_heartbeat(
     repo = ExecutionNodeRepository(db)
     if not repo.update_heartbeat(node_code):
         raise HTTPException(status_code=404, detail="节点不存在")
-    return {"code": 0, "msg": "ok"}
+    return {"success": True, "message": "ok"}
 
 
 # ---------- 节点 CRUD ----------
@@ -83,6 +83,7 @@ def list_nodes(
             )
 
     return {
+        "success": True,
         "data": [
             {**_node_dict(n), "account_count": account_counts.get(n.id, 0)}
             for n in nodes
@@ -191,6 +192,7 @@ def list_node_accounts(
         .all()
     )
     return {
+        "success": True,
         "data": [
             {
                 "id": a.id,

@@ -61,8 +61,7 @@ def monitor_status(
     overall = "healthy" if (all_services_ok and all_nodes_ok and all_db_ok) else "degraded"
 
     return {
-        "code": 0,
-        "msg": "ok",
+        "success": True,
         "data": {
             "overall": overall,
             "services": [s.to_dict() for s in svc_statuses],

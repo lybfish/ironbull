@@ -8,9 +8,9 @@ PATCH  /api/admins/{id}/toggle  -> 启用/禁用
 POST   /api/admins/{id}/reset-password -> 重置密码
 """
 
-import hashlib
 from typing import Dict, Any, Optional
 
+import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/admins", tags=["admins"])
 
 
 def _hash_password(password: str) -> str:
-    return hashlib.md5(password.encode()).hexdigest()
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 class AdminCreate(BaseModel):

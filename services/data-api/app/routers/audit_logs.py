@@ -48,7 +48,7 @@ def _audit_dict(log: AuditLog) -> dict:
 @router.get("")
 def list_audit_logs(
     page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=100),
     action: Optional[str] = Query(None, description="按操作类型筛选"),
     admin_name: Optional[str] = Query(None, description="按操作人筛选"),
     start_date: Optional[str] = Query(None, description="开始日期 yyyy-MM-dd"),
@@ -69,12 +69,12 @@ def list_audit_logs(
         query = query.filter(AuditLog.created_at <= f"{end_date} 23:59:59")
 
     total = query.count()
-    items = query.offset((page - 1) * size).limit(size).all()
+    items = query.offset((page - 1) * page_size).limit(page_size).all()
 
     return {
         "success": True,
         "data": [_audit_dict(log) for log in items],
         "total": total,
         "page": page,
-        "size": size,
+        "page_size": page_size,
     }

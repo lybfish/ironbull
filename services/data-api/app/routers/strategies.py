@@ -187,7 +187,7 @@ def list_strategy_bindings(
 ):
     """当前租户下的策略绑定列表（含用户、账户、点卡）。不传 tenant_id 时返回空列表，页面可正常加载。"""
     if tenant_id is None:
-        return {"data": [], "total": 0}
+        return {"success": True, "data": [], "total": 0}
     repo = MemberRepository(db)
     bindings = repo.list_bindings_by_tenant(tenant_id, strategy_code=strategy_code, status=status)
     result = []
@@ -218,4 +218,4 @@ def list_strategy_bindings(
             "point_card_total": point_total,
             "created_at": b.created_at.isoformat() if b.created_at else None,
         })
-    return {"data": result, "total": len(result)}
+    return {"success": True, "data": result, "total": len(result)}

@@ -76,6 +76,16 @@
           </template>
         </el-table-column>
         <el-table-column prop="total_users" label="用户数" width="80" align="center"/>
+        <el-table-column prop="tech_reward_total" label="技术累计" width="100" align="right">
+          <template slot-scope="{row}">
+            <span>{{ formatNum(row.tech_reward_total) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="undist_reward_total" label="未分配累计" width="110" align="right">
+          <template slot-scope="{row}">
+            <span>{{ formatNum(row.undist_reward_total) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="quota_plan_name" label="配额套餐" width="120">
           <template slot-scope="{row}">
             <span>{{ row.quota_plan_name || '-' }}</span>
@@ -252,6 +262,31 @@
               <div class="stat-box primary">
                 <div class="stat-value">{{ formatNum(Number(detailData.point_card_self || 0) + Number(detailData.point_card_gift || 0)) }}</div>
                 <div class="stat-label">总余额</div>
+              </div>
+            </el-col>
+          </el-row>
+        </div>
+
+        <!-- 奖励分配 -->
+        <div class="detail-section" v-if="detailData">
+          <div class="section-title">奖励分配</div>
+          <el-row :gutter="15" style="margin-top:15px;">
+            <el-col :span="8">
+              <div class="stat-box">
+                <div class="stat-value">{{ formatNum(detailData.tech_reward_total) }}</div>
+                <div class="stat-label">技术团队累计 (10%)</div>
+              </div>
+            </el-col>
+            <el-col :span="8">
+              <div class="stat-box">
+                <div class="stat-value">{{ formatNum(detailData.undist_reward_total) }}</div>
+                <div class="stat-label">网体未分配累计</div>
+              </div>
+            </el-col>
+            <el-col :span="8">
+              <div class="stat-box primary">
+                <div class="stat-value">{{ formatNum(Number(detailData.tech_reward_total || 0) + Number(detailData.undist_reward_total || 0)) }}</div>
+                <div class="stat-label">根账户累计收入</div>
               </div>
             </el-col>
           </el-row>

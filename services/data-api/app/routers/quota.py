@@ -72,7 +72,7 @@ def list_plans(
 ):
     svc = QuotaService(db)
     plans = svc.list_plans(include_disabled=True)
-    return {"data": [_plan_dict(p) for p in plans], "total": len(plans)}
+    return {"success": True, "data": [_plan_dict(p) for p in plans], "total": len(plans)}
 
 
 @router.post("/quota-plans")
@@ -86,7 +86,7 @@ def create_plan(
         raise HTTPException(status_code=400, detail=f"套餐编码 '{body.code}' 已存在")
     plan = svc.create_plan(**body.dict())
     db.commit()
-    return {"code": 0, "data": _plan_dict(plan)}
+    return {"success": True, "data": _plan_dict(plan)}
 
 
 @router.put("/quota-plans/{plan_id}")
@@ -104,7 +104,7 @@ def update_plan(
     if not plan:
         raise HTTPException(status_code=404, detail="套餐不存在")
     db.commit()
-    return {"code": 0, "data": _plan_dict(plan)}
+    return {"success": True, "data": _plan_dict(plan)}
 
 
 @router.patch("/quota-plans/{plan_id}/toggle")
@@ -118,7 +118,7 @@ def toggle_plan(
     if not plan:
         raise HTTPException(status_code=404, detail="套餐不存在")
     db.commit()
-    return {"code": 0, "status": plan.status}
+    return {"success": True, "status": plan.status}
 
 
 @router.post("/tenants/{tenant_id}/assign-plan")
@@ -133,7 +133,7 @@ def assign_plan(
     if not ok:
         raise HTTPException(status_code=400, detail="租户或套餐不存在")
     db.commit()
-    return {"code": 0, "msg": "套餐分配成功"}
+    return {"success": True, "message": "套餐分配成功"}
 
 
 @router.get("/quota-usage/{tenant_id}")
@@ -148,7 +148,10 @@ def get_usage(
     resource_check = svc.check_resource_quota(tenant_id)
     history = svc.get_usage_history(tenant_id, days=days)
     return {
-        "api_quota": api_check,
-        "resource_quota": resource_check,
-        "usage_history": history,
+        "success": True,
+        "data": {
+            "api_quota": api_check,
+            "resource_quota": resource_check,
+            "usage_history": history,
+        },
     }

@@ -8,10 +8,11 @@ PATCH  /api/tenants/{id}/toggle  -> 启用/禁用
 POST   /api/tenants/{id}/recharge -> 充值点卡
 """
 
-import hashlib
 import random
 import string
 import secrets
+
+import bcrypt
 from decimal import Decimal
 from typing import Dict, Any, Optional
 
@@ -75,6 +76,8 @@ def _tenant_dict(t: Tenant, plan_name: str = None) -> dict:
         "point_card_self": float(t.point_card_self or 0),
         "point_card_gift": float(t.point_card_gift or 0),
         "total_users": t.total_users or 0,
+        "tech_reward_total": float(t.tech_reward_total or 0),
+        "undist_reward_total": float(t.undist_reward_total or 0),
         "status": t.status,
         "quota_plan_id": t.quota_plan_id,
         "quota_plan_name": plan_name,
@@ -130,7 +133,7 @@ def create_tenant(
     root_user = User(
         tenant_id=tenant.id,
         email=f"root@tenant{tenant.id}.local",
-        password_hash=hashlib.md5(secrets.token_hex(16).encode()).hexdigest(),
+        password_hash=bcrypt.hashpw(secrets.token_hex(16).encode(), bcrypt.gensalt()).decode(),
         is_root=1,
         invite_code=invite_code,
         status=1,

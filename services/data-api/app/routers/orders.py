@@ -6,7 +6,7 @@ GET /api/fills
 POST /api/manual-order -> 占位（返回 501，实际下单需 execution-node 等接入）
 """
 
-from datetime import datetime
+import logging
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -19,17 +19,10 @@ from libs.order_trade.contracts import OrderFilter, FillFilter
 
 from ..deps import get_db, get_tenant_id, get_account_id_optional
 from ..serializers import dto_to_dict
+from ..utils import parse_datetime
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["orders"])
-
-
-def _parse_datetime(s: Optional[str]) -> Optional[datetime]:
-    if not s:
-        return None
-    try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
-    except Exception:
-        return None
 
 
 @router.get("/orders")
@@ -48,22 +41,26 @@ def list_orders(
     db: Session = Depends(get_db),
 ):
     """订单列表（支持按租户、账户、标的、状态、时间范围过滤）"""
-    filt = OrderFilter(
-        tenant_id=tenant_id,
-        account_id=account_id,
-        symbol=symbol,
-        exchange=exchange,
-        side=side,
-        status=status,
-        signal_id=signal_id,
-        start_time=_parse_datetime(start_time),
-        end_time=_parse_datetime(end_time),
-        limit=limit,
-        offset=offset,
-    )
-    svc = OrderTradeService(db)
-    orders, total = svc.list_orders(filt)
-    return {"success": True, "data": [dto_to_dict(o) for o in orders], "total": total}
+    try:
+        filt = OrderFilter(
+            tenant_id=tenant_id,
+            account_id=account_id,
+            symbol=symbol,
+            exchange=exchange,
+            side=side,
+            status=status,
+            signal_id=signal_id,
+            start_time=parse_datetime(start_time),
+            end_time=parse_datetime(end_time),
+            limit=limit,
+            offset=offset,
+        )
+        svc = OrderTradeService(db)
+        orders, total = svc.list_orders(filt)
+        return {"success": True, "data": [dto_to_dict(o) for o in orders], "total": total}
+    except Exception as e:
+        logger.exception("订单查询失败")
+        raise HTTPException(status_code=500, detail=f"订单查询失败: {str(e)}")
 
 
 @router.get("/fills")
@@ -80,20 +77,24 @@ def list_fills(
     db: Session = Depends(get_db),
 ):
     """成交列表（支持按租户、账户、订单、标的、时间范围过滤）"""
-    filt = FillFilter(
-        tenant_id=tenant_id,
-        account_id=account_id,
-        order_id=order_id,
-        symbol=symbol,
-        side=side,
-        start_time=_parse_datetime(start_time),
-        end_time=_parse_datetime(end_time),
-        limit=limit,
-        offset=offset,
-    )
-    svc = OrderTradeService(db)
-    fills, total = svc.list_fills(filt)
-    return {"success": True, "data": [dto_to_dict(f) for f in fills], "total": total}
+    try:
+        filt = FillFilter(
+            tenant_id=tenant_id,
+            account_id=account_id,
+            order_id=order_id,
+            symbol=symbol,
+            side=side,
+            start_time=parse_datetime(start_time),
+            end_time=parse_datetime(end_time),
+            limit=limit,
+            offset=offset,
+        )
+        svc = OrderTradeService(db)
+        fills, total = svc.list_fills(filt)
+        return {"success": True, "data": [dto_to_dict(f) for f in fills], "total": total}
+    except Exception as e:
+        logger.exception("成交查询失败")
+        raise HTTPException(status_code=500, detail=f"成交查询失败: {str(e)}")
 
 
 class ManualOrderBody(BaseModel):
