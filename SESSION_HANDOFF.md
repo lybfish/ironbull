@@ -46,9 +46,18 @@
 - **管理后台页面**：services/admin-web/src/（views/ 15 个页面，api/index.js，router/index.js，components/Layout.vue）。
 - **文档已同步**：NEXT_TASK.md 平台层标记 ✅，IMPLEMENTATION_STATUS.md 新增管理后台章节。
 
+### 中心-节点联调（已完成）
+- **全链路已验证**：
+  1. 节点注册：`dim_execution_node` 注册 `node-local-01`
+  2. 心跳：execution-node 启动后自动每 10s POST `/api/nodes/{node_code}/heartbeat`，中心更新 `last_heartbeat_at` ✅
+  3. 鉴权：无 token → 401、错误 token → 401、正确 token → 200 ✅
+  4. 同步余额：中心 POST `/api/sync/balance` → 节点 POST `/api/sync-balance` → 查交易所 → 写回 `fact_account` ✅
+  5. 同步持仓：链路完整（测试 key 无持仓查询权限导致 exchange error，代码无 bug）
+- **关键配置**：`config/default.yaml` 新增 `node_auth_secret`；execution-node 通过 `IRONBULL_CENTER_URL`、`IRONBULL_NODE_CODE`、`IRONBULL_NODE_AUTH_SECRET` 等环境变量配置
+- **Bug 修复**：execution-node `sys.path` 从 `../..` 改为 `../../..`，不再需要额外 `PYTHONPATH`
+
 ## 下次可以做的
 
-- **中心-节点联调**：配置 `node_auth_secret` + `center_url` + `node_code`，跑通鉴权 + 心跳 + 任务下发全链路。
 - **生产部署准备**：jwt_secret 生产配置、CORS 收窄、admin-web `npm run build` 打包、Nginx 部署配置。
 - **配额计费**：租户级 API 调用限额、策略使用计费、套餐等级（NEXT_TASK.md 里最后一个 ❌）。
 - 其他业务或 NEXT_TASK.md 中的待办。

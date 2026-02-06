@@ -61,6 +61,9 @@ exchange_passphrase: ""             # API Passphrase (OKX 需要)
 exchange_sandbox: false             # 真实交易（注意！）
 exchange_market_type: future        # 市场类型: spot(现货) / future(合约)
 
+# Execution Node Authentication
+node_auth_secret: "test-secret-2026"   # 中心⇄节点共享密钥，用于 X-Center-Token
+
 # Auto Trading
 auto_trade_enabled: false           # 是否启用自动交易
 auto_trade_mode: notify_only        # 模式: notify_only / confirm_each / auto_execute

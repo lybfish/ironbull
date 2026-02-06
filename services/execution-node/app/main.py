@@ -12,7 +12,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Dict, List, Any, Optional
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 
 from fastapi import FastAPI, HTTPException, Request, Depends
 from pydantic import BaseModel
