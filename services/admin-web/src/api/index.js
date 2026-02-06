@@ -242,4 +242,10 @@ export async function completeWithdrawal(id, txHash = '') {
   return data
 }
 
+// ---- 系统监控 ----
+export async function getMonitorStatus() {
+  const { data } = await api.get('/api/monitor/status')
+  return data
+}
+
 export default api

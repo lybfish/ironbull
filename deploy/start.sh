@@ -36,12 +36,14 @@ declare -A SERVICES=(
     [data-api]="uvicorn app.main:app --host 0.0.0.0 --port 8026 --workers 2"
     [merchant-api]="uvicorn app.main:app --host 0.0.0.0 --port 8010 --workers 2"
     [signal-monitor]="python3 -m flask run --host=0.0.0.0 --port=8020"
+    [monitor-daemon]="python3 scripts/monitor_daemon.py"
 )
 
 declare -A SERVICE_DIRS=(
     [data-api]="$PROJECT_ROOT/services/data-api"
     [merchant-api]="$PROJECT_ROOT/services/merchant-api"
     [signal-monitor]="$PROJECT_ROOT/services/signal-monitor"
+    [monitor-daemon]="$PROJECT_ROOT"
 )
 
 start_service() {

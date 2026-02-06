@@ -26,6 +26,7 @@
         <el-menu-item index="/admins">管理员</el-menu-item>
         <el-menu-item index="/quota-plans">套餐管理</el-menu-item>
         <el-menu-item index="/withdrawals">提现管理</el-menu-item>
+        <el-menu-item index="/monitor">系统监控</el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>

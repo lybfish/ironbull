@@ -26,6 +26,7 @@ const routes = [
       { path: 'admins', name: 'Admins', component: () => import('../views/Admins.vue'), meta: { title: '管理员' } },
       { path: 'quota-plans', name: 'QuotaPlans', component: () => import('../views/QuotaPlans.vue'), meta: { title: '套餐管理' } },
       { path: 'withdrawals', name: 'Withdrawals', component: () => import('../views/Withdrawals.vue'), meta: { title: '提现管理' } },
+      { path: 'monitor', name: 'Monitor', component: () => import('../views/Monitor.vue'), meta: { title: '系统监控' } },
     ],
   },
 ]

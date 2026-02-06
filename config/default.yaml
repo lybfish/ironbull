@@ -71,3 +71,16 @@ auto_trade_max_amount: 200.0        # 单笔最大金额 (USDT) - 合约最小10
 auto_trade_max_daily: 10            # 每日最大交易次数
 auto_trade_max_positions: 3         # 最大同时持仓数
 auto_trade_min_confidence: 70       # 最低置信度要求
+
+# Monitor Daemon 监控告警
+monitor_enabled: true                # 是否启用监控守护
+monitor_interval: 60                 # 巡检间隔（秒）
+monitor_services:                    # 要巡检的服务列表
+  - name: data-api
+    url: http://127.0.0.1:8026/health
+  - name: merchant-api
+    url: http://127.0.0.1:8010/health
+  - name: signal-monitor
+    url: http://127.0.0.1:8020/health
+monitor_node_timeout: 180            # 节点心跳超时（秒）
+monitor_alert_cooldown: 300          # 同一告警去重间隔（秒）
