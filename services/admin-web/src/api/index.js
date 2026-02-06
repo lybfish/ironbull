@@ -130,6 +130,18 @@ export async function getSignalMonitorStatus() {
   return data
 }
 
+// ---- Dashboard ----
+export async function getDashboardSummary() {
+  const { data } = await api.get('/api/dashboard/summary')
+  return data
+}
+
+// ---- 用户管理 ----
+export async function getUsers(params = {}) {
+  const { data } = await api.get('/api/users', { params })
+  return data
+}
+
 // ---- 租户管理 ----
 export async function getTenants(params = {}) {
   const { data } = await api.get('/api/tenants', { params })

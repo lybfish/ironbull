@@ -20,6 +20,7 @@
         <el-menu-item index="/signal-monitor">信号监控</el-menu-item>
         <div class="menu-divider"></div>
         <el-menu-item index="/tenants">租户管理</el-menu-item>
+        <el-menu-item index="/users">用户管理</el-menu-item>
         <el-menu-item index="/admins">管理员</el-menu-item>
       </el-menu>
     </el-aside>

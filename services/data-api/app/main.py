@@ -28,7 +28,7 @@ from libs.core.database import init_database
 from libs.core.logger import get_logger, setup_logging
 from libs.core import get_config
 
-from .routers import orders, positions, accounts, analytics, auth, strategies, signal_monitor, nodes, sync, tenants, admins
+from .routers import orders, positions, accounts, analytics, auth, strategies, signal_monitor, nodes, sync, tenants, admins, dashboard, users
 
 config = get_config()
 setup_logging(
@@ -70,6 +70,8 @@ app.include_router(nodes.router)
 app.include_router(sync.router)
 app.include_router(tenants.router)
 app.include_router(admins.router)
+app.include_router(dashboard.router)
+app.include_router(users.router)
 
 
 @app.get("/health")

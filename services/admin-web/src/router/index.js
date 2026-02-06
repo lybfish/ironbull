@@ -20,6 +20,7 @@ const routes = [
       { path: 'strategies', name: 'Strategies', component: () => import('../views/Strategies.vue'), meta: { title: '策略管理' } },
       { path: 'signal-monitor', name: 'SignalMonitor', component: () => import('../views/SignalMonitor.vue'), meta: { title: '信号监控' } },
       { path: 'tenants', name: 'Tenants', component: () => import('../views/Tenants.vue'), meta: { title: '租户管理' } },
+      { path: 'users', name: 'Users', component: () => import('../views/Users.vue'), meta: { title: '用户管理' } },
       { path: 'admins', name: 'Admins', component: () => import('../views/Admins.vue'), meta: { title: '管理员' } },
     ],
   },
