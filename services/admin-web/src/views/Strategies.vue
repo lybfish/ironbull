@@ -3,8 +3,8 @@
     <el-row :gutter="16">
       <el-col :span="12">
         <el-card v-loading="strategiesLoading" shadow="hover">
-          <template #header>策略目录</template>
-          <el-table :data="strategies" stripe border max-height="320">
+          <template #header>策略目录（点击行查看详情）</template>
+          <el-table :data="strategies" stripe border max-height="320" highlight-current-row @row-click="openStrategyDetail">
             <el-table-column prop="code" label="策略码" width="120" show-overflow-tooltip />
             <el-table-column prop="name" label="名称" min-width="100" show-overflow-tooltip />
             <el-table-column prop="symbol" label="标的" width="90" />
@@ -15,7 +15,8 @@
               </template>
             </el-table-column>
           </el-table>
-          <div class="tip">共 {{ strategiesTotal }} 个策略</div>
+          <el-empty v-if="!strategiesLoading && strategies.length === 0" description="暂无策略" />
+          <div v-else class="tip">共 {{ strategiesTotal }} 个策略</div>
         </el-card>
       </el-col>
       <el-col :span="12">
@@ -45,10 +46,28 @@
               <template #default="{ row }">{{ row.total_profit != null ? row.total_profit.toFixed(2) : '-' }}</template>
             </el-table-column>
           </el-table>
-          <div class="tip">共 {{ bindingsTotal }} 条绑定（点卡为 0 时该账户不执行信号）</div>
+          <el-empty v-if="!bindingsLoading && bindings.length === 0" description="暂无绑定" />
+          <div v-else class="tip">共 {{ bindingsTotal }} 条绑定（点卡为 0 时该账户不执行信号）</div>
         </el-card>
       </el-col>
     </el-row>
+
+    <el-drawer v-model="detailVisible" title="策略详情" size="400" direction="rtl">
+      <div v-if="detailStrategy" class="strategy-detail">
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="策略码">{{ detailStrategy.code }}</el-descriptions-item>
+          <el-descriptions-item label="名称">{{ detailStrategy.name }}</el-descriptions-item>
+          <el-descriptions-item label="描述">{{ detailStrategy.description || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="标的">{{ detailStrategy.symbol || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="周期">{{ detailStrategy.timeframe || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="最小资金(USDT)">{{ detailStrategy.min_capital != null ? detailStrategy.min_capital : '-' }}</el-descriptions-item>
+          <el-descriptions-item label="风险等级">{{ detailStrategy.risk_level != null ? detailStrategy.risk_level : '-' }}</el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <el-tag :type="detailStrategy.status === 1 ? 'success' : 'info'" size="small">{{ detailStrategy.status === 1 ? '启用' : '停用' }}</el-tag>
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -63,6 +82,13 @@ const strategiesTotal = ref(0)
 const bindings = ref([])
 const bindingsTotal = ref(0)
 const bindingFilter = ref('')
+const detailVisible = ref(false)
+const detailStrategy = ref(null)
+
+function openStrategyDetail(row) {
+  detailStrategy.value = row
+  detailVisible.value = true
+}
 
 async function loadStrategies() {
   strategiesLoading.value = true
@@ -100,4 +126,5 @@ onMounted(() => {
 .strategies-page { padding: 0; }
 .tip { margin-top: 8px; color: #999; font-size: 12px; }
 .text-danger { color: #f56c6c; }
+.strategy-detail { padding: 0 8px; }
 </style>
