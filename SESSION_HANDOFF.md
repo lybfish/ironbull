@@ -34,6 +34,19 @@
 - 后台充值写 fact_point_card_log；fact_reward_log（RewardLog）记录奖励/提现流水；提现完整流程：approve/reject/complete，data-api + evui 提现管理页。
 - Merchant API 与文档 v1.3.1 对齐：19 个接口，member_id→user_id（返回层点卡流水保留 member_id 映射），入参 email 化、点卡转账分类型、status 对外 1/2 映射等。
 
+### 奖励分配系统（全溯源重构）
+- **RewardService 预算制重写**（`libs/reward/service.py`）：网体 20% 是硬预算上限，分配优先级：直推 > 级差 > 平级，预算用完即停，**不超发**。
+- **全溯源**：所有资金去向均写入 `fact_user_reward` + `fact_reward_log`，每分钱可查。reward_type 区分：`tech_team`（10%技术）、`direct`/`direct_undist`（直推）、`level_diff`（级差）、`peer`/`peer_undist`（平级）、`network_undist`（网体剩余）、`platform_retain`（70%平台留存）。
+- **租户隔离**：未分配资金归**对应租户的根账户**（`dim_user.is_root=1`），非全局统一账户。
+- **租户累计字段**：`dim_tenant` 增加 `tech_reward_total`（累计技术分配）、`undist_reward_total`（累计网体未分配），每次分配自动更新。
+- **ProfitPool 追踪字段**：`fact_profit_pool` 增加 7 个字段（tech_amount / network_amount / platform_amount / direct_distributed / diff_distributed / peer_distributed / network_undistributed）。
+- **迁移**：`migrations/016_profit_pool_distribution_tracking.sql`、`migrations/017_tenant_reward_tracking.sql`。
+
+### 租户根账户自动创建
+- **创建租户自动建根账户**（`services/data-api/app/routers/tenants.py`）：POST /api/tenants 创建租户时自动生成 `is_root=1` 的用户并关联 `root_user_id`。
+- **Pydantic v2 兼容**：status 字段支持 `"active"` / `1` 两种格式（`@field_validator(mode="before")`）。
+- **前端修复**：`evui/src/views/tenant/index.vue` 的 `status: 'active'` 改为 `status: 1`。
+
 ### 配额、监控、性能
 - 配额：dim_quota_plan、fact_api_usage、QuotaService；merchant-api check_quota；data-api quota-plans、assign-plan、quota-usage。
 - 监控：libs/monitor（health_checker、node_checker、db_checker、alerter）、monitor_daemon.py、GET /api/monitor/status、evui 监控页；deploy/start.sh 含 monitor-daemon。
@@ -64,12 +77,13 @@
 | 管理后台前端   | evui/src/（views/、api/、router/） |
 | 策略与租户实例 | libs/member/models.py（Strategy、TenantStrategy）、repository.py；data-api/routers/strategies.py、tenant_strategies.py；merchant-api/routers/strategy.py；evui/views/tenant/tenant-strategies.vue |
 | 信号/执行按租户 | services/signal-monitor/app/main.py（_resolve_amount_leverage_for_tenant、execute_signal_by_strategy）；libs/member/service.py（get_execution_targets_by_strategy_code 校验租户实例）；execution-node TaskItem.leverage；scripts/node_execute_worker.py |
+| 奖励分配（全溯源）| libs/reward/service.py（RewardService，预算制 cap）、libs/reward/models.py（ProfitPool 追踪字段）|
 | 点卡/奖励/提现 | libs/pointcard/、libs/reward/、data-api/routers/tenants.py、withdrawals.py、user_manage.py |
 | 配额           | libs/quota/、data-api/routers/quota.py |
 | 监控           | libs/monitor/、scripts/monitor_daemon.py、data-api/routers/monitor.py |
 | Merchant API   | services/merchant-api/app/routers/（user、reward、pointcard、strategy） |
 | 实盘/交易所    | scripts/live_small_test.py、libs/trading/live_trader.py、libs/exchange/ |
-| 迁移与测试     | migrations/（014、015）；scripts/run_migrations_014_015.py、test_data_api_all.py、README_DATA_API_TEST.md |
+| 迁移与测试     | migrations/（014-017）；scripts/run_migrations_014_015.py、test_data_api_all.py、test_full_business.py、test_reward_distribution.py |
 
 ---
 
@@ -79,7 +93,9 @@
 - **data-api**：管理接口齐全；租户策略实例 CRUD + copy-from-master；点卡流水、奖励记录在 main 显式注册；tenant_strategies 路由在 tenants 前注册；Pydantic v2 与 admin_id 已修；健康检查 GET /health。
 - **Merchant API**：策略列表与开通按租户实例；用户已绑定列表展示名用租户实例。
 - **执行节点**：中心-节点联调通过；按租户解析 amount/leverage；子机可独立部署与打包。
-- **数据库**：需执行 014、015 后策略与租户策略相关接口才正常；可用 `scripts/run_migrations_014_015.py` 执行。
+- **数据库**：需执行 014-017 后所有功能才正常。014-015 可用 `scripts/run_migrations_014_015.py`；016-017 直接用 mysql 执行 `migrations/016_*.sql` 和 `migrations/017_*.sql`。
+- **奖励分配**：全溯源已完成，7 个场景 97 项校验通过（含超发 cap、租户隔离、无邀请人、自持不足等边界情况）。
+- **租户**：2 个活跃租户，均有根账户。新建租户自动创建根账户。
 
 ---
 
@@ -93,6 +109,8 @@
 
 ## 7. 后续可选
 
+- **前端展示租户奖励字段**：evui 租户详情页增加 tech_reward_total / undist_reward_total 展示
+- **部署到生产**：执行迁移 016-017，补建已有租户的根账户（脚本逻辑已有，见会话记录）
 - 构建体积优化（大 chunk 代码分割）
 - 监控告警增强（更多端点、历史告警、邮件通道）
 - 文档与 API 文档持续同步
