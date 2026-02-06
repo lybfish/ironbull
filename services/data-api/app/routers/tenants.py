@@ -18,6 +18,10 @@ from sqlalchemy.orm import Session
 
 from libs.tenant.models import Tenant
 from libs.quota.models import QuotaPlan
+from libs.pointcard.models import PointCardLog
+from libs.pointcard.service import (
+    CHANGE_RECHARGE, SOURCE_ADMIN, CARD_SELF, CARD_GIFT,
+)
 
 from ..deps import get_db, get_current_admin
 
@@ -144,17 +148,37 @@ def recharge_point_card(
     _admin: Dict[str, Any] = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """给租户充值点卡"""
+    """给租户充值点卡（补流水）"""
     if body.amount <= 0:
         raise HTTPException(status_code=400, detail="充值金额必须大于0")
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=404, detail="租户不存在")
     amount = Decimal(str(body.amount))
+    before_self = float(tenant.point_card_self or 0)
+    before_gift = float(tenant.point_card_gift or 0)
     if body.card_type == "gift":
         tenant.point_card_gift = (tenant.point_card_gift or 0) + amount
     else:
         tenant.point_card_self = (tenant.point_card_self or 0) + amount
     db.merge(tenant)
+    db.flush()
+    after_self = float(tenant.point_card_self or 0)
+    after_gift = float(tenant.point_card_gift or 0)
+    # 写入点卡流水
+    log = PointCardLog(
+        tenant_id=tenant_id,
+        user_id=None,
+        change_type=CHANGE_RECHARGE,
+        source_type=SOURCE_ADMIN,
+        card_type=CARD_GIFT if body.card_type == "gift" else CARD_SELF,
+        amount=float(amount),
+        before_self=before_self,
+        after_self=after_self,
+        before_gift=before_gift,
+        after_gift=after_gift,
+        remark=f"后台充值({body.card_type})",
+    )
+    db.add(log)
     db.flush()
     return {"success": True, "data": _tenant_dict(tenant), "message": f"已充值 {body.amount} 点卡({body.card_type})"}

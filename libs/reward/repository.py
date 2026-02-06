@@ -6,7 +6,7 @@ from typing import Optional, List
 
 from sqlalchemy.orm import Session
 
-from .models import ProfitPool, UserReward, UserWithdrawal
+from .models import ProfitPool, UserReward, RewardLog, UserWithdrawal
 
 
 class RewardRepository:
@@ -47,6 +47,26 @@ class RewardRepository:
         items = q.order_by(UserReward.id.desc()).offset((page - 1) * limit).limit(limit).all()
         return items, total
 
+    # ---------- RewardLog ----------
+    def create_reward_log(self, log: RewardLog) -> RewardLog:
+        self.db.add(log)
+        self.db.flush()
+        return log
+
+    def list_reward_logs(
+        self,
+        user_id: int,
+        page: int = 1,
+        limit: int = 20,
+        change_type: Optional[str] = None,
+    ) -> tuple[List[RewardLog], int]:
+        q = self.db.query(RewardLog).filter(RewardLog.user_id == user_id)
+        if change_type:
+            q = q.filter(RewardLog.change_type == change_type)
+        total = q.count()
+        items = q.order_by(RewardLog.id.desc()).offset((page - 1) * limit).limit(limit).all()
+        return items, total
+
     # ---------- UserWithdrawal ----------
     def create_withdrawal(self, w: UserWithdrawal) -> UserWithdrawal:
         self.db.add(w)
@@ -77,3 +97,17 @@ class RewardRepository:
         self.db.merge(w)
         self.db.flush()
         return w
+
+    def list_all_withdrawals(
+        self,
+        page: int = 1,
+        limit: int = 20,
+        status: Optional[int] = None,
+    ) -> tuple[List[UserWithdrawal], int]:
+        """管理员查询所有用户的提现记录"""
+        q = self.db.query(UserWithdrawal)
+        if status is not None:
+            q = q.filter(UserWithdrawal.status == status)
+        total = q.count()
+        items = q.order_by(UserWithdrawal.id.desc()).offset((page - 1) * limit).limit(limit).all()
+        return items, total

@@ -4,7 +4,7 @@ Merchant API Service - 代理商 B2B 接口
 认证：AppKey + Sign（X-App-Key, X-Timestamp, X-Sign）
 端口：8010
 
-22 个接口：用户管理(6)、点卡(4)、策略(4)、会员分销(8)
+19 个接口：用户管理(6)、点卡(3)、策略(4)、会员分销(6)
 """
 
 import sys

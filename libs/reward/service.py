@@ -14,7 +14,7 @@ from libs.member.models import User
 from libs.member.repository import MemberRepository
 from libs.member.level_service import LevelService
 from libs.member.models import LevelConfig
-from .models import ProfitPool, UserReward
+from .models import ProfitPool, UserReward, RewardLog
 from .repository import RewardRepository
 
 TECH_RATE = Decimal("0.10")
@@ -60,9 +60,20 @@ class RewardService:
                     remark="直推奖励",
                 )
                 self.repo.create_reward(r)
-                inviter.reward_usdt = (inviter.reward_usdt or 0) + direct_amount
+                before_bal = Decimal(str(inviter.reward_usdt or 0))
+                inviter.reward_usdt = before_bal + direct_amount
                 inviter.total_reward = (inviter.total_reward or 0) + direct_amount
                 self.member_repo.update_user(inviter)
+                self.repo.create_reward_log(RewardLog(
+                    user_id=inviter_id,
+                    change_type="reward_in",
+                    ref_type="user_reward",
+                    ref_id=r.id,
+                    amount=direct_amount,
+                    before_balance=before_bal,
+                    after_balance=inviter.reward_usdt,
+                    remark="直推奖励",
+                ))
                 rewards.append(r)
         # 级差奖、平级奖：需要邀请路径上市场节点
         source_user = self.member_repo.get_user_by_id(pool.user_id)
@@ -94,9 +105,20 @@ class RewardService:
                         remark="级差奖",
                     )
                     self.repo.create_reward(r)
-                    inviter.reward_usdt = (inviter.reward_usdt or 0) + amount
+                    before_bal = Decimal(str(inviter.reward_usdt or 0))
+                    inviter.reward_usdt = before_bal + amount
                     inviter.total_reward = (inviter.total_reward or 0) + amount
                     self.member_repo.update_user(inviter)
+                    self.repo.create_reward_log(RewardLog(
+                        user_id=inviter_id,
+                        change_type="reward_in",
+                        ref_type="user_reward",
+                        ref_id=r.id,
+                        amount=amount,
+                        before_balance=before_bal,
+                        after_balance=inviter.reward_usdt,
+                        remark="级差奖",
+                    ))
                     rewards.append(r)
                     last_rate = current_rate
                 if not peer_done and inviter.member_level == source_level:
@@ -114,9 +136,20 @@ class RewardService:
                         remark="平级奖",
                     )
                     self.repo.create_reward(r)
-                    inviter.reward_usdt = (inviter.reward_usdt or 0) + peer_amount
+                    before_bal = Decimal(str(inviter.reward_usdt or 0))
+                    inviter.reward_usdt = before_bal + peer_amount
                     inviter.total_reward = (inviter.total_reward or 0) + peer_amount
                     self.member_repo.update_user(inviter)
+                    self.repo.create_reward_log(RewardLog(
+                        user_id=inviter_id,
+                        change_type="reward_in",
+                        ref_type="user_reward",
+                        ref_id=r.id,
+                        amount=peer_amount,
+                        before_balance=before_bal,
+                        after_balance=inviter.reward_usdt,
+                        remark="平级奖",
+                    ))
                     rewards.append(r)
                     peer_done = True
         pool.status = 2

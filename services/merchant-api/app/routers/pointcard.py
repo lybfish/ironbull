@@ -1,5 +1,5 @@
 """
-Merchant API - 点卡管理（4 个接口）
+Merchant API - 点卡管理（3 个接口）
 """
 
 from decimal import Decimal
@@ -12,7 +12,6 @@ from libs.tenant.models import Tenant
 from libs.tenant.service import TenantService
 from libs.pointcard.service import PointCardService
 from libs.pointcard.repository import PointCardRepository
-from libs.core.database import get_session
 from ..deps import get_db, check_quota as get_tenant
 from ..schemas import ok
 
@@ -47,28 +46,6 @@ def user_recharge(
     if not success:
         return {"code": 1, "msg": err, "data": None}
     return ok(data, msg="分发成功")
-
-
-@router.get("/user/balance")
-def user_balance(
-    user_id: int,
-    tenant: Tenant = Depends(get_tenant),
-    db: Session = Depends(get_db),
-):
-    """获取用户点卡余额"""
-    from libs.member.repository import MemberRepository
-    repo = MemberRepository(db)
-    user = repo.get_user_by_id(user_id, tenant.id)
-    if not user:
-        return {"code": 1, "msg": "用户不存在", "data": None}
-    self_val = float(user.point_card_self or 0)
-    gift_val = float(user.point_card_gift or 0)
-    return ok({
-        "user_id": user_id,
-        "point_card_self": self_val,
-        "point_card_gift": gift_val,
-        "point_card_total": self_val + gift_val,
-    })
 
 
 @router.get("/point-card/logs")

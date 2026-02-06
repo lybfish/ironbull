@@ -224,4 +224,22 @@ export async function getQuotaUsage(tenantId, days = 30) {
   return data
 }
 
+// ---- 提现管理 ----
+export async function getWithdrawals(params = {}) {
+  const { data } = await api.get('/api/withdrawals', { params })
+  return data
+}
+export async function approveWithdrawal(id) {
+  const { data } = await api.post(`/api/withdrawals/${id}/approve`)
+  return data
+}
+export async function rejectWithdrawal(id, reason = '') {
+  const { data } = await api.post(`/api/withdrawals/${id}/reject`, { reason })
+  return data
+}
+export async function completeWithdrawal(id, txHash = '') {
+  const { data } = await api.post(`/api/withdrawals/${id}/complete`, { tx_hash: txHash })
+  return data
+}
+
 export default api

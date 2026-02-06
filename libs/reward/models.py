@@ -49,6 +49,25 @@ class UserReward(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
+class RewardLog(Base):
+    """
+    奖励余额流水表（fact_reward_log）
+    记录所有 reward_usdt 变动：奖励发放(+)、提现冻结(-)、提现拒绝退回(+) 等。
+    """
+    __tablename__ = "fact_reward_log"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    change_type = Column(String(30), nullable=False)  # reward_in / withdraw_freeze / withdraw_reject_return
+    ref_type = Column(String(30), nullable=True)       # user_reward / user_withdrawal
+    ref_id = Column(BigInteger, nullable=True)          # 关联 fact_user_reward.id 或 fact_user_withdrawal.id
+    amount = Column(DECIMAL(20, 8), nullable=False)     # 正=增加, 负=减少
+    before_balance = Column(DECIMAL(20, 8), nullable=False, default=0)
+    after_balance = Column(DECIMAL(20, 8), nullable=False, default=0)
+    remark = Column(String(255), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class UserWithdrawal(Base):
     """
     提现记录表（fact_user_withdrawal）

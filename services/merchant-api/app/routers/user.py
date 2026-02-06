@@ -1,5 +1,12 @@
 """
 Merchant API - 用户管理（6 个接口）
+
+- 获取根用户信息
+- 创建用户（invite_code 邀请码）
+- 用户列表
+- 用户详情（合并 balance/level/reward-balance）
+- 绑定 API Key
+- 解绑 API Key
 """
 
 from datetime import datetime
@@ -39,14 +46,25 @@ def root_user(
 def user_create(
     email: str = Form(...),
     password: str = Form(...),
-    inviter_id: Optional[int] = Form(0),
+    invite_code: Optional[str] = Form(""),
     tenant: Tenant = Depends(get_tenant),
     db: Session = Depends(get_db),
 ):
-    """创建用户"""
+    """创建用户（invite_code 为邀请人的邀请码，不传则默认挂在根用户下）"""
     if not email or not password:
         return {"code": 1, "msg": "邮箱和密码不能为空", "data": None}
-    inviter_id = inviter_id or tenant.root_user_id
+    from libs.member.repository import MemberRepository
+    repo = MemberRepository(db)
+    inviter_id = None
+    if invite_code and invite_code.strip():
+        inviter = repo.get_user_by_invite_code(invite_code.strip())
+        if not inviter:
+            return {"code": 1, "msg": "邀请码无效", "data": None}
+        if inviter.tenant_id != tenant.id:
+            return {"code": 1, "msg": "邀请码不属于该商户", "data": None}
+        inviter_id = inviter.id
+    else:
+        inviter_id = tenant.root_user_id
     svc = MemberService(db)
     user, err = svc.create_user(tenant.id, email, password, inviter_id=inviter_id, root_user_id=tenant.root_user_id)
     if err:
@@ -98,7 +116,7 @@ def user_info(
     tenant: Tenant = Depends(get_tenant),
     db: Session = Depends(get_db),
 ):
-    """用户详情"""
+    """用户详情（合并 balance/level/reward-balance，一次返回全部信息）"""
     if not user_id and not email:
         return {"code": 1, "msg": "请提供 user_id 或 email", "data": None}
     svc = MemberService(db)
@@ -109,13 +127,17 @@ def user_info(
     if not user:
         return {"code": 1, "msg": "用户不存在", "data": None}
     from libs.member.repository import MemberRepository
+    from libs.member.level_service import LevelService
     repo = MemberRepository(db)
+    level_svc = LevelService(db)
+    # 邀请人邀请码
+    inviter_invite_code = ""
+    if user.inviter_id:
+        inviter = repo.get_user_by_id(user.inviter_id)
+        if inviter:
+            inviter_invite_code = inviter.invite_code or ""
+    # 账户
     accounts = repo.get_accounts_by_user(user.id)
-    invite_count = repo.count_invitees(user.id)
-    strategies = svc.get_user_strategies(user.id, tenant.id)
-    active = sum(1 for s in strategies if s.get("status") == 1)
-    total_profit = sum(s.get("total_profit", 0) for s in strategies)
-    total_trades = sum(s.get("total_trades", 0) for s in strategies)
     acc_list = [{
         "account_id": a.id,
         "exchange": a.exchange,
@@ -125,17 +147,36 @@ def user_info(
         "futures_available": float(a.futures_available or 0),
         "status": a.status,
     } for a in accounts]
+    # 策略
+    strategies = svc.get_user_strategies(user.id, tenant.id)
+    active = sum(1 for s in strategies if s.get("status") == 1)
+    total_profit = sum(s.get("total_profit", 0) for s in strategies)
+    total_trades = sum(s.get("total_trades", 0) for s in strategies)
+    # 团队
+    invite_count = repo.count_invitees(user.id)
+    sub_ids = repo.get_all_sub_user_ids(user.id)
+    self_hold = float(level_svc.get_self_hold(user.id))
     return ok({
         "user_id": user.id,
         "email": user.email,
         "invite_code": user.invite_code,
+        "inviter_invite_code": inviter_invite_code,
         "status": user.status,
         "create_time": user.created_at.strftime("%Y-%m-%d %H:%M:%S") if user.created_at else "",
-        "inviter_id": user.inviter_id or 0,
         "invite_count": invite_count,
         "point_card_self": float(user.point_card_self or 0),
         "point_card_gift": float(user.point_card_gift or 0),
         "point_card_total": float(user.point_card_self or 0) + float(user.point_card_gift or 0),
+        "level": user.member_level or 0,
+        "level_name": level_svc.get_level_name(user.member_level or 0),
+        "is_market_node": user.is_market_node or 0,
+        "self_hold": self_hold,
+        "team_direct_count": invite_count,
+        "team_total_count": len(sub_ids),
+        "team_performance": float(user.team_performance or 0),
+        "reward_usdt": float(user.reward_usdt or 0),
+        "total_reward": float(user.total_reward or 0),
+        "withdrawn_reward": float(user.withdrawn_reward or 0),
         "accounts": acc_list,
         "active_strategies": active,
         "total_profit": total_profit,

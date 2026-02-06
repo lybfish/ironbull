@@ -37,6 +37,7 @@ def strategies_list(
             "symbol": s.symbol,
             "timeframe": s.timeframe or "",
             "min_capital": min_cap,
+            "status": s.status,
         })
     return ok(list_data)
 

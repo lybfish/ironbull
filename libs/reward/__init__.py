@@ -5,7 +5,7 @@ Reward Module - 奖励与提现
 - 提现申请与记录
 """
 
-from .models import ProfitPool, UserReward, UserWithdrawal
+from .models import ProfitPool, UserReward, RewardLog, UserWithdrawal
 from .repository import RewardRepository
 from .service import RewardService
 from .withdrawal_service import WithdrawalService
@@ -13,6 +13,7 @@ from .withdrawal_service import WithdrawalService
 __all__ = [
     "ProfitPool",
     "UserReward",
+    "RewardLog",
     "UserWithdrawal",
     "RewardRepository",
     "RewardService",

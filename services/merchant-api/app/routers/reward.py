@@ -1,5 +1,12 @@
 """
-Merchant API - 会员分销与奖励（8 个接口）
+Merchant API - 会员分销与奖励（6 个接口）
+
+- 点卡转账（邮箱互转）
+- 用户团队（直推）
+- 设置市场节点
+- 奖励记录
+- 申请提现
+- 提现记录
 """
 
 from decimal import Decimal
@@ -9,7 +16,6 @@ from fastapi import APIRouter, Depends, Query, Form
 from sqlalchemy.orm import Session
 
 from libs.tenant.models import Tenant
-from libs.member.service import MemberService
 from libs.member.level_service import LevelService
 from libs.pointcard.service import PointCardService
 from libs.reward.withdrawal_service import WithdrawalService
@@ -25,45 +31,31 @@ WITHDRAWAL_STATUS_NAME = {0: "待审核", 1: "已通过", 2: "已拒绝", 3: "�
 
 @router.post("/user/transfer-point-card")
 def transfer_point_card(
-    from_user_id: int = Form(...),
-    to_user_id: int = Form(...),
+    from_email: str = Form(...),
+    to_email: str = Form(...),
     amount: float = Form(...),
     tenant: Tenant = Depends(get_tenant),
     db: Session = Depends(get_db),
 ):
-    """点卡互转（同一邀请链路）"""
-    svc = PointCardService(db)
-    success, err, data = svc.transfer(tenant.id, from_user_id, to_user_id, Decimal(str(amount)))
-    if not success:
-        return {"code": 1, "msg": err, "data": None}
-    return ok(data, msg="转账成功")
-
-
-@router.get("/user/level")
-def user_level(
-    user_id: int,
-    tenant: Tenant = Depends(get_tenant),
-    db: Session = Depends(get_db),
-):
-    """用户等级"""
+    """点卡互转（同一邀请链路，通过邮箱）"""
     from libs.member.repository import MemberRepository
     repo = MemberRepository(db)
-    user = repo.get_user_by_id(user_id, tenant.id)
-    if not user:
-        return {"code": 1, "msg": "用户不存在", "data": None}
-    level_svc = LevelService(db)
-    self_hold = level_svc.get_self_hold(user_id)
-    return ok({
-        "user_id": user_id,
-        "level": user.member_level or 0,
-        "level_name": level_svc.get_level_name(user.member_level or 0),
-        "is_market_node": user.is_market_node or 0,
-        "team_performance": float(user.team_performance or 0),
-        "self_hold": float(self_hold),
-        "reward_usdt": float(user.reward_usdt or 0),
-        "total_reward": float(user.total_reward or 0),
-        "withdrawn_reward": float(user.withdrawn_reward or 0),
-    })
+    from_user = repo.get_user_by_email(from_email.strip(), tenant.id)
+    if not from_user:
+        return {"code": 1, "msg": "发送方邮箱不存在", "data": None}
+    to_user = repo.get_user_by_email(to_email.strip(), tenant.id)
+    if not to_user:
+        return {"code": 1, "msg": "接收方邮箱不存在", "data": None}
+    if from_user.id == to_user.id:
+        return {"code": 1, "msg": "不能给自己转账", "data": None}
+    svc = PointCardService(db)
+    success, err, data = svc.transfer(tenant.id, from_user.id, to_user.id, Decimal(str(amount)))
+    if not success:
+        return {"code": 1, "msg": err, "data": None}
+    # 补充邮箱到返回数据
+    data["from_email"] = from_email.strip()
+    data["to_email"] = to_email.strip()
+    return ok(data, msg="转账成功")
 
 
 @router.get("/user/team")
@@ -148,6 +140,13 @@ def user_rewards(
         return {"code": 1, "msg": "用户不存在", "data": None}
     repo = RewardRepository(db)
     items, total = repo.list_rewards(user_id, page, limit, reward_type)
+    # 批量查 source_user 邮箱
+    source_ids = {r.source_user_id for r in items if r.source_user_id}
+    email_map = {}
+    if source_ids:
+        from libs.member.models import User
+        rows = db.query(User.id, User.email).filter(User.id.in_(source_ids)).all()
+        email_map = {row[0]: row[1] for row in rows}
     list_data = []
     for r in items:
         list_data.append({
@@ -156,33 +155,13 @@ def user_rewards(
             "reward_type_name": REWARD_TYPE_NAME.get(r.reward_type, r.reward_type),
             "amount": float(r.amount or 0),
             "source_user_id": r.source_user_id,
-            "source_email": "",
+            "source_email": email_map.get(r.source_user_id, ""),
             "rate": float(r.rate or 0),
             "settle_batch": r.settle_batch or "",
             "remark": r.remark or "",
             "create_time": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else "",
         })
     return ok({"list": list_data, "total": total, "page": page, "limit": limit})
-
-
-@router.get("/user/reward-balance")
-def user_reward_balance(
-    user_id: int,
-    tenant: Tenant = Depends(get_tenant),
-    db: Session = Depends(get_db),
-):
-    """奖励余额"""
-    from libs.member.repository import MemberRepository
-    repo = MemberRepository(db)
-    user = repo.get_user_by_id(user_id, tenant.id)
-    if not user:
-        return {"code": 1, "msg": "用户不存在", "data": None}
-    return ok({
-        "user_id": user_id,
-        "reward_usdt": float(user.reward_usdt or 0),
-        "total_reward": float(user.total_reward or 0),
-        "withdrawn_reward": float(user.withdrawn_reward or 0),
-    })
 
 
 @router.post("/user/withdraw")
