@@ -45,6 +45,7 @@ logs/
 # Local config
 .env
 .env.local
+.env.production
 *.local.yaml
 
 # Database

@@ -47,13 +47,18 @@ app = FastAPI(
     version="1.0",
 )
 
-# 允许前端开发时跨域（admin-web 本地 5174）
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+# CORS：从配置 cors_origins 读取，逗号分隔；未配置则仅允许本地开发端口
+_cors_raw = config.get_str("cors_origins", "").strip()
+if _cors_raw:
+    _cors_origins = [o.strip() for o in _cors_raw.split(",") if o.strip()]
+else:
+    _cors_origins = [
         "http://localhost:5174", "http://127.0.0.1:5174",
         "http://localhost:5175", "http://127.0.0.1:5175",
-    ],
+    ]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -1,8 +1,14 @@
 """
 JWT 签发与校验（管理后台 / data-api 登录态）
+
+配置项：
+  jwt_secret  — 必须在生产环境中通过环境变量 IRONBULL_JWT_SECRET 注入。
+                开发环境未配置时使用内置默认值并输出警告。
 """
 
+import os
 import time
+import warnings
 from typing import Optional, Dict, Any
 
 from libs.core import get_config
@@ -15,16 +21,25 @@ except ImportError:
 ALG = "HS256"
 DEFAULT_EXP_HOURS = 24
 
+_DEV_SECRET = "ironbull-admin-dev-secret-DO-NOT-USE-IN-PROD"
+
 
 def _get_secret() -> str:
     config = get_config()
-    secret = config.get_str("jwt_secret", "")
-    if not secret:
-        secret = config.get_str("JWT_SECRET", "")
-    if not secret:
-        # 开发默认（生产必须配置 jwt_secret）
-        secret = "ironbull-admin-dev-secret-change-in-production"
-    return secret
+    secret = config.get_str("jwt_secret", "").strip()
+    if secret:
+        return secret
+    # 未配置 jwt_secret
+    env = os.environ.get("IRONBULL_ENV", "dev").lower()
+    if env in ("prod", "production"):
+        raise RuntimeError(
+            "jwt_secret 未配置！生产环境必须设置 IRONBULL_JWT_SECRET 环境变量"
+        )
+    warnings.warn(
+        "jwt_secret 未配置，使用开发默认值。生产环境请设置 IRONBULL_JWT_SECRET",
+        stacklevel=2,
+    )
+    return _DEV_SECRET
 
 
 def encode(admin_id: int, username: str, exp_hours: int = DEFAULT_EXP_HOURS) -> str:

@@ -13,6 +13,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from libs.core.database import init_database
@@ -37,6 +38,18 @@ app = FastAPI(
     description="代理商 B2B 接口，AppKey+Sign 认证",
     version="1.0",
 )
+
+# CORS：merchant-api 主要供服务端调用，生产可通过 cors_origins 配置
+_cors_raw = config.get_str("cors_origins", "").strip()
+if _cors_raw:
+    _cors_origins = [o.strip() for o in _cors_raw.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 app.include_router(user.router)
 app.include_router(pointcard.router)

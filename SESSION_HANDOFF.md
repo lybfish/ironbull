@@ -56,9 +56,16 @@
 - **关键配置**：`config/default.yaml` 新增 `node_auth_secret`；execution-node 通过 `IRONBULL_CENTER_URL`、`IRONBULL_NODE_CODE`、`IRONBULL_NODE_AUTH_SECRET` 等环境变量配置
 - **Bug 修复**：execution-node `sys.path` 从 `../..` 改为 `../../..`，不再需要额外 `PYTHONPATH`
 
+### 生产部署准备（已完成）
+- **JWT Secret**：`libs/core/auth/jwt.py` 改为生产必须配置 `IRONBULL_JWT_SECRET`，未配置+`IRONBULL_ENV=production` 直接抛异常；开发环境输出 warning
+- **CORS 收窄**：data-api + merchant-api 均从 `cors_origins` 配置读取允许域名（逗号分隔），未配置时仅允许 localhost 开发端口
+- **admin-web 打包**：`npm run build` → `dist/`（2.5MB），gzip 后约 400KB
+- **Nginx 配置**：`deploy/nginx.conf`（admin-web 静态资源 + /api/ 反代 data-api + merchant-api 独立 server）
+- **启动脚本**：`deploy/start.sh`（start/stop/restart/status），加载 `.env.production` 环境变量
+- **配置模板**：`deploy/env.production.example`（JWT、DB、Redis、CORS、node_auth 等）
+
 ## 下次可以做的
 
-- **生产部署准备**：jwt_secret 生产配置、CORS 收窄、admin-web `npm run build` 打包、Nginx 部署配置。
 - **配额计费**：租户级 API 调用限额、策略使用计费、套餐等级（NEXT_TASK.md 里最后一个 ❌）。
 - 其他业务或 NEXT_TASK.md 中的待办。
 
