@@ -24,6 +24,7 @@
         <el-menu-item index="/bindings">策略绑定</el-menu-item>
         <el-menu-item index="/exchange-accounts">交易所账户</el-menu-item>
         <el-menu-item index="/admins">管理员</el-menu-item>
+        <el-menu-item index="/quota-plans">套餐管理</el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>

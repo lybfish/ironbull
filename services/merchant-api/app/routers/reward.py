@@ -14,7 +14,7 @@ from libs.member.level_service import LevelService
 from libs.pointcard.service import PointCardService
 from libs.reward.withdrawal_service import WithdrawalService
 from libs.reward.repository import RewardRepository
-from ..deps import get_db, get_tenant
+from ..deps import get_db, check_quota as get_tenant
 from ..schemas import ok
 
 router = APIRouter(prefix="/merchant", tags=["reward"])

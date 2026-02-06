@@ -25,5 +25,6 @@ class Tenant(Base):
     point_card_gift = Column(DECIMAL(20, 8), nullable=False, default=0, comment="赠送点卡余额")
     total_users = Column(Integer, nullable=False, default=0, comment="用户总数")
     status = Column(Integer, nullable=False, default=1, comment="状态 1正常 0禁用")
+    quota_plan_id = Column(Integer, nullable=True, comment="套餐ID，关联 dim_quota_plan")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

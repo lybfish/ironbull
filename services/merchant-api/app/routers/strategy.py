@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from libs.tenant.models import Tenant
 from libs.member.service import MemberService
 from libs.member.repository import MemberRepository
-from ..deps import get_db, get_tenant
+from ..deps import get_db, check_quota as get_tenant
 from ..schemas import ok
 
 router = APIRouter(prefix="/merchant", tags=["strategy"])

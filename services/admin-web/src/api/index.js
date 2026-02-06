@@ -198,4 +198,30 @@ export async function resetAdminPassword(id, newPassword) {
   return data
 }
 
+// ---- 配额套餐管理 ----
+export async function getQuotaPlans() {
+  const { data } = await api.get('/api/quota-plans')
+  return data
+}
+export async function createQuotaPlan(body) {
+  const { data } = await api.post('/api/quota-plans', body)
+  return data
+}
+export async function updateQuotaPlan(id, body) {
+  const { data } = await api.put(`/api/quota-plans/${id}`, body)
+  return data
+}
+export async function toggleQuotaPlan(id) {
+  const { data } = await api.patch(`/api/quota-plans/${id}/toggle`)
+  return data
+}
+export async function assignTenantPlan(tenantId, planId) {
+  const { data } = await api.post(`/api/tenants/${tenantId}/assign-plan`, { plan_id: planId })
+  return data
+}
+export async function getQuotaUsage(tenantId, days = 30) {
+  const { data } = await api.get(`/api/quota-usage/${tenantId}`, { params: { days } })
+  return data
+}
+
 export default api

@@ -13,7 +13,7 @@ from libs.tenant.service import TenantService
 from libs.pointcard.service import PointCardService
 from libs.pointcard.repository import PointCardRepository
 from libs.core.database import get_session
-from ..deps import get_db, get_tenant
+from ..deps import get_db, check_quota as get_tenant
 from ..schemas import ok
 
 router = APIRouter(prefix="/merchant", tags=["pointcard"])

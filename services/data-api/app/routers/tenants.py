@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from libs.tenant.models import Tenant
+from libs.quota.models import QuotaPlan
 
 from ..deps import get_db, get_current_admin
 
@@ -33,7 +34,7 @@ class TenantUpdate(BaseModel):
     status: Optional[int] = None
 
 
-def _tenant_dict(t: Tenant) -> dict:
+def _tenant_dict(t: Tenant, plan_name: str = None) -> dict:
     return {
         "id": t.id,
         "name": t.name,
@@ -44,6 +45,8 @@ def _tenant_dict(t: Tenant) -> dict:
         "point_card_gift": float(t.point_card_gift or 0),
         "total_users": t.total_users or 0,
         "status": t.status,
+        "quota_plan_id": t.quota_plan_id,
+        "quota_plan_name": plan_name,
         "created_at": t.created_at.isoformat() if t.created_at else None,
         "updated_at": t.updated_at.isoformat() if t.updated_at else None,
     }
@@ -56,13 +59,19 @@ def list_tenants(
     _admin: Dict[str, Any] = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """租户列表（分页）"""
+    """租户列表（分页，含套餐名称）"""
     query = db.query(Tenant).order_by(Tenant.id.desc())
     total = query.count()
     items = query.offset((page - 1) * page_size).limit(page_size).all()
+    # 批量查套餐名
+    plan_ids = {t.quota_plan_id for t in items if t.quota_plan_id}
+    plan_map = {}
+    if plan_ids:
+        plans = db.query(QuotaPlan).filter(QuotaPlan.id.in_(plan_ids)).all()
+        plan_map = {p.id: p.name for p in plans}
     return {
         "success": True,
-        "data": [_tenant_dict(t) for t in items],
+        "data": [_tenant_dict(t, plan_map.get(t.quota_plan_id)) for t in items],
         "total": total,
         "page": page,
         "page_size": page_size,

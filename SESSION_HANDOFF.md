@@ -64,10 +64,19 @@
 - **启动脚本**：`deploy/start.sh`（start/stop/restart/status），加载 `.env.production` 环境变量
 - **配置模板**：`deploy/env.production.example`（JWT、DB、Redis、CORS、node_auth 等）
 
+### 配额计费（已完成）
+- **数据库**：`dim_quota_plan`（4 级套餐：免费/基础/专业/企业）、`fact_api_usage`（每日用量）、`dim_tenant.quota_plan_id`
+- **libs/quota**：`QuotaService` — 套餐 CRUD、API 配额检查（日/月）、资源配额检查（用户数/策略数/账户数）、用量记录与统计
+- **merchant-api**：`check_quota` 依赖注入，请求前自动检查配额+记录用量，超限返回 429
+- **data-api**：`/api/quota-plans` CRUD、`/api/tenants/{id}/assign-plan`、`/api/quota-usage/{tenant_id}`
+- **admin-web**：套餐管理页面（CRUD + 启停）、租户页面新增套餐列 + 分配套餐功能
+- **NEXT_TASK.md** 平台层全部 ✅
+
 ## 下次可以做的
 
-- **配额计费**：租户级 API 调用限额、策略使用计费、套餐等级（NEXT_TASK.md 里最后一个 ❌）。
-- 其他业务或 NEXT_TASK.md 中的待办。
+- **平台层 100% + 模块层 100%**：核心功能全部完成
+- 可选方向：UI 优化 / 性能优化 / 更多策略 / 监控告警 / 多语言 等
+- 其他业务或 NEXT_TASK.md 中的待办
 
 ---
 *新开聊天时：@SESSION_HANDOFF.md 然后说「按这个继续」即可接上进度。*

@@ -17,6 +17,12 @@
         </template>
       </el-table-column>
       <el-table-column prop="total_users" label="用户数" width="80" />
+      <el-table-column label="套餐" width="130">
+        <template #default="{ row }">
+          <el-tag v-if="row.quota_plan_name" size="small" type="info">{{ row.quota_plan_name }}</el-tag>
+          <el-text v-else size="small" type="warning">未分配</el-text>
+        </template>
+      </el-table-column>
       <el-table-column label="状态" width="80">
         <template #default="{ row }">
           <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">
@@ -25,13 +31,14 @@
         </template>
       </el-table-column>
       <el-table-column prop="created_at" label="创建时间" width="170" />
-      <el-table-column label="操作" width="180" fixed="right">
+      <el-table-column label="操作" width="240" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="showEdit(row)">编辑</el-button>
           <el-button link :type="row.status === 1 ? 'danger' : 'success'" size="small" @click="onToggle(row)">
             {{ row.status === 1 ? '禁用' : '启用' }}
           </el-button>
           <el-button link type="success" size="small" @click="showRecharge(row)">充值</el-button>
+          <el-button link type="warning" size="small" @click="showAssignPlan(row)">套餐</el-button>
           <el-button link type="info" size="small" @click="showSecret(row)">密钥</el-button>
         </template>
       </el-table-column>
@@ -91,13 +98,30 @@
         <el-button type="primary" :loading="saving" @click="onRecharge">确认充值</el-button>
       </template>
     </el-dialog>
+    <!-- 分配套餐对话框 -->
+    <el-dialog v-model="planVisible" title="分配套餐" width="400px">
+      <el-form label-width="80px">
+        <el-form-item label="租户">
+          <el-text>{{ planTenantName }}</el-text>
+        </el-form-item>
+        <el-form-item label="套餐">
+          <el-select v-model="planForm.planId" placeholder="选择套餐" style="width:100%">
+            <el-option v-for="p in planOptions" :key="p.id" :label="`${p.name} (${p.code})`" :value="p.id" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="planVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="onAssignPlan">确认</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getTenants, createTenant, updateTenant, toggleTenant, rechargeTenant } from '../api'
+import { getTenants, createTenant, updateTenant, toggleTenant, rechargeTenant, getQuotaPlans, assignTenantPlan } from '../api'
 
 const loading = ref(false)
 const list = ref([])
@@ -202,7 +226,43 @@ async function onRecharge() {
   }
 }
 
-onMounted(fetchData)
+// ---- 套餐分配 ----
+const planVisible = ref(false)
+const planTenantId = ref(null)
+const planTenantName = ref('')
+const planForm = reactive({ planId: null })
+const planOptions = ref([])
+
+async function loadPlans() {
+  try {
+    const res = await getQuotaPlans()
+    planOptions.value = (res.data || []).filter(p => p.status === 1)
+  } catch {}
+}
+
+function showAssignPlan(row) {
+  planTenantId.value = row.id
+  planTenantName.value = row.name
+  planForm.planId = row.quota_plan_id
+  planVisible.value = true
+}
+
+async function onAssignPlan() {
+  if (!planForm.planId) return ElMessage.warning('请选择套餐')
+  saving.value = true
+  try {
+    await assignTenantPlan(planTenantId.value, planForm.planId)
+    ElMessage.success('套餐分配成功')
+    planVisible.value = false
+    await fetchData()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '分配失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+onMounted(() => { fetchData(); loadPlans() })
 </script>
 
 <style scoped>
