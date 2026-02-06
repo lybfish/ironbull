@@ -125,7 +125,7 @@ PYTHONPATH=. uvicorn app.main:app --host 0.0.0.0 --port 9101
 """
     (DIST_DIR / "README.md").write_text(readme, encoding="utf-8")
 
-    # 7) 可执行文件构建说明
+    # 7) 可执行文件构建说明（已实际验证通过）
     build_exe = """# 打可执行文件（PyInstaller）
 
 在本目录已具备最小依赖的前提下，可打出单可执行文件，子机无需安装 Python。
@@ -142,27 +142,42 @@ pip install pyinstaller
 
 ```bash
 pyinstaller --onefile --name execution-node \\
+  --paths . \\
   --add-data "config:config" \\
+  --add-data "app:app" \\
+  --add-data "libs:libs" \\
+  --hidden-import app --hidden-import app.main \\
+  --hidden-import libs.core --hidden-import libs.core.config \\
+  --hidden-import libs.core.logger \\
+  --hidden-import libs.trading --hidden-import libs.trading.base \\
+  --hidden-import libs.trading.live_trader \\
   --hidden-import uvicorn.logging \\
-  --hidden-import uvicorn.loops \\
   --hidden-import uvicorn.loops.auto \\
-  --hidden-import uvicorn.protocols \\
-  --hidden-import uvicorn.protocols.http \\
   --hidden-import uvicorn.protocols.http.auto \\
-  --hidden-import uvicorn.protocols.websockets \\
+  --hidden-import uvicorn.protocols.http.h11_impl \\
   --hidden-import uvicorn.protocols.websockets.auto \\
-  --hidden-import uvicorn.lifespan \\
   --hidden-import uvicorn.lifespan.on \\
+  --hidden-import uvicorn.lifespan.off \\
+  --hidden-import httpx --hidden-import yaml --hidden-import ccxt \\
+  --collect-submodules ccxt \\
   run.py
 ```
 
-输出在上级 `dist/` 目录下，得到可执行文件 `execution-node`（Windows 下为 `execution-node.exe`）。
+输出在 `dist/` 子目录下，得到可执行文件 `execution-node`（约 47MB，Windows 下为 `.exe`）。
 
 ## 运行
 
 ```bash
-./execution-node
-# 或指定端口：PORT=9102 ./execution-node
+./dist/execution-node
+# 指定端口：PORT=9102 ./dist/execution-node
+# 指定主机：HOST=0.0.0.0 PORT=9101 ./dist/execution-node
+```
+
+## 验证
+
+```bash
+curl http://127.0.0.1:9101/health
+# 应返回 {"status":"ok","service":"execution-node",...}
 ```
 """
     (DIST_DIR / "BUILD_EXECUTABLE.md").write_text(build_exe, encoding="utf-8")
