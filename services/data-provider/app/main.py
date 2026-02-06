@@ -273,7 +273,7 @@ async def get_candles(
         
         # 2. 缓存未命中，从交易所获取
         if not candles:
-            client = get_exchange_client(exchange)
+            client = get_exchange_client(use_exchange)
             if client:
                 try:
                     ohlcv_list = await client.fetch_ohlcv(symbol, timeframe, limit)

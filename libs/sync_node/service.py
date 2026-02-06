@@ -79,7 +79,7 @@ def sync_balance_from_nodes(
                 resp.raise_for_status()
                 data = resp.json()
         except Exception as e:
-            log.warning("sync_balance node_id=%s error=%s", node.id, e)
+            log.warning("sync_balance failed", node_id=node.id, error=str(e))
             errors.append({"node_id": node.id, "error": str(e)})
             total_fail += len(accounts)
             continue
@@ -99,7 +99,7 @@ def sync_balance_from_nodes(
                 )
                 total_ok += 1
             except Exception as e:
-                log.warning("sync_balance write account_id=%s error=%s", r.get("account_id"), e)
+                log.warning("sync_balance write failed", account_id=r.get("account_id"), error=str(e))
                 total_fail += 1
     return {"ok": total_ok, "fail": total_fail, "errors": errors}
 
@@ -150,7 +150,7 @@ def sync_positions_from_nodes(
                 resp.raise_for_status()
                 data = resp.json()
         except Exception as e:
-            log.warning("sync_positions node_id=%s error=%s", node.id, e)
+            log.warning("sync_positions failed", node_id=node.id, error=str(e))
             errors.append({"node_id": node.id, "error": str(e)})
             total_fail += len(accounts)
             continue
@@ -176,7 +176,7 @@ def sync_positions_from_nodes(
                     )
                     total_ok += 1
                 except Exception as e:
-                    log.warning("sync_positions write account_id=%s symbol=%s error=%s",
-                                r.get("account_id"), pos.get("symbol"), e)
+                    log.warning("sync_positions write failed",
+                                account_id=r.get("account_id"), symbol=pos.get("symbol"), error=str(e))
                     total_fail += 1
     return {"ok": total_ok, "fail": total_fail, "errors": errors}

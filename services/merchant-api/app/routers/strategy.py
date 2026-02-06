@@ -21,23 +21,33 @@ def strategies_list(
     tenant: Tenant = Depends(get_tenant),
     db: Session = Depends(get_db),
 ):
-    """策略列表"""
+    """策略列表：按租户策略实例返回，仅包含该租户下已启用的策略（join 主策略，展示名/杠杆/金额以实例覆盖为准）"""
     repo = MemberRepository(db)
-    items = repo.list_strategies(status=1)
+    instances = repo.list_tenant_strategies(tenant.id, status=1)
+    strategy_ids = [ts.strategy_id for ts in instances]
+    strategies = {}
+    if strategy_ids:
+        from libs.member.models import Strategy
+        for s in repo.db.query(Strategy).filter(Strategy.id.in_(strategy_ids)).all():
+            strategies[s.id] = s
     list_data = []
-    for s in items:
-        cfg = (s.config or {}) if hasattr(s.config, "keys") else {}
-        min_cap = float(cfg.get("min_capital", 200)) if isinstance(cfg, dict) else 200
-        if hasattr(s, "min_capital") and s.min_capital is not None:
-            min_cap = float(s.min_capital)
+    for ts in instances:
+        s = strategies.get(ts.strategy_id)
+        if not s:
+            continue
+        cfg = (s.config or {}) if hasattr(s, "config") and hasattr(s.config, "keys") else {}
+        min_cap = float(ts.min_capital) if ts.min_capital is not None else (float(s.min_capital) if s.min_capital is not None else (float(cfg.get("min_capital", 200)) if isinstance(cfg, dict) else 200))
+        name = (ts.display_name or "").strip() or s.name
+        desc = (ts.display_description or "").strip() or (s.description or "").strip() or (cfg.get("description", "") if isinstance(cfg, dict) else "")
         list_data.append({
             "id": s.id,
-            "name": s.name,
-            "description": (s.description or "").strip() or (cfg.get("description", "") if isinstance(cfg, dict) else ""),
+            "strategy_id": s.id,
+            "name": name,
+            "description": desc,
             "symbol": s.symbol,
             "timeframe": s.timeframe or "",
             "min_capital": min_cap,
-            "status": s.status,
+            "status": ts.status,
         })
     return ok(list_data)
 
@@ -52,7 +62,11 @@ def strategy_open(
     tenant: Tenant = Depends(get_tenant),
     db: Session = Depends(get_db),
 ):
-    """开启策略（需满足最小点卡余额，默认 1.0）"""
+    """开启策略（需满足最小点卡余额，默认 1.0）；仅允许开通本租户已启用的策略实例"""
+    repo = MemberRepository(db)
+    ts = repo.get_tenant_strategy(tenant.id, strategy_id)
+    if not ts or ts.status != 1:
+        return {"code": 1, "msg": "该策略未对本租户开放或已下架", "data": None}
     svc = MemberService(db)
     user = svc.get_user_by_email(email.strip(), tenant.id)
     if not user:

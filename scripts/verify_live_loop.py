@@ -96,7 +96,7 @@ def run(tenant_id: int, account_id: int) -> int:
             return 0
         return 0
     except Exception as e:
-        log.error("verify failed: %s", e)
+        log.error("verify failed", error=str(e))
         print("\n  验证失败: %s" % e)
         return 1
     finally:

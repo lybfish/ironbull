@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from libs.trading.settlement import TradeSettlementService
 
 logger = get_logger("auto-trader")
+_config = get_config()
 
 
 class TradeMode(Enum):
@@ -80,12 +81,12 @@ class TradeRecord:
 
 @dataclass
 class RiskLimits:
-    """风控限制"""
-    max_trade_amount: float = 100.0       # 单笔最大金额 (USDT)
-    max_daily_trades: int = 10            # 每日最大交易次数
-    max_open_positions: int = 3           # 最大持仓数量
-    max_daily_loss: float = 200.0         # 每日最大亏损
-    min_confidence: int = 70              # 最低置信度要求
+    """风控限制（默认值从 config 读取，创建实例时可覆盖）"""
+    max_trade_amount: float = _config.get_float("risk_max_trade_amount", 100.0)
+    max_daily_trades: int = _config.get_int("risk_max_daily_trades", 10)
+    max_open_positions: int = _config.get_int("risk_max_open_positions", 3)
+    max_daily_loss: float = _config.get_float("risk_max_daily_loss", 200.0)
+    min_confidence: int = _config.get_int("risk_min_confidence", 70)
 
 
 class AutoTrader:
@@ -271,8 +272,8 @@ class AutoTrader:
         amount = self.risk_limits.max_trade_amount
         quantity = amount / entry_price
         
-        # 保留合适的精度（这里简化处理）
-        if quantity < 0.001:
+        # 使用交易所精度截断（通过 LiveTrader 处理），此处仅做粗略过滤
+        if quantity <= 0:
             return 0
         
         return round(quantity, 6)

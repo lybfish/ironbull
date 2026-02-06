@@ -8,15 +8,19 @@ PATCH  /api/tenants/{id}/toggle  -> 启用/禁用
 POST   /api/tenants/{id}/recharge -> 充值点卡
 """
 
+import hashlib
+import random
+import string
 import secrets
 from decimal import Decimal
 from typing import Dict, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from libs.tenant.models import Tenant
+from libs.member.models import User
 from libs.quota.models import QuotaPlan
 from libs.pointcard.models import PointCardLog
 from libs.pointcard.service import (
@@ -25,17 +29,40 @@ from libs.pointcard.service import (
 
 from ..deps import get_db, get_current_admin
 
+
+def _generate_invite_code() -> str:
+    return "".join(random.choices(string.digits, k=8))
+
 router = APIRouter(prefix="/api/tenants", tags=["tenants"])
+
+
+def _parse_status(v):
+    """兼容前端传 'active'/'inactive' 或 1/0"""
+    if isinstance(v, str):
+        return 1 if v.lower() in ("active", "1", "true") else 0
+    return int(v)
 
 
 class TenantCreate(BaseModel):
     name: str
-    status: int = 1
+    status: Any = 1
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def coerce_status(cls, v):
+        return _parse_status(v)
 
 
 class TenantUpdate(BaseModel):
     name: Optional[str] = None
-    status: Optional[int] = None
+    status: Any = None
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def coerce_status(cls, v):
+        if v is None:
+            return None
+        return _parse_status(v)
 
 
 def _tenant_dict(t: Tenant, plan_name: str = None) -> dict:
@@ -59,7 +86,7 @@ def _tenant_dict(t: Tenant, plan_name: str = None) -> dict:
 @router.get("")
 def list_tenants(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=500),
     _admin: Dict[str, Any] = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
@@ -88,7 +115,7 @@ def create_tenant(
     _admin: Dict[str, Any] = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """创建租户（自动生成 app_key / app_secret）"""
+    """创建租户（自动生成 app_key / app_secret + 根账户）"""
     tenant = Tenant(
         name=body.name.strip(),
         app_key=secrets.token_hex(16),
@@ -97,6 +124,23 @@ def create_tenant(
     )
     db.add(tenant)
     db.flush()
+
+    # 自动创建根账户
+    invite_code = _generate_invite_code()
+    root_user = User(
+        tenant_id=tenant.id,
+        email=f"root@tenant{tenant.id}.local",
+        password_hash=hashlib.md5(secrets.token_hex(16).encode()).hexdigest(),
+        is_root=1,
+        invite_code=invite_code,
+        status=1,
+    )
+    db.add(root_user)
+    db.flush()
+    tenant.root_user_id = root_user.id
+    db.merge(tenant)
+    db.flush()
+
     return {"success": True, "data": _tenant_dict(tenant)}
 
 

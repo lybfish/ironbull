@@ -102,7 +102,7 @@ class TickerStream:
         if self._ccxt_ws:
             try:
                 await self._ccxt_ws.close()
-            except:
+            except Exception:
                 pass
         
         logger.info("ticker stream stopped")
@@ -113,8 +113,9 @@ class TickerStream:
             # 动态导入 ccxt
             import ccxt.pro as ccxtpro
             
-            # 创建交易所实例
-            exchange_class = getattr(ccxtpro, self.exchange)
+            # 交易所名 -> CCXT 类名（gate -> gateio）
+            ccxt_id = "gateio" if self.exchange == "gate" else self.exchange
+            exchange_class = getattr(ccxtpro, ccxt_id)
             self._ccxt_ws = exchange_class({
                 'enableRateLimit': True,
             })
@@ -175,7 +176,7 @@ class TickerStream:
             if self._ccxt_ws:
                 try:
                     await self._ccxt_ws.close()
-                except:
+                except Exception:
                     pass
     
     async def _run_mock_loop(self):

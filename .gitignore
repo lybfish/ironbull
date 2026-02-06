@@ -47,6 +47,12 @@ logs/
 .env.local
 .env.production
 *.local.yaml
+# 部署目标配置（服务器、路径等，勿提交）
+deploy/.deploy.env
+deploy/.deploy.*.env
+deploy/.deploy.child.env
+deploy/.deploy.child-*.env
+deploy/.deploy.child-batch.env
 
 # Database
 *.db

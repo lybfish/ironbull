@@ -60,6 +60,7 @@ app = Flask(__name__)
 # 配置
 config = get_config()
 DATA_PROVIDER_URL = config.get_str("data_provider_url", "http://127.0.0.1:8010")
+HTTP_TIMEOUT = config.get_float("http_timeout", 30.0)
 
 # 日志
 setup_logging(
@@ -82,20 +83,21 @@ monitor_state = {
     "errors": 0,
 }
 
-# 监控配置
-monitor_config = {
-    "interval_seconds": 300,  # 检测间隔（默认5分钟）
-    "strategies": [
-        {
-            "code": "market_regime",
-            "config": {"atr_mult_sl": 1.5, "atr_mult_tp": 3.0},
-            "symbols": ["BTCUSDT", "ETHUSDT"],
-            "timeframe": "1h",
-        }
-    ],
-    "min_confidence": 50,     # 最低置信度
-    "notify_on_signal": True, # 有信号时通知
-    "cooldown_minutes": 60,   # 同一交易对冷却时间（避免重复通知）
+# 全局监控参数（仅保留与策略无关的配置）
+MONITOR_INTERVAL = config.get_int("monitor_interval_seconds", 300)
+NOTIFY_ON_SIGNAL = config.get_bool("notify_on_signal", True)
+
+# 向后兼容：当数据库中没有 status=1 的策略时，使用此 fallback（仅用于冷启动）
+_FALLBACK_STRATEGY = {
+    "code": config.get_str("default_strategy_code", "market_regime"),
+    "config": {
+        "atr_mult_sl": config.get_float("default_atr_mult_sl", 1.5),
+        "atr_mult_tp": config.get_float("default_atr_mult_tp", 3.0),
+    },
+    "symbols": config.get_list("monitor_symbols", ["BTCUSDT", "ETHUSDT"]),
+    "timeframe": config.get_str("monitor_timeframe", "1h"),
+    "min_confidence": config.get_int("min_confidence", 50),
+    "cooldown_minutes": config.get_int("signal_cooldown_minutes", 60),
 }
 
 # 信号冷却记录
@@ -111,7 +113,7 @@ def fetch_candles(symbol: str, timeframe: str, limit: int = 200) -> List[Dict]:
     try:
         url = f"{DATA_PROVIDER_URL}/api/candles"
         params = {"symbol": symbol, "timeframe": timeframe, "limit": limit, "source": "live"}
-        with httpx.Client(timeout=30.0) as client:
+        with httpx.Client(timeout=HTTP_TIMEOUT) as client:
             resp = client.get(url, params=params)
             resp.raise_for_status()
             return resp.json().get("candles", [])
@@ -159,13 +161,12 @@ def check_signal(strategy_code: str, strategy_config: Dict,
         return None
 
 
-def is_in_cooldown(symbol: str, strategy: str) -> bool:
-    """检查是否在冷却期"""
+def is_in_cooldown(symbol: str, strategy: str, cooldown_minutes: int = 60) -> bool:
+    """检查是否在冷却期（cooldown_minutes 来自策略配置）"""
     key = f"{strategy}:{symbol}"
     if key not in signal_cooldown:
         return False
-    
-    cooldown_minutes = monitor_config.get("cooldown_minutes", 60)
+
     elapsed = (datetime.now() - signal_cooldown[key]).total_seconds() / 60
     return elapsed < cooldown_minutes
 
@@ -176,43 +177,93 @@ def set_cooldown(symbol: str, strategy: str):
     signal_cooldown[key] = datetime.now()
 
 
+def _load_strategies_from_db():
+    """
+    从 dim_strategy 加载 status=1 的策略列表，返回统一格式的 dict list。
+    若数据库不可用或无数据，回退到全局配置中的 fallback 策略。
+    """
+    session = None
+    try:
+        session = get_session()
+        from libs.member.repository import MemberRepository
+        repo = MemberRepository(session)
+        rows = repo.list_strategies(status=1)
+        if rows:
+            result = []
+            for s in rows:
+                result.append({
+                    "code": s.code,
+                    "config": s.get_config(),
+                    "symbols": s.get_symbols(),
+                    "timeframe": s.timeframe or "1h",
+                    "min_confidence": int(s.min_confidence or 50),
+                    "cooldown_minutes": int(s.cooldown_minutes or 60),
+                    "exchange": s.exchange or None,
+                    "market_type": s.market_type or "future",
+                    "amount_usdt": float(s.amount_usdt or 0),
+                    "leverage": int(s.leverage or 0),
+                })
+            log.info("从数据库加载策略", count=len(result))
+            return result
+    except Exception as e:
+        log.warning("从数据库加载策略失败, 使用 fallback", error=str(e))
+    finally:
+        if session:
+            try:
+                session.close()
+            except Exception:
+                pass
+
+    # fallback：使用全局配置
+    return [_FALLBACK_STRATEGY]
+
+
 def monitor_loop():
-    """监控主循环"""
+    """监控主循环 - 每轮从数据库加载最新策略配置"""
     global monitor_state
-    
+
     log.info("信号监控启动")
-    
+
     while not stop_event.is_set():
         try:
             monitor_state["last_check"] = datetime.now().isoformat()
             monitor_state["total_checks"] += 1
-            
-            # 遍历所有策略配置
-            for strat_cfg in monitor_config.get("strategies", []):
+
+            # 每轮动态加载策略（支持运行时增删改策略，无需重启）
+            strategies = _load_strategies_from_db()
+
+            for strat_cfg in strategies:
                 code = strat_cfg.get("code")
                 cfg = strat_cfg.get("config", {})
                 symbols = strat_cfg.get("symbols", [])
                 timeframe = strat_cfg.get("timeframe", "1h")
-                
+                min_conf = strat_cfg.get("min_confidence", 50)
+                cooldown = strat_cfg.get("cooldown_minutes", 60)
+
                 for symbol in symbols:
-                    # 检查冷却
-                    if is_in_cooldown(symbol, code):
+                    # 检查冷却（使用策略级别的冷却时间）
+                    if is_in_cooldown(symbol, code, cooldown):
                         log.debug(f"冷却中跳过: {code}/{symbol}")
                         continue
-                    
+
                     # 检测信号
                     signal = check_signal(code, cfg, symbol, timeframe)
-                    
+
                     if signal:
                         confidence = signal.get("confidence", 0)
-                        min_conf = monitor_config.get("min_confidence", 50)
-                        
+
                         if confidence >= min_conf:
                             log.info(f"检测到信号: {signal['side']} {symbol} @ {signal['entry_price']}")
-                            
+
+                            # 将策略层参数注入信号（amount_usdt、leverage），供执行层使用
+                            if strat_cfg.get("amount_usdt"):
+                                signal["amount_usdt"] = strat_cfg["amount_usdt"]
+                            if strat_cfg.get("leverage"):
+                                signal["leverage"] = strat_cfg["leverage"]
+
                             monitor_state["last_signal"] = signal
                             monitor_state["total_signals"] += 1
-                            
+
                             # 按策略多账户分发（若启用）
                             if DISPATCH_BY_STRATEGY and signal.get("strategy"):
                                 try:
@@ -223,10 +274,10 @@ def monitor_loop():
                                         dispatch_result.get("success_count", 0),
                                     )
                                 except Exception as e:
-                                    log.error("strategy dispatch error: %s", e)
-                            
+                                    log.error("strategy dispatch error", error=str(e))
+
                             # 推送通知
-                            if monitor_config.get("notify_on_signal", True):
+                            if NOTIFY_ON_SIGNAL:
                                 result = notifier.send_signal(signal)
                                 if result.success:
                                     log.info(f"信号已推送: {symbol}")
@@ -235,15 +286,14 @@ def monitor_loop():
                                     log.error(f"推送失败: {result.error}")
                         else:
                             log.debug(f"信号置信度不足: {confidence} < {min_conf}")
-            
+
         except Exception as e:
             log.error(f"监控循环异常: {e}")
             monitor_state["errors"] += 1
-        
+
         # 等待下次检测
-        interval = monitor_config.get("interval_seconds", 300)
-        stop_event.wait(interval)
-    
+        stop_event.wait(MONITOR_INTERVAL)
+
     log.info("信号监控已停止")
 
 
@@ -257,14 +307,14 @@ def health():
 @app.route("/api/status", methods=["GET"])
 def get_status():
     """获取监控状态"""
+    strategies = _load_strategies_from_db()
     return jsonify({
         "success": True,
         "state": monitor_state,
         "config": {
-            "interval_seconds": monitor_config.get("interval_seconds"),
-            "strategies_count": len(monitor_config.get("strategies", [])),
-            "min_confidence": monitor_config.get("min_confidence"),
-            "notify_enabled": monitor_config.get("notify_on_signal"),
+            "interval_seconds": MONITOR_INTERVAL,
+            "strategies_count": len(strategies),
+            "notify_enabled": NOTIFY_ON_SIGNAL,
             "dispatch_by_strategy": DISPATCH_BY_STRATEGY,
             "strategy_dispatch_amount": STRATEGY_DISPATCH_AMOUNT,
         },
@@ -273,36 +323,45 @@ def get_status():
 
 @app.route("/api/config", methods=["GET"])
 def get_config_api():
-    """获取完整配置"""
+    """获取完整配置（策略配置现在从数据库读取）"""
+    strategies = _load_strategies_from_db()
     return jsonify({
         "success": True,
-        "config": monitor_config,
+        "config": {
+            "interval_seconds": MONITOR_INTERVAL,
+            "notify_on_signal": NOTIFY_ON_SIGNAL,
+            "dispatch_by_strategy": DISPATCH_BY_STRATEGY,
+            "strategy_dispatch_amount": STRATEGY_DISPATCH_AMOUNT,
+            "strategies": strategies,
+        },
     })
 
 
 @app.route("/api/config", methods=["POST"])
 def update_config():
-    """更新配置"""
-    global monitor_config
-    
+    """
+    更新配置 — 策略级参数请直接修改 dim_strategy 表（monitor_loop 每轮自动加载）。
+    此端点仅支持修改全局运行参数。
+    """
+    global MONITOR_INTERVAL, NOTIFY_ON_SIGNAL
+
     data = request.get_json() or {}
-    
+
     if "interval_seconds" in data:
-        monitor_config["interval_seconds"] = int(data["interval_seconds"])
-    if "strategies" in data:
-        monitor_config["strategies"] = data["strategies"]
-    if "min_confidence" in data:
-        monitor_config["min_confidence"] = int(data["min_confidence"])
+        MONITOR_INTERVAL = int(data["interval_seconds"])
     if "notify_on_signal" in data:
-        monitor_config["notify_on_signal"] = bool(data["notify_on_signal"])
-    if "cooldown_minutes" in data:
-        monitor_config["cooldown_minutes"] = int(data["cooldown_minutes"])
-    # 按策略分发由环境/配置文件控制，不通过 API 动态改，仅展示在 status
-    log.info("配置已更新")
-    
+        NOTIFY_ON_SIGNAL = bool(data["notify_on_signal"])
+    # 策略级参数（min_confidence / cooldown_minutes / symbols 等）已下沉到 dim_strategy 表，
+    # 直接修改数据库即可，monitor_loop 每轮自动加载最新配置。
+    log.info("全局监控配置已更新", interval=MONITOR_INTERVAL, notify=NOTIFY_ON_SIGNAL)
+
     return jsonify({
         "success": True,
-        "config": monitor_config,
+        "config": {
+            "interval_seconds": MONITOR_INTERVAL,
+            "notify_on_signal": NOTIFY_ON_SIGNAL,
+            "note": "策略级参数请直接修改 dim_strategy 表",
+        },
     })
 
 
@@ -322,12 +381,13 @@ def start_monitor():
     
     log.info("监控已启动")
     
+    strategies = _load_strategies_from_db()
     return jsonify({
         "success": True,
         "message": "监控已启动",
         "config": {
-            "interval_seconds": monitor_config.get("interval_seconds"),
-            "strategies": len(monitor_config.get("strategies", [])),
+            "interval_seconds": MONITOR_INTERVAL,
+            "strategies_count": len(strategies),
         },
     })
 
@@ -366,10 +426,32 @@ def test_notify():
 def check_now():
     """立即检测一次"""
     data = request.get_json() or {}
-    strategy_code = data.get("strategy", "market_regime")
-    symbol = data.get("symbol", "ETHUSDT")
-    timeframe = data.get("timeframe", "1h")
-    strategy_config = data.get("config", {"atr_mult_sl": 1.5, "atr_mult_tp": 3.0})
+    strategy_code = data.get("strategy", _FALLBACK_STRATEGY["code"])
+    symbol = data.get("symbol")
+    if not symbol:
+        return jsonify({"success": False, "error": "symbol is required"}), 400
+    timeframe = data.get("timeframe", _FALLBACK_STRATEGY.get("timeframe", "1h"))
+
+    # 优先从数据库读取策略参数
+    default_cfg = _FALLBACK_STRATEGY.get("config", {})
+    session = None
+    try:
+        session = get_session()
+        from libs.member.repository import MemberRepository
+        repo = MemberRepository(session)
+        strat = repo.get_strategy_by_code(strategy_code)
+        if strat:
+            default_cfg = strat.get_config()
+            timeframe = data.get("timeframe") or strat.timeframe or timeframe
+    except Exception as e:
+        log.debug("load strategy config from db failed, using fallback", error=str(e))
+    finally:
+        if session:
+            try:
+                session.close()
+            except Exception:
+                pass
+    strategy_config = data.get("config", default_cfg)
     
     signal = check_signal(strategy_code, strategy_config, symbol, timeframe)
     
@@ -392,7 +474,41 @@ def check_now():
 
 @app.route("/api/strategies", methods=["GET"])
 def get_strategies():
-    """获取可用策略列表"""
+    """获取可用策略列表（优先从数据库读取，回退到内置策略）"""
+    session = None
+    try:
+        session = get_session()
+        from libs.member.repository import MemberRepository
+        repo = MemberRepository(session)
+        rows = repo.list_strategies(status=1)
+        if rows:
+            return jsonify({
+                "success": True,
+                "strategies": [
+                    {
+                        "code": s.code,
+                        "name": s.name,
+                        "symbols": s.get_symbols(),
+                        "timeframe": s.timeframe,
+                        "exchange": s.exchange,
+                        "market_type": s.market_type,
+                        "amount_usdt": float(s.amount_usdt or 0),
+                        "leverage": int(s.leverage or 0),
+                        "min_confidence": int(s.min_confidence or 50),
+                    }
+                    for s in rows
+                ],
+            })
+    except Exception as e:
+        log.warning("load strategies from db failed", error=str(e))
+    finally:
+        if session:
+            try:
+                session.close()
+            except Exception:
+                pass
+
+    # 回退到内置策略注册表
     strategies = list_strategies()
     return jsonify({
         "success": True,
@@ -433,11 +549,11 @@ async def _execute_signal_for_target(
     entry_price = float(signal.get("entry_price") or 0)
     stop_loss = float(signal.get("stop_loss") or 0)
     take_profit = float(signal.get("take_profit") or 0)
+    leverage = int(signal.get("leverage") or 0)  # 杠杆倍数（策略配置，随信号传入）
     if not symbol or not entry_price:
         return {"account_id": target.account_id, "success": False, "error": "missing symbol or entry_price"}
-    quantity = round(amount_usdt / entry_price, 6)
-    if quantity <= 0:
-        return {"account_id": target.account_id, "success": False, "error": "quantity <= 0"}
+    if amount_usdt <= 0:
+        return {"account_id": target.account_id, "success": False, "error": "amount_usdt <= 0"}
     order_side = OrderSide.BUY if side_str.upper() == "BUY" else OrderSide.SELL
     settlement_svc = TradeSettlementService(
         session=session,
@@ -457,11 +573,14 @@ async def _execute_signal_for_target(
         account_id=target.account_id,
     )
     try:
+        # 传 amount_usdt 让 LiveTrader 内部统一换算数量（自动处理 contractSize、最小限制等）
         order_result = await trader.create_order(
             symbol=symbol,
             side=order_side,
             order_type=OrderType.MARKET,
-            quantity=quantity,
+            amount_usdt=amount_usdt,
+            price=entry_price,
+            leverage=leverage or None,
             signal_id=signal.get("signal_id"),
         )
         ok = order_result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
@@ -479,7 +598,7 @@ async def _execute_signal_for_target(
                 )
                 sl_tp_ok = True
             except Exception as e:
-                log.warning("set_sl_tp failed for account %s: %s", target.account_id, e)
+                log.warning("set_sl_tp failed", account_id=target.account_id, error=str(e))
         await trader.close()
         return {
             "account_id": target.account_id,
@@ -495,13 +614,34 @@ async def _execute_signal_for_target(
             await trader.close()
         except Exception:
             pass
-        log.error("execute_signal_for_target account_id=%s error=%s", target.account_id, e)
+        log.error("execute_signal_for_target failed", account_id=target.account_id, error=str(e))
         return {"account_id": target.account_id, "user_id": target.user_id, "success": False, "error": str(e)}
+
+
+def _resolve_amount_leverage_for_tenant(repo, strategy, tenant_id: int):
+    """
+    按租户解析下单金额与杠杆：优先用 dim_tenant_strategy 实例覆盖，无则用主策略。
+    返回 (amount_usdt, leverage)。
+    """
+    if not strategy:
+        return STRATEGY_DISPATCH_AMOUNT, 0
+    base_amount = float(strategy.amount_usdt or 0) if strategy else 0
+    base_leverage = int(strategy.leverage or 0) if strategy else 0
+    ts = repo.get_tenant_strategy(tenant_id, strategy.id)
+    if ts:
+        amount = float(ts.amount_usdt) if ts.amount_usdt is not None else base_amount
+        leverage = int(ts.leverage) if ts.leverage is not None else base_leverage
+    else:
+        amount = base_amount
+        leverage = base_leverage
+    amount = amount if amount > 0 else STRATEGY_DISPATCH_AMOUNT
+    return amount, leverage
 
 
 def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
     """
     按策略分发：根据 signal["strategy"] 查 dim_strategy_binding，对每个绑定账户执行。
+    金额和杠杆按租户解析：优先 dim_tenant_strategy 实例，无则用主策略 dim_strategy。
     本机账户：进程内 LiveTrader；远程节点账户：POST 到节点，再根据响应在中心写库与结算。
     """
     strategy_code = (signal or {}).get("strategy") or (signal or {}).get("strategy_code")
@@ -518,7 +658,18 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
                 "targets": 0,
                 "message": "该策略暂无绑定账户，将走单账户逻辑（若已配置）",
             }
-        amount = STRATEGY_DISPATCH_AMOUNT
+
+        from libs.member.repository import MemberRepository
+        repo = MemberRepository(session)
+        strategy = repo.get_strategy_by_code(strategy_code)
+        # 主策略默认值仅用于 signal 兜底（无租户实例时）
+        strategy_amount = float(strategy.amount_usdt or 0) if strategy else 0
+        strategy_leverage = int(strategy.leverage or 0) if strategy else 0
+        if strategy_amount > 0:
+            signal.setdefault("amount_usdt", strategy_amount)
+        if strategy_leverage > 0:
+            signal.setdefault("leverage", strategy_leverage)
+
         sandbox = config.get_bool("exchange_sandbox", True)
         results = []
 
@@ -530,8 +681,13 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
 
         local_targets = by_node.get(0, [])
         for target in local_targets:
+            amount, leverage = _resolve_amount_leverage_for_tenant(repo, strategy, target.tenant_id)
+            target_amount = round(amount * (target.ratio / 100), 2) if target.ratio and target.ratio != 100 else amount
+            signal_for_target = dict(signal)
+            if leverage > 0:
+                signal_for_target["leverage"] = leverage
             r = run_async(
-                _execute_signal_for_target(session, target, signal, amount, sandbox)
+                _execute_signal_for_target(session, target, signal_for_target, target_amount, sandbox)
             )
             results.append(r)
 
@@ -549,23 +705,31 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
                 for t in remote_targets:
                     results.append({"account_id": t.account_id, "user_id": t.user_id, "success": False, "error": "节点 base_url 为空"})
                 continue
+            # 每个 target 按租户解析 amount/leverage，再按 ratio 缩放金额
+            task_list = []
+            for t in remote_targets:
+                amount, leverage = _resolve_amount_leverage_for_tenant(repo, strategy, t.tenant_id)
+                task_amount = round(amount * (t.ratio / 100), 2) if t.ratio and t.ratio != 100 else amount
+                task_list.append({
+                    "account_id": t.account_id,
+                    "tenant_id": t.tenant_id,
+                    "user_id": t.user_id,
+                    "exchange": t.exchange,
+                    "api_key": t.api_key,
+                    "api_secret": t.api_secret,
+                    "passphrase": t.passphrase,
+                    "market_type": t.market_type,
+                    "amount_usdt": task_amount,
+                    "leverage": leverage if leverage > 0 else None,
+                    "binding_id": t.binding_id,
+                    "strategy_code": t.strategy_code,
+                    "ratio": t.ratio,
+                })
             payload = {
                 "signal": signal,
-                "amount_usdt": amount,
+                "amount_usdt": float(strategy.amount_usdt or 0) if strategy else STRATEGY_DISPATCH_AMOUNT,
                 "sandbox": sandbox,
-                "tasks": [
-                    {
-                        "account_id": t.account_id,
-                        "tenant_id": t.tenant_id,
-                        "user_id": t.user_id,
-                        "exchange": t.exchange,
-                        "api_key": t.api_key,
-                        "api_secret": t.api_secret,
-                        "passphrase": t.passphrase,
-                        "market_type": t.market_type,
-                    }
-                    for t in remote_targets
-                ],
+                "tasks": task_list,
             }
             if USE_NODE_EXECUTION_QUEUE:
                 try:
@@ -578,9 +742,9 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
                             "node_id": node_id,
                             "base_url": base_url,
                             "signal": signal,
-                            "amount_usdt": amount,
+                            "amount_usdt": payload.get("amount_usdt"),
                             "sandbox": sandbox,
-                            "tasks": [asdict(t) for t in remote_targets],
+                            "tasks": task_list,
                         },
                         signal_id=signal.get("signal_id"),
                     )
@@ -589,18 +753,18 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
                         results.append({"account_id": t.account_id, "user_id": t.user_id, "queued": True, "node_id": node_id})
                     continue
                 except Exception as eq:
-                    log.warning("node execute queue push failed node_id=%s, fallback to direct POST: %s", node_id, eq)
+                    log.warning("node execute queue push failed, fallback to direct POST", node_id=node_id, error=str(eq))
             try:
                 node_headers = {}
                 secret = config.get_str("node_auth_secret", "").strip()
                 if secret:
                     node_headers["X-Center-Token"] = secret
-                with httpx.Client(timeout=30.0) as client:
+                with httpx.Client(timeout=HTTP_TIMEOUT) as client:
                     resp = client.post(f"{base_url}/api/execute", json=payload, headers=node_headers or None)
                     resp.raise_for_status()
                     data = resp.json()
             except Exception as e:
-                log.warning("remote node POST node_id=%s error=%s", node_id, e)
+                log.warning("remote node POST failed", node_id=node_id, error=str(e))
                 for t in remote_targets:
                     results.append({"account_id": t.account_id, "user_id": t.user_id, "success": False, "error": str(e)})
                 continue
@@ -620,7 +784,7 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
         }
     except Exception as e:
         session.rollback()
-        log.error("execute_signal_by_strategy error: %s", e)
+        log.error("execute_signal_by_strategy error", error=str(e))
         return {"success": False, "action": "error", "message": str(e)}
     finally:
         session.close()
@@ -841,7 +1005,7 @@ def trading_execute():
                     return jsonify({"success": result.get("success", False), **result})
             return jsonify(result)
         except Exception as e:
-            log.error("execute_signal_by_strategy error: %s", e)
+            log.error("execute_signal_by_strategy error", error=str(e))
             return jsonify({"success": False, "action": "error", "message": str(e)})
     
     # 单账户逻辑
@@ -852,7 +1016,7 @@ def trading_execute():
     try:
         result = run_async(trader.process_signal(signal))
     except Exception as e:
-        log.error("执行交易失败: %s", e)
+        log.error("执行交易失败", error=str(e))
         result = {"success": False, "message": str(e)}
     
     return jsonify({

@@ -19,6 +19,7 @@ from pydantic import BaseModel
 import httpx
 
 from libs.core import get_config, get_logger, setup_logging
+from libs.exchange.utils import to_canonical_symbol, normalize_symbol
 from libs.trading.live_trader import LiveTrader
 from libs.trading.base import OrderSide, OrderType, OrderStatus
 
@@ -38,6 +39,7 @@ CENTER_URL = config.get_str("center_url", "").strip().rstrip("/")
 NODE_CODE = config.get_str("node_code", "").strip()
 # 心跳间隔（秒），默认 60
 HEARTBEAT_INTERVAL = config.get_int("heartbeat_interval", 60)
+HEARTBEAT_TIMEOUT = config.get_float("heartbeat_timeout", 10.0)
 
 _heartbeat_task: Optional[asyncio.Task] = None
 
@@ -52,7 +54,7 @@ async def _heartbeat_loop():
     log.info("heartbeat started", url=url, interval=HEARTBEAT_INTERVAL)
     while True:
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=HEARTBEAT_TIMEOUT) as client:
                 resp = await client.post(url, headers=headers or None)
                 if resp.status_code == 200:
                     log.debug("heartbeat ok")
@@ -119,14 +121,18 @@ class TaskItem(BaseModel):
     api_key: str
     api_secret: str
     passphrase: Optional[str] = None
-    market_type: str = "future"
+    market_type: str = "future"  # future=合约（默认，会做双向持仓检测）, spot=现货
+    amount_usdt: Optional[float] = None  # 该账户实际下单金额（按 ratio 缩放后），优先于 req.amount_usdt
+    leverage: Optional[int] = None  # 该租户策略实例杠杆覆盖，空则用 signal.leverage
 
 
 class ExecuteRequest(BaseModel):
     signal: Dict[str, Any]
-    amount_usdt: float = 100.0
+    amount_usdt: float = 100.0  # 回退默认值，实际应由策略配置传入
     sandbox: bool = True
     tasks: List[TaskItem]
+
+    # 注意：amount_usdt 的优先级为：task.amount_usdt > req.amount_usdt > signal.amount_usdt > 此默认值
 
 
 class SyncTasksRequest(BaseModel):
@@ -208,8 +214,11 @@ async def _sync_positions_one(task: TaskItem, sandbox: bool) -> Dict[str, Any]:
                 continue
             side = (p.get("side") or "long").lower()
             position_side = "LONG" if side == "long" else "SHORT"
+            # 统一为规范 symbol（BTC/USDT），便于存储与跨所一致
+            raw_sym = p.get("symbol") or ""
+            sym = to_canonical_symbol(raw_sym, "future")
             out.append({
-                "symbol": p.get("symbol") or "",
+                "symbol": sym or raw_sym,
                 "position_side": position_side,
                 "quantity": abs(qty),
                 "entry_price": float(p.get("entryPrice") or p.get("averagePrice") or 0),
@@ -248,10 +257,12 @@ async def _run_one(
     take_profit: float,
     amount_usdt: float,
     sandbox: bool,
+    leverage: int = 0,
 ) -> Dict[str, Any]:
-    quantity = round(amount_usdt / entry_price, 6) if entry_price else 0
-    if quantity <= 0:
-        return {"account_id": task.account_id, "success": False, "error": "quantity<=0"}
+    # 统一为规范 symbol（BTC/USDT），LiveTrader 内部会转为 CCXT 合约格式
+    symbol = to_canonical_symbol(normalize_symbol(symbol or "", "binance"), "future")
+    if amount_usdt <= 0 or entry_price <= 0:
+        return {"account_id": task.account_id, "success": False, "error": "invalid amount_usdt or entry_price"}
     order_side = OrderSide.BUY if (side or "BUY").upper() == "BUY" else OrderSide.SELL
     trader = LiveTrader(
         exchange=task.exchange or "binance",
@@ -263,11 +274,14 @@ async def _run_one(
         settlement_service=None,
     )
     try:
+        # 传 amount_usdt 让 LiveTrader 内部统一换算数量（自动处理 contractSize、最小限制等）
         result = await trader.create_order(
             symbol=symbol,
             side=order_side,
             order_type=OrderType.MARKET,
-            quantity=quantity,
+            amount_usdt=amount_usdt,
+            price=entry_price,
+            leverage=leverage or None,
             signal_id=None,
         )
         ok = result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
@@ -316,17 +330,24 @@ async def _run_one(
 def api_execute(req: ExecuteRequest, _: None = Depends(verify_center_token)):
     """执行信号：对 tasks 中每个账户下单，返回 results（同步）"""
     signal = req.signal or {}
-    symbol = signal.get("symbol") or "BTC/USDT"
+    symbol = signal.get("symbol")
+    if not symbol:
+        raise HTTPException(status_code=400, detail="signal.symbol required")
     side = signal.get("side") or "BUY"
     entry_price = float(signal.get("entry_price") or 0)
     stop_loss = float(signal.get("stop_loss") or 0)
     take_profit = float(signal.get("take_profit") or 0)
+    leverage = int(signal.get("leverage") or 0)  # 杠杆倍数（策略配置，随信号传入）
     if not entry_price:
         raise HTTPException(status_code=400, detail="signal.entry_price required")
     if not req.tasks:
         return {"success": True, "results": []}
     results = []
     for task in req.tasks:
+        # 优先用 task 级别的 amount_usdt（按 binding ratio 缩放后），回退到 req 级别
+        task_amount = task.amount_usdt if task.amount_usdt and task.amount_usdt > 0 else req.amount_usdt
+        # 优先用 task 级别杠杆（租户策略实例覆盖），无则用 signal
+        task_leverage = (task.leverage if task.leverage and task.leverage > 0 else None) or leverage
         r = asyncio.run(
             _run_one(
                 task=task,
@@ -335,8 +356,9 @@ def api_execute(req: ExecuteRequest, _: None = Depends(verify_center_token)):
                 entry_price=entry_price,
                 stop_loss=stop_loss,
                 take_profit=take_profit,
-                amount_usdt=req.amount_usdt,
+                amount_usdt=task_amount,
                 sandbox=req.sandbox,
+                leverage=task_leverage,
             )
         )
         results.append(r)

@@ -33,13 +33,14 @@ def _parse_date(s: Optional[str]) -> Optional[date]:
 @router.get("/performance")
 def get_performance(
     tenant_id: int = Depends(get_tenant_id),
-    account_id: int = Query(..., description="账户ID（必填）"),
+    account_id: Optional[int] = Query(None, description="账户ID，不传时默认 1"),
     start_date: Optional[str] = Query(None, description="YYYY-MM-DD，净值曲线起始"),
     end_date: Optional[str] = Query(None, description="YYYY-MM-DD，净值曲线结束"),
     db: Session = Depends(get_db),
 ):
-    """绩效汇总与净值曲线。不传 start_date/end_date 时仅返回汇总；传则同时返回 equity_curve。"""
-    svc = AnalyticsService(db, tenant_id=tenant_id, account_id=account_id)
+    """绩效汇总与净值曲线。不传 account_id 时默认 1；不传 start_date/end_date 时仅返回汇总。"""
+    aid = account_id if account_id is not None else 1
+    svc = AnalyticsService(db, tenant_id=tenant_id, account_id=aid)
     summary = svc.get_performance_summary()
     out = {"summary": dto_to_dict(summary)}
     sd = _parse_date(start_date)
@@ -53,12 +54,13 @@ def get_performance(
 @router.get("/risk")
 def get_risk(
     tenant_id: int = Depends(get_tenant_id),
-    account_id: int = Query(..., description="账户ID（必填）"),
+    account_id: Optional[int] = Query(None, description="账户ID，不传时默认 1"),
     strategy_code: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
     """最新风险指标（夏普、回撤、VaR 等）"""
-    svc = AnalyticsService(db, tenant_id=tenant_id, account_id=account_id)
+    aid = account_id if account_id is not None else 1
+    svc = AnalyticsService(db, tenant_id=tenant_id, account_id=aid)
     risk = svc.get_latest_risk_metrics(strategy_code=strategy_code)
     return {"success": True, "data": dto_to_dict(risk) if risk else None}
 
@@ -66,7 +68,7 @@ def get_risk(
 @router.get("/statistics")
 def list_statistics(
     tenant_id: int = Depends(get_tenant_id),
-    account_id: int = Query(..., description="账户ID（必填）"),
+    account_id: Optional[int] = Query(None, description="账户ID，不传时默认 1"),
     period_type: Optional[str] = Query(None),
     strategy_code: Optional[str] = Query(None),
     symbol: Optional[str] = Query(None),
@@ -74,9 +76,10 @@ def list_statistics(
     db: Session = Depends(get_db),
 ):
     """交易统计列表（胜率、盈亏比、获利因子等）"""
+    aid = account_id if account_id is not None else 1
     repo = TradeStatisticsRepository(db, tenant_id)
     stats = repo.list_statistics(
-        account_id=account_id,
+        account_id=aid,
         period_type=period_type,
         strategy_code=strategy_code,
         symbol=symbol,

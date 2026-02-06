@@ -181,22 +181,38 @@ def user_info(
     })
 
 
-@router.post("/user/apikey")
+# 支持的交易所（绑定 API 时 exchange 只能在此列表中）
+ALLOWED_EXCHANGES = ["binance", "okx", "gate"]
+
+
+@router.post(
+    "/user/apikey",
+    summary="绑定用户 API Key",
+    description="支持交易所：binance、okx、gate。选择 OKX 时需多传 passphrase（API Passphrase，创建 API 时设置的密码）。",
+)
 def user_apikey(
     email: str = Form(...),
-    exchange: str = Form(...),
+    exchange: str = Form(..., description="交易所：binance / okx / gate"),
     api_key: str = Form(...),
     api_secret: str = Form(...),
+    passphrase: Optional[str] = Form(None, description="API Passphrase，OKX 必填、Gate 可选、Binance 不填"),
     account_type: Optional[str] = Form("futures"),
     tenant: Tenant = Depends(get_tenant),
     db: Session = Depends(get_db),
 ):
-    """绑定用户 API Key"""
+    """绑定用户 API Key。OKX 需传 passphrase；支持 binance、okx、gate。"""
+    ex = exchange.strip().lower()
+    if ex not in ALLOWED_EXCHANGES:
+        return {"code": 1, "msg": f"不支持的交易所，仅支持: {', '.join(ALLOWED_EXCHANGES)}", "data": None}
+    if ex == "okx" and not (passphrase and passphrase.strip()):
+        return {"code": 1, "msg": "OKX 必须填写 API Passphrase（创建 API 时设置的密码）", "data": None}
     svc = MemberService(db)
     user = svc.get_user_by_email(email.strip(), tenant.id)
     if not user:
         return {"code": 1, "msg": "用户不存在", "data": None}
-    acc, err = svc.bind_api_key(user.id, tenant.id, exchange, api_key, api_secret, account_type=account_type)
+    acc, err = svc.bind_api_key(
+        user.id, tenant.id, ex, api_key, api_secret, account_type=account_type, passphrase=(passphrase or "").strip() or None
+    )
     if err:
         return {"code": 1, "msg": err, "data": None}
     return ok({

@@ -58,5 +58,10 @@ def get_tenant_id(
     raise HTTPException(status_code=400, detail="请选择租户（tenant_id）")
 
 
+def get_tenant_id_optional(tenant_id: Optional[int] = Query(None, description="要查看的租户ID（可选）")) -> Optional[int]:
+    """租户ID可选，不传时返回 None（用于策略目录等全局列表）"""
+    return int(tenant_id) if tenant_id is not None else None
+
+
 def get_account_id_optional(account_id: Optional[int] = Query(None, description="账户ID（可选）")) -> Optional[int]:
     return account_id

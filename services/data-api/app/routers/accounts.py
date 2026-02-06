@@ -70,7 +70,7 @@ def list_transactions(
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
-    """账务流水列表（按租户、账户、类型、时间范围）"""
+    """账务流水列表（按租户、账户、类型、时间范围）。返回 data[].remark 由业务写入，无固定枚举，详见 docs/api/LEDGER_REMARKS.md。"""
     filt = TransactionFilter(
         tenant_id=tenant_id,
         account_id=account_id,

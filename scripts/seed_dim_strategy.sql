@@ -1,5 +1,6 @@
 -- 插入 dim_strategy 策略目录（与 libs/strategies 的 code 对应）
 -- 用于 Merchant API GET /merchant/strategies
+-- 插入后建议执行: PYTHONPATH=. python scripts/update_strategy_configs.py  以写入各策略最优 config
 
 INSERT INTO `dim_strategy` (`code`, `name`, `description`, `symbol`, `timeframe`, `min_capital`, `risk_level`, `status`, `config`) VALUES
 ('market_regime', '市场状态-BTC', '多周期市场状态识别，顺势择时', 'BTC/USDT', '1h', 200, 1, 1, NULL),

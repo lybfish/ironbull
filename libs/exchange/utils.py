@@ -1,8 +1,12 @@
 """
 Exchange Utilities - 交易所工具函数
+
+Symbol 约定：
+- 规范形式（canonical）：BASE/QUOTE，如 BTC/USDT，用于存储、展示、跨交易所一致。
+- 各所格式：Binance 现货 BTCUSDT，OKX BTC-USDT，Gate BTC_USDT；合约在 CCXT 中多为 BASE/QUOTE:USDT。
 """
 
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 
 # 时间周期映射（周期 -> 毫秒）
 TIMEFRAME_MS: Dict[str, int] = {
@@ -61,28 +65,56 @@ def normalize_symbol(symbol: str, exchange: str = "binance") -> str:
     return symbol
 
 
+def to_canonical_symbol(symbol: str, market_type: str = "future") -> str:
+    """
+    将交易所返回的 symbol 转为规范形式 BASE/QUOTE，便于存储和跨所一致。
+
+    - CCXT 合约多为 BTC/USDT:USDT，去掉 :USDT 得到 BTC/USDT。
+    - 现货或已是 BASE/QUOTE 则先 normalize_symbol 后返回。
+    """
+    if not symbol:
+        return symbol
+    s = (symbol or "").strip().upper()
+    # 合约后缀 :USDT / :USD
+    for suffix in (":USDT", ":USD", ":BUSD"):
+        if s.endswith(suffix):
+            return s[: -len(suffix)]
+    return normalize_symbol(s, "binance")
+
+
+def symbol_for_ccxt_futures(canonical_symbol: str, settle: str = "USDT") -> str:
+    """
+    规范 symbol 转为 CCXT 合约格式（永续常用 BASE/QUOTE:USDT）。
+    下单、查持仓等调用 CCXT 时，若为合约且传入的是规范形式，应先调用此函数。
+    """
+    canonical_symbol = normalize_symbol(canonical_symbol, "binance")
+    if ":" in canonical_symbol:
+        return canonical_symbol
+    return f"{canonical_symbol}:{settle}"
+
+
 def denormalize_symbol(symbol: str, exchange: str = "binance") -> str:
     """
     反标准化交易对格式
     
-    将 BASE/QUOTE 格式转换为交易所特定格式
-    
-    Examples (binance):
-        "BTC/USDT" -> "BTCUSDT"
-    Examples (okx):
-        "BTC/USDT" -> "BTC-USDT"
+    将规范形式 BASE/QUOTE 转换为各交易所可识别的格式：
+    - binance / bybit: BTCUSDT（无分隔）
+    - okx: BTC-USDT（横线）
+    - gate / gateio: BTC_USDT（下划线）
     """
     if "/" not in symbol:
         return symbol
     
     base, quote = symbol.split("/")
     
-    if exchange.lower() in ("binance", "bybit"):
+    ex = exchange.lower()
+    if ex in ("binance", "bybit"):
         return f"{base}{quote}"
-    elif exchange.lower() in ("okx", "okex"):
+    if ex in ("okx", "okex"):
         return f"{base}-{quote}"
-    else:
-        return f"{base}{quote}"
+    if ex in ("gate", "gateio"):
+        return f"{base}_{quote}"
+    return f"{base}{quote}"
 
 
 def parse_timeframe(timeframe: str) -> Tuple[int, str]:

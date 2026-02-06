@@ -5,8 +5,7 @@ IronBull Exchange Module (v1 Phase 5)
 
 组件：
 - ExchangeClient: 交易所客户端基类
-- BinanceClient: Binance 数据客户端
-- OKXClient: OKX 数据客户端
+- BinanceClient / OKXClient / GateClient: 各交易所数据客户端
 - 通用工具函数
 """
 
@@ -17,8 +16,12 @@ from .client import (
 )
 from .binance import BinanceClient
 from .okx import OKXClient
+from .gate import GateClient
 from .utils import (
     normalize_symbol,
+    to_canonical_symbol,
+    symbol_for_ccxt_futures,
+    denormalize_symbol,
     parse_timeframe,
     timeframe_to_ms,
 )
@@ -28,10 +31,14 @@ __all__ = [
     "ExchangeClient",
     "BinanceClient",
     "OKXClient",
+    "GateClient",
     "create_client",
     "list_supported_exchanges",
     # 工具函数
     "normalize_symbol",
+    "to_canonical_symbol",
+    "symbol_for_ccxt_futures",
+    "denormalize_symbol",
     "parse_timeframe",
     "timeframe_to_ms",
 ]

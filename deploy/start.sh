@@ -4,10 +4,16 @@
 # 用法：
 #   1. 复制 env.production.example 为 .env.production 并填入实际值
 #   2. chmod +x deploy/start.sh
-#   3. ./deploy/start.sh start   — 启动所有服务
-#      ./deploy/start.sh stop    — 停止所有服务
-#      ./deploy/start.sh restart — 重启
+#   3. 所有服务：
+#      ./deploy/start.sh start   — 启动全部
+#      ./deploy/start.sh stop    — 停止全部
+#      ./deploy/start.sh restart — 重启全部
 #      ./deploy/start.sh status  — 查看状态
+#   4. 指定服务（可选，第二个参数起为服务名）：
+#      ./deploy/start.sh start data-api merchant-api
+#      ./deploy/start.sh stop signal-monitor
+#      ./deploy/start.sh restart data-api
+# 服务名：data-api | merchant-api | signal-monitor | monitor-daemon
 # ============================================================
 
 set -euo pipefail
@@ -31,25 +37,35 @@ fi
 export PYTHONPATH="$PROJECT_ROOT"
 mkdir -p "$PID_DIR" "$LOG_DIR"
 
-# ---- 服务定义 ----
-declare -A SERVICES=(
-    [data-api]="uvicorn app.main:app --host 0.0.0.0 --port 8026 --workers 2"
-    [merchant-api]="uvicorn app.main:app --host 0.0.0.0 --port 8010 --workers 2"
-    [signal-monitor]="python3 -m flask run --host=0.0.0.0 --port=8020"
-    [monitor-daemon]="python3 scripts/monitor_daemon.py"
-)
+# ---- 服务定义（case 实现，兼容 Bash 3.x / macOS） ----
+ALL_SERVICES="data-api merchant-api signal-monitor monitor-daemon"
 
-declare -A SERVICE_DIRS=(
-    [data-api]="$PROJECT_ROOT/services/data-api"
-    [merchant-api]="$PROJECT_ROOT/services/merchant-api"
-    [signal-monitor]="$PROJECT_ROOT/services/signal-monitor"
-    [monitor-daemon]="$PROJECT_ROOT"
-)
+get_service_cmd() {
+    case "$1" in
+        data-api)       echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8026 --workers 2" ;;
+        merchant-api)   echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8010 --workers 2" ;;
+        signal-monitor) echo "python3 -m flask run --host=0.0.0.0 --port=8020" ;;
+        monitor-daemon) echo "python3 scripts/monitor_daemon.py" ;;
+        *)              echo "" ;;
+    esac
+}
+
+get_service_dir() {
+    case "$1" in
+        data-api)       echo "$PROJECT_ROOT/services/data-api" ;;
+        merchant-api)   echo "$PROJECT_ROOT/services/merchant-api" ;;
+        signal-monitor) echo "$PROJECT_ROOT/services/signal-monitor" ;;
+        monitor-daemon) echo "$PROJECT_ROOT" ;;
+        *)              echo "" ;;
+    esac
+}
 
 start_service() {
     local name=$1
-    local cmd="${SERVICES[$name]}"
-    local dir="${SERVICE_DIRS[$name]}"
+    local cmd
+    local dir
+    cmd=$(get_service_cmd "$name")
+    dir=$(get_service_dir "$name")
     local pid_file="$PID_DIR/${name}.pid"
     local log_file="$LOG_DIR/${name}.log"
 
@@ -103,34 +119,60 @@ status_service() {
     fi
 }
 
-case "${1:-help}" in
+# 解析：第 1 个参数为动作，第 2 个起为可选服务名；无服务名则操作全部
+ACTION="${1:-help}"
+shift || true
+TARGET_SVC=""
+if [ $# -gt 0 ]; then
+    for name in "$@"; do
+        if [ -n "$(get_service_cmd "$name")" ]; then
+            TARGET_SVC="$TARGET_SVC $name"
+        else
+            echo "[!] Unknown service: $name (valid: $ALL_SERVICES)"
+            exit 1
+        fi
+    done
+    TARGET_SVC=$(echo "$TARGET_SVC" | xargs)
+else
+    TARGET_SVC="$ALL_SERVICES"
+fi
+
+case "$ACTION" in
     start)
         echo "=== Starting IronBull services ==="
-        for svc in "${!SERVICES[@]}"; do
+        for svc in $TARGET_SVC; do
             start_service "$svc"
         done
         echo "=== Done ==="
         ;;
     stop)
         echo "=== Stopping IronBull services ==="
-        for svc in "${!SERVICES[@]}"; do
+        for svc in $TARGET_SVC; do
             stop_service "$svc"
         done
         echo "=== Done ==="
         ;;
     restart)
-        $0 stop
+        echo "=== Restarting IronBull services ==="
+        for svc in $TARGET_SVC; do
+            stop_service "$svc"
+        done
         sleep 1
-        $0 start
+        for svc in $TARGET_SVC; do
+            start_service "$svc"
+        done
+        echo "=== Done ==="
         ;;
     status)
         echo "=== IronBull service status ==="
-        for svc in "${!SERVICES[@]}"; do
+        for svc in $TARGET_SVC; do
             status_service "$svc"
         done
         ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status}"
+        echo "Usage: $0 {start|stop|restart|status} [service ...]"
+        echo "  Services: data-api merchant-api signal-monitor monitor-daemon"
+        echo "  Example:  $0 start data-api merchant-api"
         exit 1
         ;;
 esac

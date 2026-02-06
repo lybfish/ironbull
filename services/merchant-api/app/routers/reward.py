@@ -130,7 +130,11 @@ def set_market_node(
     return ok(None, msg="已设置为市场节点" if is_node else "已取消市场节点资格")
 
 
-@router.get("/user/rewards")
+@router.get(
+    "/user/rewards",
+    summary="奖励流水",
+    description="分页查询用户奖励记录（直推/级差/平级）。list[].remark 取值为：直推奖励、级差奖、平级奖。详见 docs/api/LEDGER_REMARKS.md。",
+)
 def user_rewards(
     email: str = Query(...),
     page: int = Query(1, ge=1),
@@ -139,7 +143,7 @@ def user_rewards(
     tenant: Tenant = Depends(get_tenant),
     db: Session = Depends(get_db),
 ):
-    """奖励记录"""
+    """奖励记录。备注 remark 含义见 docs/api/LEDGER_REMARKS.md"""
     from libs.member.repository import MemberRepository
     repo_m = MemberRepository(db)
     user = repo_m.get_user_by_email(email.strip(), tenant.id)

@@ -28,7 +28,7 @@ from libs.core.database import init_database
 from libs.core.logger import get_logger, setup_logging
 from libs.core import get_config
 
-from .routers import orders, positions, accounts, analytics, auth, strategies, signal_monitor, nodes, sync, tenants, admins, dashboard, users, bindings, exchange_accounts, quota, withdrawals, monitor
+from .routers import orders, positions, accounts, analytics, auth, strategies, signal_monitor, nodes, sync, tenants, tenant_strategies, admins, dashboard, users, bindings, exchange_accounts, quota, withdrawals, monitor, user_manage, audit_logs, pointcard_rewards
 
 config = get_config()
 setup_logging(
@@ -64,6 +64,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 点卡流水、奖励记录优先挂载（独立 router），避免 404
+app.include_router(pointcard_rewards.router)
 app.include_router(auth.router)
 app.include_router(orders.router)
 app.include_router(positions.router)
@@ -73,15 +75,20 @@ app.include_router(strategies.router)
 app.include_router(signal_monitor.router)
 app.include_router(nodes.router)
 app.include_router(sync.router)
+# 租户策略实例必须在 tenants 之前注册，否则 GET /api/tenants/{id}/tenant-strategies 会被误匹配或 404
+app.include_router(tenant_strategies.router)
 app.include_router(tenants.router)
 app.include_router(admins.router)
 app.include_router(dashboard.router)
+# users 含 GET /api/users 与 GET /api/users/{user_id}，先注册以便详情路径正确匹配
 app.include_router(users.router)
+app.include_router(user_manage.router)
 app.include_router(bindings.router)
 app.include_router(exchange_accounts.router)
 app.include_router(quota.router)
 app.include_router(withdrawals.router)
 app.include_router(monitor.router)
+app.include_router(audit_logs.router)
 
 
 @app.get("/health")

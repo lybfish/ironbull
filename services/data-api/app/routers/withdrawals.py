@@ -80,7 +80,7 @@ def approve_withdrawal(
 ):
     """审核通过提现"""
     svc = WithdrawalService(db)
-    w, err = svc.approve(withdrawal_id, admin["id"])
+    w, err = svc.approve(withdrawal_id, admin["admin_id"])
     if err:
         raise HTTPException(status_code=400, detail=err)
     return {"success": True, "data": _withdrawal_dict(w)}
@@ -95,7 +95,7 @@ def reject_withdrawal(
 ):
     """拒绝提现（退回余额）"""
     svc = WithdrawalService(db)
-    w, err = svc.reject(withdrawal_id, admin["id"], body.reason)
+    w, err = svc.reject(withdrawal_id, admin["admin_id"], body.reason)
     if err:
         raise HTTPException(status_code=400, detail=err)
     return {"success": True, "data": _withdrawal_dict(w)}

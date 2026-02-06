@@ -11,10 +11,11 @@ mt5_node_port: 9102
 backtest_port: 8030
 
 # MySQL Database (v1 Facts Layer)
+# 生产请用环境变量 IRONBULL_DB_* 覆盖，勿提交真实密码
 db_host: 127.0.0.1
 db_port: 3306
 db_user: root
-db_password: "root123456"
+db_password: ""                     # 生产必填，用 IRONBULL_DB_PASSWORD
 db_name: ironbull
 db_charset: utf8mb4
 db_pool_size: 5
@@ -33,7 +34,7 @@ redis_pool_size: 10
 data_source: mock                 # 数据源: mock / live
 default_exchange: binance         # 默认交易所: binance / okx
 data_cache_enabled: true          # 是否启用数据缓存
-data_provider_url: http://127.0.0.1:8010  # data-provider 服务地址
+data_provider_url: http://127.0.0.1:8005  # data-provider 服务地址（勿用 8010，该端口为 merchant-api）
 signal_monitor_url: http://127.0.0.1:8020  # signal-monitor 状态代理（管理后台用）
 
 # Trading (v1 Phase 6)
@@ -49,20 +50,20 @@ risk_max_consecutive_losses: 5    # 连续亏损次数上限
 risk_loss_cooldown_minutes: 30    # 连续亏损后冷却时间（分钟）
 risk_trade_cooldown_seconds: 0    # 两次交易间隔（秒，0=不限制）
 
-# Telegram Notification
-telegram_bot_token: "8520192492:AAETCm1SytHYmt7ILAEU9lkqoSWHSXHMq8U"
-telegram_chat_id: "8165570703"
+# Telegram Notification（生产用 IRONBULL_TELEGRAM_BOT_TOKEN / IRONBULL_TELEGRAM_CHAT_ID）
+telegram_bot_token: ""
+telegram_chat_id: ""
 
-# Exchange API (用于真实交易)
+# Exchange API (用于真实交易，生产必须用环境变量 IRONBULL_EXCHANGE_*，勿写在此)
 exchange_name: binance              # 交易所: binance / okx
-exchange_api_key: "x0WJZRj8d4xW5xb6OJvQvthEN5GUF8zEs1Zxx0DIxdv60PMB0C5PoWbQA1c4BIw5"
-exchange_api_secret: "LRi9fH3mpBjI4MEaoVTfOoprSnSOwDLwxGU8sxvPL6W6FChbNHXURRMmphrNbUuj"
+exchange_api_key: ""                # 生产用 IRONBULL_EXCHANGE_API_KEY
+exchange_api_secret: ""             # 生产用 IRONBULL_EXCHANGE_API_SECRET
 exchange_passphrase: ""             # API Passphrase (OKX 需要)
 exchange_sandbox: false             # 真实交易（注意！）
 exchange_market_type: future        # 市场类型: spot(现货) / future(合约)
 
-# Execution Node Authentication
-node_auth_secret: "test-secret-2026"   # 中心⇄节点共享密钥，用于 X-Center-Token
+# Execution Node Authentication（生产用 IRONBULL_NODE_AUTH_SECRET，勿用默认值）
+node_auth_secret: ""                # 中心⇄节点共享密钥，用于 X-Center-Token
 
 # Auto Trading
 auto_trade_enabled: false           # 是否启用自动交易
@@ -71,6 +72,34 @@ auto_trade_max_amount: 200.0        # 单笔最大金额 (USDT) - 合约最小10
 auto_trade_max_daily: 10            # 每日最大交易次数
 auto_trade_max_positions: 3         # 最大同时持仓数
 auto_trade_min_confidence: 70       # 最低置信度要求
+
+# Risk Limits (AutoTrader 风控)
+risk_max_trade_amount: 100.0        # 单笔最大金额 (USDT)
+risk_max_daily_trades: 10           # 每日最大交易次数
+risk_max_open_positions: 3          # 最大持仓数量
+risk_max_daily_loss: 200.0          # 每日最大亏损 (USDT)
+risk_min_confidence: 70             # 最低置信度要求
+
+# Signal Monitor（全局运行参数，策略级配置已下沉到 dim_strategy 表）
+monitor_interval_seconds: 300       # 信号检测间隔（秒）
+notify_on_signal: true               # 有信号时通知
+http_timeout: 30.0                   # HTTP 请求超时（秒）
+dispatch_by_strategy: false          # 是否按策略多账户分发
+strategy_dispatch_amount: 100.0      # 策略分发 fallback 下单金额 (USDT)
+
+# 以下为 fallback（数据库无策略时使用，正常应在 dim_strategy 表中配置）
+default_strategy_code: market_regime
+default_atr_mult_sl: 1.5
+default_atr_mult_tp: 3.0
+monitor_symbols:
+  - BTCUSDT
+  - ETHUSDT
+monitor_timeframe: 1h
+min_confidence: 50
+signal_cooldown_minutes: 60
+
+# Execution Node
+heartbeat_timeout: 10.0              # 心跳 HTTP 超时（秒）
 
 # Monitor Daemon 监控告警
 monitor_enabled: true                # 是否启用监控守护

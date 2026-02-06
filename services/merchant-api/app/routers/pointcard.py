@@ -57,7 +57,12 @@ def user_recharge(
     return ok(data, msg="分发成功")
 
 
-@router.get("/point-card/logs")
+@router.get(
+    "/point-card/logs",
+    summary="点卡流水",
+    description="分页查询点卡变动记录。传 email 时查该用户自己的点卡流水（App 点卡记录）；不传时查商户的代理商点卡流水。"
+    " 返回 list[].remark 为系统写入的备注，取值见 docs/api/LEDGER_REMARKS.md（用户流水：代理商充值/赠送、转出/转入、盈利扣费30%；商户流水：后台充值、分发给用户#xxx 等）。",
+)
 def point_card_logs(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1),
@@ -68,7 +73,7 @@ def point_card_logs(
     tenant: Tenant = Depends(get_tenant),
     db: Session = Depends(get_db),
 ):
-    """点卡流水（商户维度，可筛 email）"""
+    """点卡流水（商户维度，可筛 email）。备注 remark 含义见 docs/api/LEDGER_REMARKS.md"""
     # 若传了 email 先解析为 user_id
     filter_user_id = None
     if email and email.strip():

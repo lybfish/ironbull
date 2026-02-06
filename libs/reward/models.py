@@ -23,6 +23,14 @@ class ProfitPool(Base):
     self_deduct = Column(DECIMAL(20, 8), nullable=False, default=0)
     gift_deduct = Column(DECIMAL(20, 8), nullable=False, default=0)
     pool_amount = Column(DECIMAL(20, 8), nullable=False)
+    # --- 分配追踪字段 ---
+    tech_amount = Column(DECIMAL(20, 8), nullable=False, default=0, comment="技术团队 10%")
+    network_amount = Column(DECIMAL(20, 8), nullable=False, default=0, comment="网体总额 20%")
+    platform_amount = Column(DECIMAL(20, 8), nullable=False, default=0, comment="平台留存 70%")
+    direct_distributed = Column(DECIMAL(20, 8), nullable=False, default=0, comment="直推已发放")
+    diff_distributed = Column(DECIMAL(20, 8), nullable=False, default=0, comment="级差已发放")
+    peer_distributed = Column(DECIMAL(20, 8), nullable=False, default=0, comment="平级已发放")
+    network_undistributed = Column(DECIMAL(20, 8), nullable=False, default=0, comment="网体未分配(条件不满足)")
     status = Column(Integer, nullable=False, default=1)  # 1待结算 2已结算
     settle_batch = Column(String(50), nullable=True)
     settled_at = Column(DateTime, nullable=True)

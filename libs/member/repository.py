@@ -8,7 +8,7 @@ from decimal import Decimal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from .models import User, ExchangeAccount, StrategyBinding, Strategy
+from .models import User, ExchangeAccount, StrategyBinding, Strategy, TenantStrategy
 
 
 class MemberRepository:
@@ -184,10 +184,16 @@ class MemberRepository:
         return q.order_by(StrategyBinding.id.desc()).limit(limit).all()
 
     # ---------- Strategy ----------
-    def list_strategies(self, status: Optional[int] = 1) -> List[Strategy]:
+    def list_strategies(
+        self,
+        status: Optional[int] = 1,
+        show_to_user: Optional[bool] = None,
+    ) -> List[Strategy]:
         q = self.db.query(Strategy)
         if status is not None:
             q = q.filter(Strategy.status == status)
+        if show_to_user is not None:
+            q = q.filter(Strategy.show_to_user == (1 if show_to_user else 0))
         return q.order_by(Strategy.id).all()
 
     def get_strategy_by_code(self, code: str) -> Optional[Strategy]:
@@ -195,3 +201,45 @@ class MemberRepository:
 
     def get_strategy_by_id(self, strategy_id: int) -> Optional[Strategy]:
         return self.db.query(Strategy).filter(Strategy.id == strategy_id).first()
+
+    def update_strategy(self, strategy: Strategy) -> Strategy:
+        self.db.merge(strategy)
+        self.db.flush()
+        return strategy
+
+    # ---------- TenantStrategy (租户策略实例) ----------
+    def list_tenant_strategies(
+        self,
+        tenant_id: int,
+        status: Optional[int] = None,
+    ) -> List[TenantStrategy]:
+        q = self.db.query(TenantStrategy).filter(TenantStrategy.tenant_id == tenant_id)
+        if status is not None:
+            q = q.filter(TenantStrategy.status == status)
+        return q.order_by(TenantStrategy.sort_order.asc(), TenantStrategy.id.asc()).all()
+
+    def get_tenant_strategy(self, tenant_id: int, strategy_id: int) -> Optional[TenantStrategy]:
+        return self.db.query(TenantStrategy).filter(
+            TenantStrategy.tenant_id == tenant_id,
+            TenantStrategy.strategy_id == strategy_id,
+        ).first()
+
+    def get_tenant_strategy_by_id(self, instance_id: int, tenant_id: Optional[int] = None) -> Optional[TenantStrategy]:
+        q = self.db.query(TenantStrategy).filter(TenantStrategy.id == instance_id)
+        if tenant_id is not None:
+            q = q.filter(TenantStrategy.tenant_id == tenant_id)
+        return q.first()
+
+    def create_tenant_strategy(self, ts: TenantStrategy) -> TenantStrategy:
+        self.db.add(ts)
+        self.db.flush()
+        return ts
+
+    def update_tenant_strategy(self, ts: TenantStrategy) -> TenantStrategy:
+        self.db.merge(ts)
+        self.db.flush()
+        return ts
+
+    def delete_tenant_strategy(self, ts: TenantStrategy) -> None:
+        self.db.delete(ts)
+        self.db.flush()

@@ -2,7 +2,8 @@
 
 本指南用于本地一键复现实验链路（v0）。
 
-相关规范：`docs/ops/ERRORS_AND_LOGGING.md`
+- **端口与流程总览**（含生产 vs 实验、端口冲突说明）：`docs/ops/PORTS_AND_FLOW.md`
+- 相关规范：`docs/ops/ERRORS_AND_LOGGING.md`
 
 ## 端口一览
 - `strategy-engine`: 8000

@@ -227,7 +227,7 @@ class MemberService:
         return True
 
     def get_user_strategies(self, user_id: int, tenant_id: int) -> List[dict]:
-        """用户已绑定的策略列表，含策略名称、账户、盈亏等"""
+        """用户已绑定的策略列表，含策略名称（优先租户实例展示名）、账户、盈亏等"""
         user = self.repo.get_user_by_id(user_id, tenant_id)
         if not user:
             return []
@@ -235,9 +235,16 @@ class MemberService:
         result = []
         for b in bindings:
             s = self.repo.get_strategy_by_code(b.strategy_code)
+            strategy_id = s.id if s else 0
+            strategy_name = s.name if s else b.strategy_code
+            # 优先用该租户的策略实例展示名（与 GET /merchant/strategies 一致）
+            if s:
+                ts = self.repo.get_tenant_strategy(tenant_id, s.id)
+                if ts and (ts.display_name or "").strip():
+                    strategy_name = (ts.display_name or "").strip()
             result.append({
-                "strategy_id": s.id if s else 0,
-                "strategy_name": s.name if s else b.strategy_code,
+                "strategy_id": strategy_id,
+                "strategy_name": strategy_name,
                 "symbol": s.symbol if s else "",
                 "account_id": b.account_id,
                 "status": b.status,
@@ -253,8 +260,11 @@ class MemberService:
         根据 strategy_code 获取所有已绑定且启用的 (binding + 交易所账户) 列表，
         含执行所需字段（api_key/api_secret 等），仅服务端使用。
         用于按策略多账户执行时创建 LiveTrader + TradeSettlementService。
-        点卡余额为 0 的用户不进入执行列表（策略对该账户实际暂停，充值后自动恢复）。
+        点卡余额为 0 的用户不进入执行列表；该租户已下架/删除策略实例的也不执行。
         """
+        strategy = self.repo.get_strategy_by_code(strategy_code)
+        if not strategy:
+            return []
         bindings = self.repo.get_bindings_by_strategy_code(strategy_code)
         targets = []
         for b in bindings:
@@ -263,6 +273,10 @@ class MemberService:
                 continue
             user = self.repo.get_user_by_id(acc.user_id)
             if not user:
+                continue
+            # 该租户下该策略实例必须存在且启用，否则不执行（与开通校验一致）
+            ts = self.repo.get_tenant_strategy(acc.tenant_id, strategy.id)
+            if not ts or ts.status != 1:
                 continue
             total_point = float(user.point_card_self or 0) + float(user.point_card_gift or 0)
             if total_point <= 0:

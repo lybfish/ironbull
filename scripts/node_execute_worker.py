@@ -73,14 +73,14 @@ def run():
                 )
                 targets_by_account[target.account_id] = target
             except Exception as e:
-                log.warning("skip invalid task task_id=%s account_id=%s error=%s", task_id, t.get("account_id"), e)
+                log.warning("skip invalid task", task_id=task_id, account_id=t.get("account_id"), error=str(e))
 
         if not targets_by_account:
-            log.warning("no valid targets task_id=%s", task_id)
+            log.warning("no valid targets", task_id=task_id)
             queue.nack(msg, "no valid targets")
             continue
 
-        # 发给节点的 body 与 signal-monitor 一致
+        # 发给节点的 body 与 signal-monitor 一致；保留每 task 的 amount_usdt/leverage（租户实例覆盖）
         post_body = {
             "signal": signal,
             "amount_usdt": amount_usdt,
@@ -95,6 +95,8 @@ def run():
                     "api_secret": t.get("api_secret", ""),
                     "passphrase": t.get("passphrase"),
                     "market_type": t.get("market_type", "future"),
+                    "amount_usdt": t.get("amount_usdt"),
+                    "leverage": t.get("leverage"),
                 }
                 for t in tasks
             ],
@@ -110,7 +112,7 @@ def run():
                 resp.raise_for_status()
                 data = resp.json()
         except Exception as e:
-            log.warning("node execute POST failed task_id=%s node_id=%s error=%s", task_id, node_id, e)
+            log.warning("node execute POST failed", task_id=task_id, node_id=node_id, error=str(e))
             queue.nack(msg, str(e))
             continue
 
@@ -120,15 +122,10 @@ def run():
             apply_remote_results(session, signal, targets_by_account, response_results)
             session.commit()
             queue.ack(task_id)
-            log.info(
-                "node execute done task_id=%s node_id=%s results=%s",
-                task_id,
-                node_id,
-                len(response_results),
-            )
+            log.info("node execute done", task_id=task_id, node_id=node_id, results=len(response_results))
         except Exception as e:
             session.rollback()
-            log.error("apply_remote_results failed task_id=%s error=%s", task_id, e)
+            log.error("apply_remote_results failed", task_id=task_id, error=str(e))
             queue.nack(msg, str(e))
         finally:
             session.close()

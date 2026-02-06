@@ -151,7 +151,7 @@ class GridOptimizer:
             try:
                 if not check_func(params):
                     return False
-            except:
+            except Exception:
                 return False
         return True
     

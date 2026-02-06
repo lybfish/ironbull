@@ -1,0 +1,19 @@
+# EditorConfig 配置文件（前端项目）
+# https://editorconfig.org
+# 
+# 注意：此文件仅用于 evui/ 目录
+# 根目录的 .editorconfig 会处理 PHP 文件和其他文件
+
+root = true
+
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 2
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.md]
+insert_final_newline = false
+trim_trailing_whitespace = false

@@ -169,7 +169,18 @@ class Config:
         if isinstance(value, bool):
             return value
         return str(value).lower() in ("true", "1", "yes", "on")
-    
+
+    def get_list(self, key: str, default: Any = None) -> list:
+        """获取列表配置。支持 YAML list 或逗号分隔字符串"""
+        value = self.get(key)
+        if value is None:
+            return default if default is not None else []
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            return [s.strip() for s in value.split(",") if s.strip()]
+        return default if default is not None else []
+
     def set(self, key: str, value: Any) -> None:
         """设置配置值（运行时）"""
         self._set_by_path(key.lower(), value)

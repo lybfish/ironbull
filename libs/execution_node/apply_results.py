@@ -84,6 +84,6 @@ def apply_remote_results(
                 "filled_price": filled_price,
             })
         except Exception as e:
-            log.warning("apply_remote_result account_id=%s error=%s", account_id, e)
+            log.warning("apply_remote_result failed", account_id=account_id, error=str(e))
             outcome.append({"account_id": account_id, "user_id": target.user_id, "success": False, "error": str(e)})
     return outcome

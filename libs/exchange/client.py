@@ -93,8 +93,8 @@ class ExchangeClient(ABC):
         pass
 
 
-# 支持的交易所列表
-SUPPORTED_EXCHANGES = ["binance", "okx"]
+# 支持的交易所列表（K 线、实时行情）
+SUPPORTED_EXCHANGES = ["binance", "okx", "gate"]
 
 
 def list_supported_exchanges() -> List[str]:
@@ -110,22 +110,28 @@ def create_client(
 ) -> ExchangeClient:
     """
     创建交易所客户端
-    
+
+    用于 K 线、实时行情等公开数据；交易下单请使用 libs.trading.LiveTrader。
+
     Args:
-        exchange: 交易所名称 (binance, okx)
+        exchange: 交易所名称 (binance, okx, gate)
         api_key: API Key（可选，公开数据不需要）
         api_secret: API Secret（可选）
-    
+        passphrase: OKX 需传；gate 可选
+
     Returns:
         ExchangeClient 实例
     """
     exchange = exchange.lower()
-    
+
     if exchange == "binance":
         from .binance import BinanceClient
         return BinanceClient(api_key=api_key, api_secret=api_secret, **kwargs)
     elif exchange in ("okx", "okex"):
         from .okx import OKXClient
         return OKXClient(api_key=api_key, api_secret=api_secret, **kwargs)
+    elif exchange == "gate":
+        from .gate import GateClient
+        return GateClient(api_key=api_key, api_secret=api_secret, **kwargs)
     else:
         raise ValueError(f"Unsupported exchange: {exchange}. Supported: {SUPPORTED_EXCHANGES}")

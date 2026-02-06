@@ -55,6 +55,10 @@ class Signal:
     # 数量（风控计算后填充）
     quantity: Optional[float] = None        # 下单数量
     
+    # 仓位配置（策略层定义，随信号传递到执行层）
+    amount_usdt: Optional[float] = None     # 单仓下单金额（USDT），策略配置
+    leverage: Optional[int] = None          # 杠杆倍数，策略配置
+    
     # 元信息
     confidence: Optional[float] = None      # 置信度 0-100
     reason: Optional[str] = None            # 信号原因

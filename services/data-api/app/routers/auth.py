@@ -54,6 +54,12 @@ def me(current_admin: Dict[str, Any] = Depends(get_current_admin)):
     return {"success": True, "data": current_admin}
 
 
+@router.get("/logout")
+def logout(_: Dict[str, Any] = Depends(get_current_admin)):
+    """退出登录（服务端无状态，仅返回成功；前端清除 token 并跳转登录）"""
+    return {"success": True, "message": "已退出"}
+
+
 class ChangePasswordBody(BaseModel):
     old_password: str
     new_password: str

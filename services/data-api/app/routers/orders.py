@@ -3,14 +3,16 @@ Data API - 订单与成交查询
 
 GET /api/orders
 GET /api/fills
+POST /api/manual-order -> 占位（返回 501，实际下单需 execution-node 等接入）
 """
 
 from datetime import datetime
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from libs.order_trade import OrderTradeService
 from libs.order_trade.contracts import OrderFilter, FillFilter
@@ -92,3 +94,25 @@ def list_fills(
     svc = OrderTradeService(db)
     fills, total = svc.list_fills(filt)
     return {"success": True, "data": [dto_to_dict(f) for f in fills], "total": total}
+
+
+class ManualOrderBody(BaseModel):
+    """手动下单请求体（占位，实际由 execution-node 等实现）"""
+    exchange: Optional[str] = None
+    market_type: Optional[str] = None
+    symbol: str = ""
+    side: str = "buy"
+    order_type: str = "market"
+    amount: Optional[float] = None
+    price: Optional[float] = None
+
+
+@router.post("/manual-order")
+def manual_order_placeholder(
+    _body: ManualOrderBody,
+) -> None:
+    """占位：手动下单接口尚未在 data-api 实现，请通过 execution-node 或后续接入。返回 501 避免前端 404。"""
+    raise HTTPException(
+        status_code=501,
+        detail="手动下单接口尚未实现，请通过 execution-node 或运维配置接入后再使用。",
+    )
