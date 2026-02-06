@@ -202,8 +202,11 @@ class QuotaService:
             User.tenant_id == tenant_id, User.status == 1
         ).scalar() or 0
 
+        # StrategyBinding 通过 user_id 关联 User 来筛选租户
+        user_ids_subq = self.db.query(User.id).filter(User.tenant_id == tenant_id).subquery()
         strategy_count = self.db.query(sqlfunc.count(StrategyBinding.id)).filter(
-            StrategyBinding.tenant_id == tenant_id, StrategyBinding.status == 1
+            StrategyBinding.user_id.in_(user_ids_subq),
+            StrategyBinding.status == 1,
         ).scalar() or 0
 
         account_count = self.db.query(sqlfunc.count(ExchangeAccount.id)).filter(
