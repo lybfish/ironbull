@@ -47,6 +47,20 @@
 - **Pydantic v2 兼容**：status 字段支持 `"active"` / `1` 两种格式（`@field_validator(mode="before")`）。
 - **前端修复**：`evui/src/views/tenant/index.vue` 的 `status: 'active'` 改为 `status: 1`。
 
+### 前端租户奖励展示
+- **后端** `_tenant_dict` 新增返回 `tech_reward_total`、`undist_reward_total` 字段。
+- **前端** 租户主表格新增「技术累计」「未分配累计」两列；租户详情弹窗新增「奖励分配」区块（技术团队累计 10%、网体未分配累计、根账户累计收入）。
+
+### 后台全面优化
+- **响应格式统一**：所有 API 返回 `{"success": true, "data": ..., "total": ...}`，quota/nodes/monitor 等原 `{"code":0}` 格式已全部替换。
+- **错误处理**：orders/positions/accounts/analytics/sync 全部加 try/except + logging，不再裸抛 500。
+- **分页 total 修复**：positions/accounts/transactions 用 `count()` 返回真实总数，不再用 `len(当页数据)`。
+- **sync 鉴权**：POST /api/sync/balance 和 /positions 加 `get_current_admin` 依赖，未登录返回 401。
+- **密码 bcrypt 升级**：`libs/admin/service.py` + `admins.py` + `tenants.py` 全部用 bcrypt；**兼容旧 MD5**，管理员登录时自动升级为 bcrypt（无需手动迁移）。
+- **分页参数统一**：audit_logs 的 `size` 改为 `page_size`，全部接口一致。
+- **公共日期解析**：新建 `services/data-api/app/utils.py`（`parse_datetime` + `parse_date`），orders/accounts/analytics 统一引用，消除重复代码。
+- **清理模板残留**：删除 25 个未使用的 vue 文件（system/user、role、menu、operlog、loginlog、data/、member/、message/、user/），减少包体积。
+
 ### 配额、监控、性能
 - 配额：dim_quota_plan、fact_api_usage、QuotaService；merchant-api check_quota；data-api quota-plans、assign-plan、quota-usage。
 - 监控：libs/monitor（health_checker、node_checker、db_checker、alerter）、monitor_daemon.py、GET /api/monitor/status、evui 监控页；deploy/start.sh 含 monitor-daemon。
@@ -78,6 +92,7 @@
 | 策略与租户实例 | libs/member/models.py（Strategy、TenantStrategy）、repository.py；data-api/routers/strategies.py、tenant_strategies.py；merchant-api/routers/strategy.py；evui/views/tenant/tenant-strategies.vue |
 | 信号/执行按租户 | services/signal-monitor/app/main.py（_resolve_amount_leverage_for_tenant、execute_signal_by_strategy）；libs/member/service.py（get_execution_targets_by_strategy_code 校验租户实例）；execution-node TaskItem.leverage；scripts/node_execute_worker.py |
 | 奖励分配（全溯源）| libs/reward/service.py（RewardService，预算制 cap）、libs/reward/models.py（ProfitPool 追踪字段）|
+| 公共工具       | services/data-api/app/utils.py（parse_datetime、parse_date）|
 | 点卡/奖励/提现 | libs/pointcard/、libs/reward/、data-api/routers/tenants.py、withdrawals.py、user_manage.py |
 | 配额           | libs/quota/、data-api/routers/quota.py |
 | 监控           | libs/monitor/、scripts/monitor_daemon.py、data-api/routers/monitor.py |
@@ -89,8 +104,8 @@
 
 ## 5. 当前状态
 
-- **evui**：多页管理后台，订单/成交/持仓/资金/流水、绩效/策略/信号、租户/用户/提现/配额/点卡流水/奖励/监控、**租户策略**（按租户管理策略实例、一键复制主策略、新增时自动带出参数）等。
-- **data-api**：管理接口齐全；租户策略实例 CRUD + copy-from-master；点卡流水、奖励记录在 main 显式注册；tenant_strategies 路由在 tenants 前注册；Pydantic v2 与 admin_id 已修；健康检查 GET /health。
+- **evui**：多页管理后台，订单/成交/持仓/资金/流水、绩效/策略/信号、租户/用户/提现/配额/点卡流水/奖励/监控、**租户策略**（按租户管理策略实例、一键复制主策略、新增时自动带出参数）等。租户详情新增**奖励分配区块**（技术累计、未分配累计）。已清理模板残留文件（25 个）。
+- **data-api**：管理接口齐全；响应格式全部统一为 `{"success":true,"data":...}`；所有查询接口加 try/except 错误处理；分页 total 用 count() 真实计数；sync 接口加鉴权；密码用 bcrypt（兼容旧 MD5 自动升级）；公共 utils 提取日期解析。
 - **Merchant API**：策略列表与开通按租户实例；用户已绑定列表展示名用租户实例。
 - **执行节点**：中心-节点联调通过；按租户解析 amount/leverage；子机可独立部署与打包。
 - **数据库**：需执行 014-017 后所有功能才正常。014-015 可用 `scripts/run_migrations_014_015.py`；016-017 直接用 mysql 执行 `migrations/016_*.sql` 和 `migrations/017_*.sql`。
@@ -109,8 +124,6 @@
 
 ## 7. 后续可选
 
-- **前端展示租户奖励字段**：evui 租户详情页增加 tech_reward_total / undist_reward_total 展示
-- **部署到生产**：执行迁移 016-017，补建已有租户的根账户（脚本逻辑已有，见会话记录）
-- 构建体积优化（大 chunk 代码分割）
-- 监控告警增强（更多端点、历史告警、邮件通道）
-- 文档与 API 文档持续同步
+- **部署到生产**：执行迁移 016-017，补建已有租户的根账户（脚本逻辑已有，见会话记录），部署最新代码
+- 构建体积优化（大 chunk 代码分割、路由懒加载）
+- 监控告警增强（更多端点、历史告警、邮件/钉钉通道）
