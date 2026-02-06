@@ -12,26 +12,45 @@
 
 ## 最近做完的
 
-- **执行节点扩展（Phase 1–5）**：dim_execution_node、心跳/节点列表 API、execution-node 服务（POST /api/execute、/api/sync-balance、/api/sync-positions）；signal-monitor 按 execution_node_id 分流，远程 POST 或投递 NODE_EXECUTE_QUEUE；node_execute_worker 消费队列并 POST 到节点；libs/sync_node、data-api 同步余额/持仓。
-- **子机独立部署（方案 B）**：execution-node 改为从 live_trader/base 直引；`scripts/build_node_bundle.py` 打出 `dist/execution-node/`（最小依赖）；可执行文件说明见 `dist/execution-node/BUILD_EXECUTABLE.md`、`docs/ops/EXECUTION_NODE_BUILD.md`；PLAN_EXECUTION_NODES.md 第九节已改为「独立部署包或可执行文件」。
-- **仅中心可调鉴权**：节点配置 `node_auth_enabled`、`node_auth_secret`（可选 `node_allowed_ips`），校验请求头 `X-Center-Token`；中心 signal-monitor、sync_node、node_execute_worker 在 POST 节点时带该头。详见 PLAN_EXECUTION_NODES.md 5.4 节。
-- **子机自动心跳**：execution-node 配置 `center_url`（中心 data-api 地址）+ `node_code` 后，启动时自动定时 POST 中心 `/api/nodes/{node_code}/heartbeat`；支持 `heartbeat_interval`（默认 60s）；同时支持 `node_auth_secret` 鉴权头；GET /health 展示心跳状态。详见 PLAN_EXECUTION_NODES.md 5.3 节。
+### 执行节点（已完成）
+- **Phase 1–5**：dim_execution_node、心跳/节点列表 API、execution-node 服务（POST /api/execute、/api/sync-balance、/api/sync-positions）；signal-monitor 按 execution_node_id 分流；node_execute_worker 消费队列并 POST 到节点。
+- **子机独立部署**：`scripts/build_node_bundle.py` 打出 `dist/execution-node/`（最小依赖）。
+- **仅中心可调鉴权**：节点 `node_auth_enabled` + `node_auth_secret` + 可选 `node_allowed_ips`，校验 `X-Center-Token`。
+- **子机自动心跳**：配置 `center_url` + `node_code` 后自动定时 POST 中心心跳。
+- **PyInstaller 打包验证通过**：`run.py` 直接 import app 对象（修复 string import 问题），47MB arm64 可执行文件，health/execute/sync-balance 接口正常。打包命令见 `dist/execution-node/BUILD_EXECUTABLE.md`。
 
-- **管理后台独立鉴权体系**：新建 `dim_admin` 表（独立于 dim_tenant / dim_user），后台(admin-web)只有管理员可登录；JWT payload 含 `admin_id` + `username`；管理员是平台级超管，可查看所有租户数据，通过 `tenant_id` query 参数切换租户视角；登录表单改为 用户名+密码（去掉了 tenant_id + email）。初始账号：admin / admin123。
+### 管理后台（已完成）
+- **独立管理员体系**：`dim_admin` 表独立于 dim_tenant / dim_user；JWT payload 含 `admin_id` + `username`；平台级超管，通过 `tenant_id` query 参数切换租户视角。初始账号：**admin / admin123**。
+- **data-api 管理接口**：
+  - 认证：POST /api/auth/login、GET /api/auth/me、POST /api/auth/change-password
+  - Dashboard：GET /api/dashboard/summary（平台汇总）
+  - 租户：GET/POST /api/tenants、PUT/PATCH、POST /:id/recharge（充值点卡）
+  - 用户：GET /api/users（按租户筛选）
+  - 管理员：GET/POST /api/admins、PUT/PATCH、POST /:id/reset-password
+  - 策略绑定：GET /api/strategy-bindings-admin
+  - 交易所账户：GET /api/exchange-accounts（API Key 脱敏）
+- **admin-web 前端**（Vue 3 + Vite + Element Plus，端口 5174，共 15 页）：
+  - 概览 Dashboard（平台汇总 + 租户绩效）
+  - 订单 / 成交 / 持仓 / 资金账户 / 流水
+  - 绩效分析 / 策略管理 / 信号监控
+  - 租户管理（CRUD + 充值点卡 + 查看密钥）
+  - 用户管理（按租户筛选）
+  - 策略绑定 / 交易所账户
+  - 管理员管理（创建/编辑/重置密码/启用禁用）
 
 ## 当前代码状态
 
-- 鉴权已接在：services/execution-node/app/main.py（verify_center_token）、signal-monitor、libs/sync_node/service.py、scripts/node_execute_worker.py。
-- 心跳已接在：services/execution-node/app/main.py（lifespan + _heartbeat_loop）。
-- 未配置 `node_auth_secret` 时行为与之前一致（兼容）；未配置 `center_url` 或 `node_code` 时不发心跳（兼容）。
-- **管理后台鉴权**：libs/admin（Admin model + AdminService），libs/core/auth/jwt.py（admin_id payload），services/data-api/app/deps.py（get_current_admin），services/data-api/app/routers/auth.py（login/me/change-password），admin-web Login.vue + api/index.js + Layout.vue。
+- **节点鉴权**：services/execution-node/app/main.py、signal-monitor、libs/sync_node、node_execute_worker。
+- **节点心跳**：services/execution-node/app/main.py（lifespan + _heartbeat_loop）。
+- **管理后台鉴权**：libs/admin/、libs/core/auth/jwt.py、services/data-api/app/（deps.py + routers/auth.py）。
+- **管理后台页面**：services/admin-web/src/（views/ 15 个页面，api/index.js，router/index.js，components/Layout.vue）。
+- **文档已同步**：NEXT_TASK.md 平台层标记 ✅，IMPLEMENTATION_STATUS.md 新增管理后台章节。
 
 ## 下次可以做的
 
-- 在子机用 `dist/execution-node/` 实际打可执行文件（PyInstaller）并跑通。
-- 配置中心与节点的 `node_auth_secret` + `center_url` + `node_code` 做联调验证。
-- admin-web 前端 build + 连接 data-api 做端到端登录联调。
-- 管理后台功能：租户列表/管理、管理员账号管理等。
+- **中心-节点联调**：配置 `node_auth_secret` + `center_url` + `node_code`，跑通鉴权 + 心跳 + 任务下发全链路。
+- **生产部署准备**：jwt_secret 生产配置、CORS 收窄、admin-web `npm run build` 打包、Nginx 部署配置。
+- **配额计费**：租户级 API 调用限额、策略使用计费、套餐等级（NEXT_TASK.md 里最后一个 ❌）。
 - 其他业务或 NEXT_TASK.md 中的待办。
 
 ---
