@@ -95,11 +95,16 @@ class BacktestEngine:
         commission_rate: float = 0.001,  # 0.1% 手续费
         hedge_mode: bool = False,        # 对冲模式（双向持仓）
         risk_per_trade: float = 0.0,     # 每笔交易最大亏损金额（0=固定仓位，>0=以损定仓）
+        amount_usdt: float = 0.0,        # 每笔固定名义持仓金额（与线上一致，>0 时覆盖其他模式）
+        min_rr: float = 0.0,             # 最小盈亏比过滤（0=不过滤，>0=TP/SL < min_rr 的信号跳过）
     ):
         self.initial_balance = initial_balance
         self.commission_rate = commission_rate
         self.hedge_mode = hedge_mode
         self.risk_per_trade = risk_per_trade  # 以损定仓：每笔最大亏损
+        self.amount_usdt = amount_usdt        # 固定名义持仓（USDT）
+        self.min_rr = min_rr                  # 最小盈亏比过滤
+        self.rr_filtered = 0                  # 被过滤的信号计数
         
         # 账户状态
         self.balance = initial_balance
@@ -120,23 +125,73 @@ class BacktestEngine:
         # 权益曲线
         self.equity_curve: List[Dict] = []
     
+    def _has_sufficient_balance(self, entry_price: float) -> bool:
+        """
+        检查余额是否足够开仓。
+        合约交易需要初始保证金，此处按 amount_usdt / 20 (即 20x 杠杆保证金) 或
+        余额的 5% 作为最低保证金要求，二者取较大值。
+        余额 <= 0 直接拒绝。
+        """
+        if self.balance <= 0:
+            return False
+        if self.amount_usdt > 0:
+            # 至少需要名义金额的 5% 作为保证金（等效 20x 杠杆）
+            min_margin = self.amount_usdt * 0.05
+        else:
+            # 非 amount_usdt 模式，至少需要初始资金的 2%
+            min_margin = self.initial_balance * 0.02
+        return self.balance >= min_margin
+
     def _calc_position_size(self, entry_price: float, stop_loss: float, base_qty: float = 1.0) -> float:
         """
-        计算仓位大小
+        计算仓位大小（三种模式，优先级从高到低）
         
-        以损定仓模式：仓位 = 最大亏损 / 止损距离
-        固定仓位模式：返回 base_qty
+        1. 固定名义持仓模式（amount_usdt > 0）：仓位 = amount_usdt / entry_price
+           与线上 LiveTrader 一致，直接用 USDT 金额换算数量。
+        2. 以损定仓模式（risk_per_trade > 0）：仓位 = 最大亏损 / 止损距离
+        3. 固定仓位模式（兜底）：返回 base_qty
+        
+        安全限制：
+        0. 余额不足 → 返回 0（禁止开仓）
+        1. 止损距离 < 入场价 0.1% 视为无效（太窄），跳过该信号
+        2. 名义价值不超过账户余额的 3 倍（防止杠杆爆炸）
         """
-        if self.risk_per_trade <= 0 or stop_loss is None:
-            return base_qty
+        # ── 余额保护：不足时禁止开仓 ──
+        if not self._has_sufficient_balance(entry_price):
+            return 0.0
         
-        sl_distance = abs(entry_price - stop_loss)
-        if sl_distance == 0:
-            return base_qty
+        # ── 模式 1: 固定名义持仓（最高优先级）──
+        if self.amount_usdt > 0 and entry_price > 0:
+            position_size = self.amount_usdt / entry_price
+            # 安全阀：名义价值不超过账户余额的 3 倍（余额已确认 > 0）
+            max_notional = self.balance * 3
+            max_qty = max_notional / entry_price
+            position_size = min(position_size, max_qty)
+            return round(position_size, 6)
         
-        # 以损定仓计算
-        position_size = self.risk_per_trade / sl_distance
-        return round(position_size, 6)
+        # ── 模式 2: 以损定仓 ──
+        if self.risk_per_trade > 0 and stop_loss is not None:
+            sl_distance = abs(entry_price - stop_loss)
+            if sl_distance == 0:
+                return base_qty
+            
+            # 安全阀 1: 止损距离 < 入场价 0.1%，视为无效止损
+            min_sl_distance = entry_price * 0.001
+            if sl_distance < min_sl_distance:
+                sl_distance = min_sl_distance
+            
+            # 以损定仓计算
+            position_size = self.risk_per_trade / sl_distance
+            
+            # 安全阀 2: 名义价值不超过账户余额的 3 倍（余额已确认 > 0）
+            max_notional = self.balance * 3
+            max_qty = max_notional / entry_price if entry_price > 0 else base_qty
+            position_size = min(position_size, max_qty)
+            
+            return round(position_size, 6)
+        
+        # ── 模式 3: 固定仓位（兜底）──
+        return base_qty
     
     def run(
         self,
@@ -208,7 +263,7 @@ class BacktestEngine:
     def _detect_hedge_mode(self, strategy):
         """检测策略是否需要对冲模式"""
         # 根据策略代码自动启用对冲模式
-        hedge_strategies = ["hedge", "hedge_conservative", "reversal_hedge"]
+        hedge_strategies = ["hedge", "hedge_conservative", "reversal_hedge", "market_regime"]
         if hasattr(strategy, "code") and strategy.code in hedge_strategies:
             self.hedge_mode = True
     
@@ -223,6 +278,7 @@ class BacktestEngine:
         self.trades = []
         self.trade_id_counter = 0
         self.equity_curve = []
+        self.rr_filtered = 0
     
     def _build_positions_info(self) -> Dict:
         """构建持仓信息传给策略"""
@@ -251,6 +307,30 @@ class BacktestEngine:
             return datetime.fromisoformat(value)
         raise ValueError(f"Unsupported timestamp type: {type(value)}")
     
+    def _check_min_rr(self, signal, current_price: float) -> bool:
+        """
+        检查信号的盈亏比是否达标。
+        返回 True = 通过，False = 被过滤。
+        """
+        if self.min_rr <= 0:
+            return True  # 未启用过滤
+        
+        sl = getattr(signal, "stop_loss", None)
+        tp = getattr(signal, "take_profit", None)
+        if sl is None or tp is None or sl == 0 or tp == 0:
+            return True  # 没有 SL/TP 信息，放行
+        
+        sl_dist = abs(current_price - sl)
+        tp_dist = abs(tp - current_price)
+        if sl_dist <= 0:
+            return False
+        
+        rr = tp_dist / sl_dist
+        if rr < self.min_rr:
+            self.rr_filtered += 1
+            return False
+        return True
+
     def _handle_signal(self, signal, current_price: float, current_time: datetime):
         """处理策略信号"""
         
@@ -259,6 +339,9 @@ class BacktestEngine:
         
         # 对冲信号：同时开多空
         if signal_type == "HEDGE" and side == "BOTH":
+            # 对冲信号也检查盈亏比（用多仓的 SL/TP 代表性检查）
+            if not self._check_min_rr(signal, current_price):
+                return
             self._handle_hedge_signal(signal, current_price, current_time)
             return
         
@@ -277,32 +360,53 @@ class BacktestEngine:
                     self._close_position(current_price, current_time, "SIGNAL")
             return
         
-        # 开仓信号
+        # 开仓信号（盈亏比不达标则跳过）
         if signal_type == "OPEN" and side:
+            if not self._check_min_rr(signal, current_price):
+                return
             if self.hedge_mode:
                 self._handle_hedge_open(signal, current_price, current_time)
             else:
                 self._handle_single_open(signal, current_price, current_time)
     
     def _handle_hedge_signal(self, signal, current_price: float, current_time: datetime):
-        """处理对冲信号（同时开多空）"""
+        """处理对冲信号（同时开多空，各自独立止损止盈）"""
         
-        # 如果没有多仓，开多
+        indicators = getattr(signal, "indicators", None) or {}
+        
+        # 如果没有多仓，开多（使用 indicators 中的独立 SL/TP）
         if not self.long_position:
-            self._open_long(signal, current_price, current_time)
+            long_sl = indicators.get("long_stop_loss", getattr(signal, "stop_loss", None))
+            long_tp = indicators.get("long_take_profit", getattr(signal, "take_profit", None))
+            self._open_long_with_sl_tp(signal, current_price, current_time, long_sl, long_tp)
         
-        # 如果没有空仓，开空
+        # 如果没有空仓，开空（使用 indicators 中的独立 SL/TP）
         if not self.short_position:
-            self._open_short(signal, current_price, current_time)
+            short_sl = indicators.get("short_stop_loss", getattr(signal, "stop_loss", None))
+            short_tp = indicators.get("short_take_profit", getattr(signal, "take_profit", None))
+            self._open_short_with_sl_tp(signal, current_price, current_time, short_sl, short_tp)
     
     def _handle_hedge_open(self, signal, current_price: float, current_time: datetime):
-        """对冲模式下处理单向开仓"""
+        """
+        对冲模式下处理单向 OPEN 信号（趋势模式切入时）
+        
+        逻辑：
+        - 收到 BUY → 平掉空仓（如果有），开多仓（如果没有）
+        - 收到 SELL → 平掉多仓（如果有），开空仓（如果没有）
+        - 从震荡对冲切到趋势单边时，先清理反向仓位
+        """
         side = signal.side
         
         if side == "BUY":
+            # 趋势看多：平掉空仓，保留/开多仓
+            if self.short_position:
+                self._close_short(current_price, current_time, "SIGNAL")
             if not self.long_position:
                 self._open_long(signal, current_price, current_time)
         elif side == "SELL":
+            # 趋势看空：平掉多仓，保留/开空仓
+            if self.long_position:
+                self._close_long(current_price, current_time, "SIGNAL")
             if not self.short_position:
                 self._open_short(signal, current_price, current_time)
     
@@ -326,6 +430,8 @@ class BacktestEngine:
         
         # 以损定仓计算仓位
         quantity = self._calc_position_size(entry_price, stop_loss, base_qty=1.0)
+        if quantity <= 0:
+            return  # 余额不足，跳过
         
         commission = entry_price * quantity * self.commission_rate
         self.balance -= commission
@@ -343,12 +449,18 @@ class BacktestEngine:
         )
     
     def _open_long(self, signal, entry_price: float, entry_time: datetime):
-        """开多仓"""
+        """开多仓（使用信号默认 SL/TP）"""
         stop_loss = getattr(signal, "stop_loss", None)
         take_profit = getattr(signal, "take_profit", None)
-        
+        self._open_long_with_sl_tp(signal, entry_price, entry_time, stop_loss, take_profit)
+    
+    def _open_long_with_sl_tp(self, signal, entry_price: float, entry_time: datetime,
+                               stop_loss: float = None, take_profit: float = None):
+        """开多仓（指定 SL/TP）"""
         # 以损定仓计算仓位（对冲模式基础仓位0.5）
         quantity = self._calc_position_size(entry_price, stop_loss, base_qty=0.5)
+        if quantity <= 0:
+            return  # 余额不足，跳过
         
         commission = entry_price * quantity * self.commission_rate
         self.balance -= commission
@@ -366,12 +478,18 @@ class BacktestEngine:
         )
     
     def _open_short(self, signal, entry_price: float, entry_time: datetime):
-        """开空仓"""
+        """开空仓（使用信号默认 SL/TP）"""
         stop_loss = getattr(signal, "stop_loss", None)
         take_profit = getattr(signal, "take_profit", None)
-        
+        self._open_short_with_sl_tp(signal, entry_price, entry_time, stop_loss, take_profit)
+    
+    def _open_short_with_sl_tp(self, signal, entry_price: float, entry_time: datetime,
+                                stop_loss: float = None, take_profit: float = None):
+        """开空仓（指定 SL/TP）"""
         # 以损定仓计算仓位
         quantity = self._calc_position_size(entry_price, stop_loss, base_qty=0.5)
+        if quantity <= 0:
+            return  # 余额不足，跳过
         
         commission = entry_price * quantity * self.commission_rate
         self.balance -= commission
@@ -385,7 +503,7 @@ class BacktestEngine:
             entry_time=entry_time,
             quantity=quantity,
             stop_loss=stop_loss,
-            take_profit=getattr(signal, "take_profit", None),
+            take_profit=take_profit,
         )
     
     # ========== 平仓方法 ==========

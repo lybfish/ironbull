@@ -140,6 +140,7 @@ def run_backtest():
         commission_rate = data.get("commission_rate", 0.001)
         lookback = data.get("lookback", 50)
         risk_per_trade = data.get("risk_per_trade", 0.0)  # 以损定仓
+        amount_usdt = data.get("amount_usdt", 0.0)        # 固定名义持仓
         
         # 加载策略
         try:
@@ -158,11 +159,18 @@ def run_backtest():
             initial_balance=initial_balance,
             commission_rate=commission_rate,
             risk_per_trade=risk_per_trade,
+            amount_usdt=amount_usdt,
         )
         
+        if amount_usdt > 0:
+            risk_mode = f"固定名义持仓({amount_usdt} USDT/单)"
+        elif risk_per_trade > 0:
+            risk_mode = "以损定仓"
+        else:
+            risk_mode = "固定仓位"
         log.info(
             f"开始回测: strategy={strategy_code}, symbol={symbol}, "
-            f"timeframe={timeframe}, candles={len(candles)}"
+            f"timeframe={timeframe}, candles={len(candles)}, mode={risk_mode}"
         )
         
         # 运行回测
@@ -245,6 +253,9 @@ def _backtest_result_to_dict(result: BacktestResult) -> dict:
                 "entry_time": t.entry_time.isoformat(),
                 "exit_price": t.exit_price,
                 "exit_time": t.exit_time.isoformat() if t.exit_time else None,
+                "quantity": t.quantity,
+                "stop_loss": t.stop_loss,
+                "take_profit": t.take_profit,
                 "exit_reason": t.exit_reason,
                 "pnl": round(t.pnl, 2) if t.pnl else None,
                 "pnl_pct": round(t.pnl_pct, 2) if t.pnl_pct else None,
@@ -354,6 +365,7 @@ def run_backtest_live():
         commission_rate = data.get("commission_rate", 0.001)
         lookback = data.get("lookback", 50)
         risk_per_trade = data.get("risk_per_trade", 0.0)  # 以损定仓
+        amount_usdt = data.get("amount_usdt", 0.0)        # 固定名义持仓（与线上一致）
         
         # 1. 从 data-provider 获取真实 K 线
         log.info(
@@ -405,9 +417,15 @@ def run_backtest_live():
             initial_balance=initial_balance,
             commission_rate=commission_rate,
             risk_per_trade=risk_per_trade,
+            amount_usdt=amount_usdt,
         )
         
-        risk_mode = "以损定仓" if risk_per_trade > 0 else "固定仓位"
+        if amount_usdt > 0:
+            risk_mode = f"固定名义持仓({amount_usdt} USDT/单)"
+        elif risk_per_trade > 0:
+            risk_mode = "以损定仓"
+        else:
+            risk_mode = "固定仓位"
         log.info(
             f"开始真实数据回测: strategy={strategy_code}, symbol={symbol}, "
             f"timeframe={timeframe}, candles={len(candles)}, mode={risk_mode}"

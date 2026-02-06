@@ -143,6 +143,7 @@ def check_signal(strategy_code: str, strategy_config: Dict,
         if signal:
             return {
                 "symbol": signal.symbol,
+                "signal_type": signal.signal_type,   # OPEN / CLOSE / HEDGE 等
                 "side": signal.side,
                 "entry_price": signal.entry_price,
                 "stop_loss": signal.stop_loss,
@@ -175,6 +176,32 @@ def set_cooldown(symbol: str, strategy: str):
     """设置冷却"""
     key = f"{strategy}:{symbol}"
     signal_cooldown[key] = datetime.now()
+
+
+def _split_hedge_signal(signal: Dict) -> List[Dict]:
+    """
+    将 HEDGE 信号拆分为两个独立的单向信号（BUY + SELL），
+    从 indicators 中读取各自的止损止盈。
+    返回: [long_signal, short_signal]
+    """
+    indicators = signal.get("indicators") or {}
+    base = {k: v for k, v in signal.items() if k not in ("side", "stop_loss", "take_profit", "signal_type")}
+
+    long_signal = {
+        **base,
+        "signal_type": "OPEN",
+        "side": "BUY",
+        "stop_loss": indicators.get("long_stop_loss", signal.get("stop_loss")),
+        "take_profit": indicators.get("long_take_profit", signal.get("take_profit")),
+    }
+    short_signal = {
+        **base,
+        "signal_type": "OPEN",
+        "side": "SELL",
+        "stop_loss": indicators.get("short_stop_loss", signal.get("stop_loss")),
+        "take_profit": indicators.get("short_take_profit", signal.get("take_profit")),
+    }
+    return [long_signal, short_signal]
 
 
 def _load_strategies_from_db():
@@ -253,37 +280,50 @@ def monitor_loop():
                         confidence = signal.get("confidence", 0)
 
                         if confidence >= min_conf:
-                            log.info(f"检测到信号: {signal['side']} {symbol} @ {signal['entry_price']}")
+                            # ── HEDGE 信号拆分为 BUY + SELL 两单 ──
+                            sig_type = (signal.get("signal_type") or "OPEN").upper()
+                            if sig_type == "HEDGE":
+                                signals_to_exec = _split_hedge_signal(signal)
+                                log.info(
+                                    f"检测到对冲信号: {symbol} @ {signal['entry_price']}，拆分为 BUY+SELL 两单"
+                                )
+                            else:
+                                signals_to_exec = [signal]
+                                log.info(f"检测到信号: {signal['side']} {symbol} @ {signal['entry_price']}")
 
-                            # 将策略层参数注入信号（amount_usdt、leverage），供执行层使用
-                            if strat_cfg.get("amount_usdt"):
-                                signal["amount_usdt"] = strat_cfg["amount_usdt"]
-                            if strat_cfg.get("leverage"):
-                                signal["leverage"] = strat_cfg["leverage"]
+                            for sig in signals_to_exec:
+                                # 将策略层参数注入信号（amount_usdt、leverage），供执行层使用
+                                if strat_cfg.get("amount_usdt"):
+                                    sig["amount_usdt"] = strat_cfg["amount_usdt"]
+                                if strat_cfg.get("leverage"):
+                                    sig["leverage"] = strat_cfg["leverage"]
 
-                            monitor_state["last_signal"] = signal
-                            monitor_state["total_signals"] += 1
+                                monitor_state["last_signal"] = sig
+                                monitor_state["total_signals"] += 1
 
-                            # 按策略多账户分发（若启用）
-                            if DISPATCH_BY_STRATEGY and signal.get("strategy"):
-                                try:
-                                    dispatch_result = execute_signal_by_strategy(signal)
-                                    log.info(
-                                        "strategy dispatch: targets=%s success_count=%s",
-                                        dispatch_result.get("targets", 0),
-                                        dispatch_result.get("success_count", 0),
-                                    )
-                                except Exception as e:
-                                    log.error("strategy dispatch error", error=str(e))
+                                # 按策略多账户分发（若启用）
+                                if DISPATCH_BY_STRATEGY and sig.get("strategy"):
+                                    try:
+                                        dispatch_result = execute_signal_by_strategy(sig)
+                                        log.info(
+                                            "strategy dispatch [%s]: targets=%s success_count=%s",
+                                            sig.get("side"),
+                                            dispatch_result.get("targets", 0),
+                                            dispatch_result.get("success_count", 0),
+                                        )
+                                    except Exception as e:
+                                        log.error("strategy dispatch error [%s]", sig.get("side"), error=str(e))
 
-                            # 推送通知
-                            if NOTIFY_ON_SIGNAL:
-                                result = notifier.send_signal(signal)
-                                if result.success:
-                                    log.info(f"信号已推送: {symbol}")
-                                    set_cooldown(symbol, code)
-                                else:
-                                    log.error(f"推送失败: {result.error}")
+                                # 推送通知
+                                if NOTIFY_ON_SIGNAL:
+                                    result = notifier.send_signal(sig)
+                                    if result.success:
+                                        log.info(f"信号已推送: {sig.get('side')} {symbol}")
+                                    else:
+                                        log.error(f"推送失败: {result.error}")
+
+                            # 冷却：无论单信号还是对冲，一轮只设一次冷却
+                            set_cooldown(symbol, code)
                         else:
                             log.debug(f"信号置信度不足: {confidence} < {min_conf}")
 

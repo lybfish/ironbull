@@ -74,10 +74,10 @@ auto_trade_max_positions: 3         # 最大同时持仓数
 auto_trade_min_confidence: 70       # 最低置信度要求
 
 # Risk Limits (AutoTrader 风控)
-risk_max_trade_amount: 100.0        # 单笔最大金额 (USDT)
-risk_max_daily_trades: 10           # 每日最大交易次数
-risk_max_open_positions: 3          # 最大持仓数量
-risk_max_daily_loss: 200.0          # 每日最大亏损 (USDT)
+risk_max_trade_amount: 200.0        # 单笔最大金额 (USDT)
+risk_max_daily_trades: 30           # 每日最大交易次数（3策略 x 3币种 x ~3笔/天）
+risk_max_open_positions: 12         # 最大持仓数量（3策略 x 3币种 + buffer）
+risk_max_daily_loss: 500.0          # 每日最大亏损 (USDT)
 risk_min_confidence: 70             # 最低置信度要求
 
 # Signal Monitor（全局运行参数，策略级配置已下沉到 dim_strategy 表）
@@ -94,6 +94,7 @@ default_atr_mult_tp: 3.0
 monitor_symbols:
   - BTCUSDT
   - ETHUSDT
+  - SOLUSDT
 monitor_timeframe: 1h
 min_confidence: 50
 signal_cooldown_minutes: 60

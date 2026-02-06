@@ -3,7 +3,7 @@ Market Regime Strategy - 市场状态识别策略
 
 功能：
 1. 自动识别市场状态（震荡/趋势）
-2. 震荡市场 → 双向开仓（对冲）
+2. 震荡市场 → 多空双开（对冲），各自独立止损止盈
 3. 趋势市场 → 单边开仓（顺势）
 
 识别方法（多指标融合）：
@@ -11,6 +11,14 @@ Market Regime Strategy - 市场状态识别策略
 - 布林带宽: 收窄=震荡，扩张=趋势
 - 均线排列: 缠绕=震荡，多头/空头排列=趋势
 - ATR变化: 萎缩=震荡，放大=趋势
+
+对冲模式说明（震荡市场）：
+- 同时开多仓和空仓
+- 多仓: SL = 入场 - ATR×2, TP = 入场 + ATR×3
+- 空仓: SL = 入场 + ATR×2, TP = 入场 - ATR×3
+- 价格上涨 → 多仓止盈 + 空仓止损 → 净赚 ATR×1
+- 价格下跌 → 空仓止盈 + 多仓止损 → 净赚 ATR×1
+- 风险: 剧烈波动来回扫损，两边都止损
 """
 
 from typing import Dict, List, Optional
@@ -64,8 +72,8 @@ class MarketRegimeStrategy(StrategyBase):
         
         # 市场识别参数
         self.adx_period = self.config.get("adx_period", 14)
-        self.adx_trend_threshold = self.config.get("adx_trend_threshold", 25)
-        self.adx_range_threshold = self.config.get("adx_range_threshold", 20)
+        self.adx_trend_threshold = self.config.get("adx_trend_threshold", 35)   # 收紧：35（原25）
+        self.adx_range_threshold = self.config.get("adx_range_threshold", 15)   # 收紧：15（原20）
         self.bb_period = self.config.get("bb_period", 20)
         self.bb_std = self.config.get("bb_std", 2.0)
         self.bb_squeeze_threshold = self.config.get("bb_squeeze_threshold", 0.02)
@@ -80,8 +88,8 @@ class MarketRegimeStrategy(StrategyBase):
         
         # ATR 参数
         self.atr_period = self.config.get("atr_period", 14)
-        self.atr_mult_sl = self.config.get("atr_mult_sl", 2.0)
-        self.atr_mult_tp = self.config.get("atr_mult_tp", 3.0)
+        self.atr_mult_sl = self.config.get("atr_mult_sl", 1.2)   # 收紧：1.2（原2.0）
+        self.atr_mult_tp = self.config.get("atr_mult_tp", 4.5)   # 放宽：4.5（原3.0）
     
     def _calc_adx(self, candles: List[Dict], period: int = 14) -> Optional[float]:
         """
@@ -375,28 +383,21 @@ class MarketRegimeStrategy(StrategyBase):
         signal = None
         
         if state.regime == "ranging":
-            # 震荡市场 → 单向开仓（根据方向），使用 ATR 止损
-            # 震荡市场中逆向操作（低买高卖）
-            if state.direction == "bearish":
-                # 价格偏低，做多
-                side = "BUY"
-                stop_loss = current_price - atr_val * self.atr_mult_sl
-                take_profit = current_price + atr_val * self.atr_mult_tp
-            else:
-                # 价格偏高，做空
-                side = "SELL"
-                stop_loss = current_price + atr_val * self.atr_mult_sl
-                take_profit = current_price - atr_val * self.atr_mult_tp
+            # 震荡市场 → 多空双开（对冲），各自独立止损止盈
+            long_stop_loss = round(current_price - atr_val * self.atr_mult_sl, 2)
+            long_take_profit = round(current_price + atr_val * self.atr_mult_tp, 2)
+            short_stop_loss = round(current_price + atr_val * self.atr_mult_sl, 2)
+            short_take_profit = round(current_price - atr_val * self.atr_mult_tp, 2)
             
             signal = StrategyOutput(
                 symbol=symbol,
-                signal_type="OPEN",
-                side=side,
+                signal_type="HEDGE",
+                side="BOTH",
                 entry_price=current_price,
-                stop_loss=round(stop_loss, 2),
-                take_profit=round(take_profit, 2),
+                stop_loss=long_stop_loss,         # 默认给多仓的 SL（兼容旧引擎）
+                take_profit=long_take_profit,     # 默认给多仓的 TP
                 confidence=int(state.strength),
-                reason=f"震荡市场{side}: ADX={state.adx:.1f}, BB宽={state.bb_width:.2%}, MA={state.ma_alignment}",
+                reason=f"震荡对冲: ADX={state.adx:.1f}, BB宽={state.bb_width:.2%}, MA={state.ma_alignment}",
                 indicators={
                     "regime": state.regime,
                     "direction": state.direction,
@@ -404,8 +405,13 @@ class MarketRegimeStrategy(StrategyBase):
                     "bb_width": round(state.bb_width, 4),
                     "ma_alignment": state.ma_alignment,
                     "strength": state.strength,
-                    "mode": "ranging_reversal",
+                    "mode": "hedge",
                     "atr": round(atr_val, 2),
+                    # 多空独立止损止盈
+                    "long_stop_loss": long_stop_loss,
+                    "long_take_profit": long_take_profit,
+                    "short_stop_loss": short_stop_loss,
+                    "short_take_profit": short_take_profit,
                 },
             )
         

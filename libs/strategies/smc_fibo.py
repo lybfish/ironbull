@@ -76,6 +76,19 @@ class SMCFiboStrategy(StrategyBase):
     - htf_ema_fast: 大周期快EMA（默认 20）
     - htf_ema_slow: 大周期慢EMA（默认 50）
     - require_htf_filter: 是否要求大周期过滤（默认 True）
+    
+    回踩拒绝确认（移植自 old1 版本）：
+    - require_retest: 是否要求回踩拒绝确认入场（默认 True）
+    - retest_bars: 信号产生后最多等待多少根K线确认（默认 20）
+    - pinbar_ratio: Pin Bar 影线/实体最小比值（默认 1.5）
+    - allow_engulf: 是否允许吞没形态作为确认（默认 True）
+    - retest_ignore_stop_touch: 回踩期间触及止损是否忽略（默认 False）
+    
+    确认流程：
+    1. 识别信号（Fibo + OB）→ 不立即入场，存为 pending
+    2. 后续K线检测：价格是否触达回踩区间
+    3. 触达后检测拒绝K线形态（Pin Bar / 吞没 / 晨星 / 暮星）
+    4. 确认后以当前收盘价入场；超时或触及止损则撤单
     """
     
     def __init__(self, config: dict = None):
@@ -105,6 +118,16 @@ class SMCFiboStrategy(StrategyBase):
         self.htf_ema_fast = self.config.get("htf_ema_fast", 20)         # 大周期快EMA
         self.htf_ema_slow = self.config.get("htf_ema_slow", 50)         # 大周期慢EMA
         self.require_htf_filter = self.config.get("require_htf_filter", True)  # 是否强制大周期过滤
+        
+        # 回踩确认参数（移植自 old1 版本 detect_rejection）
+        self.require_retest = self.config.get("require_retest", True)              # 是否要求回踩拒绝确认
+        self.retest_bars = self.config.get("retest_bars", 20)                      # 最大等待K线数
+        self.pinbar_ratio = self.config.get("pinbar_ratio", 1.5)                   # Pin Bar 影线/实体比
+        self.allow_engulf = self.config.get("allow_engulf", True)                  # 是否允许吞没形态确认
+        self.retest_ignore_stop_touch = self.config.get("retest_ignore_stop_touch", False)
+        
+        # 回踩状态（跨 analyze 调用保持）
+        self._pending = None
     
     def _aggregate_to_htf(self, candles: List[Dict]) -> List[Dict]:
         """
@@ -303,6 +326,186 @@ class SMCFiboStrategy(StrategyBase):
         
         return tp_distance / sl_distance
     
+    # ================================================================
+    #  回踩拒绝确认系统（移植自 old1 版本 detect_rejection）
+    # ================================================================
+
+    def _detect_rejection(
+        self,
+        candle: Dict,
+        prev: Optional[Dict],
+        prev2: Optional[Dict],
+        side: str,
+        zone_low: float,
+        zone_high: float,
+    ) -> Dict[str, bool]:
+        """
+        检测回踩拒绝K线形态
+        
+        支持四种形态：
+        - Pin Bar：长影线 + 小实体，影线朝止损方向
+        - 吞没（Engulfing）：后一根完全包住前一根，方向反转
+        - 晨星（Morning Star）：三根K线看涨反转（做多）
+        - 暮星（Evening Star）：三根K线看跌反转（做空）
+        """
+        o = candle["open"]
+        c = candle["close"]
+        h = candle["high"]
+        l = candle["low"]
+        body = max(1e-8, abs(c - o))
+        upper = h - max(o, c)
+        lower = min(o, c) - l
+
+        # 1. Close Reject：收盘价拒绝区间
+        if side == "BUY":
+            close_reject = c > zone_high and c > o   # 阳线收在区间上方
+            pinbar = lower >= self.pinbar_ratio * body and lower >= upper * 1.2
+        else:
+            close_reject = c < zone_low and c < o    # 阴线收在区间下方
+            pinbar = upper >= self.pinbar_ratio * body and upper >= lower * 1.2
+
+        # 2. Engulfing（吞没形态）
+        engulf = False
+        if self.allow_engulf and prev:
+            po, pc = prev["open"], prev["close"]
+            if side == "BUY":
+                engulf = c > o and pc < po and c >= po and o <= pc
+            else:
+                engulf = c < o and pc > po and o >= pc and c <= po
+
+        # 3. Morning Star / Evening Star（晨星 / 暮星）
+        morning_star = False
+        evening_star = False
+        if prev and prev2:
+            c1o, c1c = prev2["open"], prev2["close"]
+            c2o, c2c = prev["open"], prev["close"]
+            body1 = abs(c1c - c1o)
+            body2 = abs(c2c - c2o)
+            if side == "BUY":
+                if c1c < c1o and body1 > 0 and body2 < body1 * 0.5:
+                    if c > o and body > 0 and c >= (c1o + c1c) / 2.0:
+                        morning_star = True
+            else:
+                if c1c > c1o and body1 > 0 and body2 < body1 * 0.5:
+                    if c < o and body > 0 and c <= (c1o + c1c) / 2.0:
+                        evening_star = True
+
+        return {
+            "close_reject": close_reject,
+            "pinbar": pinbar,
+            "engulf": engulf,
+            "morning_star": morning_star,
+            "evening_star": evening_star,
+        }
+
+    def _check_pending(self, symbol: str, candles: List[Dict]):
+        """
+        检查待确认信号的回踩状态
+        
+        返回:
+        - StrategyOutput: 回踩确认成功，立即入场
+        - "waiting": 仍在等待确认
+        - "expired" / "stop_touched" / "rr_insufficient": 信号取消
+        """
+        p = self._pending
+        if not p:
+            return "no_pending"
+
+        bars_waited = len(candles) - p["created_at"]
+
+        # ── 超时检查 ──
+        if bars_waited > self.retest_bars:
+            self._pending = None
+            return "expired"
+
+        current = candles[-1]
+        prev = candles[-2] if len(candles) >= 2 else None
+        prev2 = candles[-3] if len(candles) >= 3 else None
+        side = p["side"]
+
+        # ── 回踩期间触及止损 → 撤单 ──
+        if not self.retest_ignore_stop_touch:
+            if side == "BUY" and current["low"] <= p["stop_loss"]:
+                self._pending = None
+                return "stop_touched"
+            if side == "SELL" and current["high"] >= p["stop_loss"]:
+                self._pending = None
+                return "stop_touched"
+
+        # ── 检测价格是否触达回踩区间 ──
+        touched = current["low"] <= p["zone_high"] and current["high"] >= p["zone_low"]
+        if touched and not p["touched"]:
+            p["touched"] = True
+
+        # ── 触达后检测拒绝形态 ──
+        if p["touched"]:
+            rej = self._detect_rejection(
+                current, prev, prev2, side,
+                p["zone_low"], p["zone_high"],
+            )
+            has_pattern = (
+                rej["pinbar"] or rej["engulf"]
+                or rej["morning_star"] or rej["evening_star"]
+            )
+            if rej["close_reject"] and has_pattern:
+                # ── 回踩确认成功！以当前收盘价入场 ──
+                entry_price = current["close"]
+
+                # 重新检查盈亏比
+                rr_ratio = self._calc_rr_ratio(
+                    entry_price, p["stop_loss"], p["take_profit"]
+                )
+                if rr_ratio < self.min_rr:
+                    self._pending = None
+                    return "rr_insufficient"
+
+                # 重新计算仓位
+                position_size = self._calc_position_size(entry_price, p["stop_loss"])
+
+                # 确定拒绝形态名称
+                patterns = []
+                if rej["pinbar"]:
+                    patterns.append("PinBar")
+                if rej["engulf"]:
+                    patterns.append("吞没")
+                if rej["morning_star"]:
+                    patterns.append("晨星")
+                if rej["evening_star"]:
+                    patterns.append("暮星")
+                pattern_str = "+".join(patterns)
+
+                # 更新指标
+                indicators = dict(p["indicators"])
+                indicators["confirmation"] = pattern_str
+                indicators["bars_waited"] = bars_waited
+                indicators["rr_ratio"] = round(rr_ratio, 2)
+                indicators["position_size"] = position_size
+
+                side_label = "做多" if side == "BUY" else "做空"
+                fibo_level = p.get("fibo_level", 0)
+
+                signal = StrategyOutput(
+                    symbol=symbol,
+                    signal_type="OPEN",
+                    side=side,
+                    entry_price=entry_price,
+                    stop_loss=round(p["stop_loss"], 2),
+                    take_profit=round(p["take_profit"], 2),
+                    confidence=min(95, p["confidence"] + 5),
+                    reason=(
+                        f"SMC+Fibo{side_label}: 回踩{fibo_level:.1%}位"
+                        f" {pattern_str}确认({bars_waited}根K线), "
+                        f"盈亏比{rr_ratio:.2f}, 仓位{position_size}"
+                    ),
+                    indicators=indicators,
+                )
+                self._pending = None
+                return signal
+
+        return "waiting"
+
+    # ================================================================
+
     def analyze(
         self,
         symbol: str,
@@ -314,6 +517,15 @@ class SMCFiboStrategy(StrategyBase):
         
         if len(candles) < self.lookback:
             return None
+        
+        # ── 回踩确认检查（优先处理待确认信号）──
+        if self.require_retest and self._pending:
+            result = self._check_pending(symbol, candles)
+            if isinstance(result, StrategyOutput):
+                return result          # 确认成功，返回入场信号
+            if result == "waiting":
+                return None            # 仍在等待，不检测新信号
+            # expired / stop_touched / rr_insufficient → pending 已清除，继续检测新信号
         
         current = candles[-1]
         current_price = current["close"]
@@ -386,7 +598,15 @@ class SMCFiboStrategy(StrategyBase):
                     else:
                         stop_loss = recent_low * (1 - self.sl_buffer_pct)
                     
+                    # 安全检查: 做多止损必须低于入场价
+                    if stop_loss >= current_price:
+                        return None
+                    
                     sl_distance = current_price - stop_loss
+                    
+                    # 安全检查: 止损距离不能太窄（< 入场价 0.1%）
+                    if sl_distance < current_price * 0.001:
+                        return None
                     
                     # 用斐波那契扩展位作为止盈目标
                     extension = fibo_extension(recent_high, recent_low, [1.272, 1.618])
@@ -493,7 +713,15 @@ class SMCFiboStrategy(StrategyBase):
                     else:
                         stop_loss = recent_high * (1 + self.sl_buffer_pct)
                     
+                    # 安全检查: 做空止损必须高于入场价
+                    if stop_loss <= current_price:
+                        return None
+                    
                     sl_distance = stop_loss - current_price
+                    
+                    # 安全检查: 止损距离不能太窄（< 入场价 0.1%）
+                    if sl_distance < current_price * 0.001:
+                        return None
                     
                     # 斐波那契扩展作为止盈
                     take_profit = recent_low - (swing_range * 0.272)
@@ -560,5 +788,24 @@ class SMCFiboStrategy(StrategyBase):
                                 "atr": round(atr_val, 2) if atr_val else None,
                             },
                         )
+        
+        # ── 回踩确认模式：不立即入场，创建待确认信号 ──
+        if signal is not None and self.require_retest:
+            fibo_level = (signal.indicators or {}).get("fibo_level", 0)
+            self._pending = {
+                "symbol": symbol,
+                "side": signal.side,
+                "entry_price": signal.entry_price,
+                "stop_loss": float(signal.stop_loss),
+                "take_profit": float(signal.take_profit),
+                "zone_low": min(signal.entry_price, float(signal.stop_loss)),
+                "zone_high": max(signal.entry_price, float(signal.stop_loss)),
+                "created_at": len(candles),
+                "touched": True,       # 检测时价格已在 Fibo 区间
+                "confidence": signal.confidence,
+                "indicators": signal.indicators or {},
+                "fibo_level": fibo_level,
+            }
+            return None   # 等待回踩拒绝确认
         
         return signal
