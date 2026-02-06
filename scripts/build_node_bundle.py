@@ -62,11 +62,26 @@ def main():
         encoding="utf-8",
     )
 
-    # 4) 节点用 config：仅 log，无 db/redis
+    # 4) 节点用 config：仅 log，无 db/redis；可选中心鉴权 + 心跳
     node_yaml = """# 执行节点用配置（不连数据库、不连 Redis）
 service_name: execution-node
 log_level: INFO
 log_structured: false
+
+# ---- 心跳（节点 → 中心）----
+# 中心 data-api 地址，如 http://192.168.1.1:8026；为空则不发心跳
+# center_url: ""
+# 本节点编码，需与中心 dim_execution_node.node_code 一致
+# node_code: ""
+# 心跳间隔（秒），默认 60
+# heartbeat_interval: 60
+
+# ---- 仅中心可调（鉴权）----
+# 与中心配置相同密钥后，节点开启鉴权
+# node_auth_enabled: true
+# node_auth_secret: ""
+# 可选 IP 白名单（逗号分隔，为空则不校验）
+# node_allowed_ips: ""
 """
     (DIST_DIR / "config" / "default.yaml").write_text(node_yaml, encoding="utf-8")
 
@@ -78,6 +93,7 @@ pydantic>=2.0.0
 python-multipart>=0.0.6
 pyyaml>=6.0
 ccxt>=4.0.0
+httpx>=0.24.0
 """
     (DIST_DIR / "requirements.txt").write_text(node_req, encoding="utf-8")
 

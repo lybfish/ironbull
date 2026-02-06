@@ -591,8 +591,12 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
                 except Exception as eq:
                     log.warning("node execute queue push failed node_id=%s, fallback to direct POST: %s", node_id, eq)
             try:
+                node_headers = {}
+                secret = config.get_str("node_auth_secret", "").strip()
+                if secret:
+                    node_headers["X-Center-Token"] = secret
                 with httpx.Client(timeout=30.0) as client:
-                    resp = client.post(f"{base_url}/api/execute", json=payload)
+                    resp = client.post(f"{base_url}/api/execute", json=payload, headers=node_headers or None)
                     resp.raise_for_status()
                     data = resp.json()
             except Exception as e:

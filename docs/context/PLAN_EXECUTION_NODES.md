@@ -62,9 +62,23 @@
 - **POST /api/sync-positions**：body 带 account 列表 + 凭证；节点查交易所持仓并返回；中心写 fact_position。
 - 中心通过 data-api 的 **POST /api/sync/balance**、**POST /api/sync/positions** 触发；内部调用 `libs/sync_node` 向各节点请求并写库。
 
-### 5.3 可选
+### 5.3 心跳（已实现）
 
-- **心跳**：节点 POST 中心 `/api/nodes/{node_code}/heartbeat`，用于注册与发现；与执行无关。
+- **自动心跳**：节点配置 `center_url`（中心 data-api 地址）和 `node_code`（与 dim_execution_node.node_code 一致）后，节点启动时自动创建后台任务，按 `heartbeat_interval`（默认 60s）定时 POST 中心 `/api/nodes/{node_code}/heartbeat`，中心更新 `last_heartbeat_at`。
+- **鉴权联动**：若同时配置了 `node_auth_secret`，心跳请求也会带上 `X-Center-Token` 头。
+- **可选关闭**：不配置 `center_url` 或 `node_code` 时不发心跳，行为与旧版一致。
+- **健康检查**：GET /health 中展示心跳配置状态（enabled、center_url、node_code、interval）。
+
+### 5.4 仅中心可调（鉴权）
+
+- **目标**：保证子机接口只被中心调用，拒绝未授权请求。
+- **方式**：中心与节点配置同一密钥（`node_auth_secret`）；中心请求时带 Header `X-Center-Token: <密钥>`，节点校验。
+- **节点配置**（config 或环境变量）：
+  - `node_auth_enabled: true` — 开启鉴权（默认 false，便于兼容旧部署）。
+  - `node_auth_secret: "your-shared-secret"` — 与中心一致。
+  - 可选 `node_allowed_ips: "中心IP1,中心IP2"` — IP 白名单，为空则不校验 IP。
+- **中心配置**：`node_auth_secret: "your-shared-secret"`（与节点一致）；未配或为空则不带头，节点未开启鉴权时行为不变。
+- **实现**：execution-node 对 `/api/execute`、`/api/sync-balance`、`/api/sync-positions` 做依赖校验；中心侧 signal-monitor、sync_node、node_execute_worker 在 POST 时带上 `X-Center-Token`。
 
 ---
 

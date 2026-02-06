@@ -460,6 +460,10 @@
 - **NODE_EXECUTE_QUEUE**（Redis）：signal-monitor 配置 **use_node_execution_queue=True** 时，将远程节点任务投递到队列；否则直接 POST。
 - **scripts/node_execute_worker.py**：消费队列，向节点 POST /api/execute，收到结果后调用 apply_remote_results 在中心写库与结算；支持 ack/nack 与死信。
 
+### 鉴权 + 心跳 ✅
+- **仅中心可调鉴权**：节点 `node_auth_enabled` + `node_auth_secret`（可选 `node_allowed_ips`）；中心 signal-monitor / sync_node / node_execute_worker 在 POST 节点时带 `X-Center-Token` 头。
+- **子机自动心跳**：execution-node 配置 `center_url` + `node_code` 后，启动时自动定时 POST 中心 `/api/nodes/{node_code}/heartbeat`（默认 60s）；心跳同样支持 `node_auth_secret` 鉴权头；GET /health 展示心跳状态。
+
 详见 [docs/context/PLAN_EXECUTION_NODES.md](context/PLAN_EXECUTION_NODES.md)。
 
 ---

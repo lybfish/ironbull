@@ -3,17 +3,20 @@ Execution Node - 子服务器执行端
 
 接收中心 POST /api/execute，用请求中的凭证调交易所下单，同步返回执行结果。
 不连数据库，不写库。
+支持定时心跳：配置 center_url + node_code 后，节点启动时自动向中心发送心跳。
 """
 
 import sys
 import os
 import asyncio
+from contextlib import asynccontextmanager
 from typing import Dict, List, Any, Optional
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Depends
 from pydantic import BaseModel
+import httpx
 
 from libs.core import get_config, get_logger, setup_logging
 from libs.trading.live_trader import LiveTrader
@@ -27,7 +30,85 @@ setup_logging(
 )
 log = get_logger("execution-node")
 
-app = FastAPI(title="Execution Node", version="1.0")
+# ---------- 心跳 ----------
+
+# 中心 data-api 地址，如 http://192.168.1.1:8026；为空则不发心跳
+CENTER_URL = config.get_str("center_url", "").strip().rstrip("/")
+# 本节点编码，需与中心 dim_execution_node.node_code 一致
+NODE_CODE = config.get_str("node_code", "").strip()
+# 心跳间隔（秒），默认 60
+HEARTBEAT_INTERVAL = config.get_int("heartbeat_interval", 60)
+
+_heartbeat_task: Optional[asyncio.Task] = None
+
+
+async def _heartbeat_loop():
+    """后台任务：定时向中心 POST /api/nodes/{node_code}/heartbeat"""
+    url = f"{CENTER_URL}/api/nodes/{NODE_CODE}/heartbeat"
+    secret = config.get_str("node_auth_secret", "").strip()
+    headers = {}
+    if secret:
+        headers["X-Center-Token"] = secret
+    log.info("heartbeat started", url=url, interval=HEARTBEAT_INTERVAL)
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(url, headers=headers or None)
+                if resp.status_code == 200:
+                    log.debug("heartbeat ok")
+                else:
+                    log.warning("heartbeat response unexpected", status=resp.status_code, body=resp.text[:200])
+        except Exception as e:
+            log.warning("heartbeat failed", error=str(e))
+        await asyncio.sleep(HEARTBEAT_INTERVAL)
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    """FastAPI lifespan：启动时开始心跳，关闭时取消"""
+    global _heartbeat_task
+    if CENTER_URL and NODE_CODE:
+        _heartbeat_task = asyncio.create_task(_heartbeat_loop())
+    else:
+        log.info("heartbeat disabled (center_url or node_code not configured)")
+    yield
+    if _heartbeat_task and not _heartbeat_task.done():
+        _heartbeat_task.cancel()
+        try:
+            await _heartbeat_task
+        except asyncio.CancelledError:
+            pass
+        log.info("heartbeat stopped")
+
+
+app = FastAPI(title="Execution Node", version="1.0", lifespan=lifespan)
+
+
+def _allowed_ips_set():
+    """解析 node_allowed_ips 为集合，空则返回 None（不校验 IP）"""
+    raw = config.get_str("node_allowed_ips", "").strip()
+    if not raw:
+        return None
+    return {ip.strip() for ip in raw.split(",") if ip.strip()}
+
+
+async def verify_center_token(request: Request):
+    """仅中心可调：校验 X-Center-Token 与可选 IP 白名单；未开启鉴权则放行"""
+    if not config.get_bool("node_auth_enabled", False):
+        return
+    secret = config.get_str("node_auth_secret", "").strip()
+    if not secret:
+        return
+    token = (request.headers.get("X-Center-Token") or "").strip()
+    if token != secret:
+        log.warning("center token mismatch or missing")
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    allowed = _allowed_ips_set()
+    if allowed:
+        client_host = request.client.host if request.client else ""
+        if client_host not in allowed:
+            log.warning("center ip not allowed", client_host=client_host)
+            raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 class TaskItem(BaseModel):
@@ -93,7 +174,7 @@ async def _sync_balance_one(task: TaskItem, sandbox: bool) -> Dict[str, Any]:
             await trader.close()
         except Exception:
             pass
-        log.error("sync_balance account_id=%s error=%s", task.account_id, e)
+        log.error("sync_balance error", account_id=task.account_id, error=str(e))
         return {
             "account_id": task.account_id,
             "tenant_id": task.tenant_id,
@@ -148,7 +229,7 @@ async def _sync_positions_one(task: TaskItem, sandbox: bool) -> Dict[str, Any]:
             await trader.close()
         except Exception:
             pass
-        log.error("sync_positions account_id=%s error=%s", task.account_id, e)
+        log.error("sync_positions error", account_id=task.account_id, error=str(e))
         return {
             "account_id": task.account_id,
             "tenant_id": task.tenant_id,
@@ -203,7 +284,7 @@ async def _run_one(
                     take_profit=take_profit,
                 )
             except Exception as e:
-                log.warning("set_sl_tp failed account_id=%s: %s", task.account_id, e)
+                log.warning("set_sl_tp failed", account_id=task.account_id, error=str(e))
         await trader.close()
         return {
             "account_id": task.account_id,
@@ -219,7 +300,7 @@ async def _run_one(
             await trader.close()
         except Exception:
             pass
-        log.error("execute account_id=%s error=%s", task.account_id, e)
+        log.error("execute error", account_id=task.account_id, error=str(e))
         return {
             "account_id": task.account_id,
             "success": False,
@@ -232,7 +313,7 @@ async def _run_one(
 
 
 @app.post("/api/execute")
-def api_execute(req: ExecuteRequest):
+def api_execute(req: ExecuteRequest, _: None = Depends(verify_center_token)):
     """执行信号：对 tasks 中每个账户下单，返回 results（同步）"""
     signal = req.signal or {}
     symbol = signal.get("symbol") or "BTC/USDT"
@@ -263,7 +344,7 @@ def api_execute(req: ExecuteRequest):
 
 
 @app.post("/api/sync-balance")
-def api_sync_balance(req: SyncTasksRequest):
+def api_sync_balance(req: SyncTasksRequest, _: None = Depends(verify_center_token)):
     """同步余额：对 tasks 中每个账户查交易所余额，返回 results（不写库）"""
     if not req.tasks:
         return {"success": True, "results": []}
@@ -275,7 +356,7 @@ def api_sync_balance(req: SyncTasksRequest):
 
 
 @app.post("/api/sync-positions")
-def api_sync_positions(req: SyncTasksRequest):
+def api_sync_positions(req: SyncTasksRequest, _: None = Depends(verify_center_token)):
     """同步持仓：对 tasks 中每个账户查交易所持仓，返回 results（不写库）"""
     if not req.tasks:
         return {"success": True, "results": []}
@@ -288,7 +369,17 @@ def api_sync_positions(req: SyncTasksRequest):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "execution-node"}
+    heartbeat_info = {}
+    if CENTER_URL and NODE_CODE:
+        heartbeat_info = {
+            "heartbeat_enabled": True,
+            "center_url": CENTER_URL,
+            "node_code": NODE_CODE,
+            "heartbeat_interval": HEARTBEAT_INTERVAL,
+        }
+    else:
+        heartbeat_info = {"heartbeat_enabled": False}
+    return {"status": "ok", "service": "execution-node", **heartbeat_info}
 
 
 if __name__ == "__main__":

@@ -100,9 +100,13 @@ def run():
             ],
         }
 
+        node_headers = {}
+        secret = config.get_str("node_auth_secret", "").strip()
+        if secret:
+            node_headers["X-Center-Token"] = secret
         try:
             with httpx.Client(timeout=30.0) as client:
-                resp = client.post(f"{base_url}/api/execute", json=post_body)
+                resp = client.post(f"{base_url}/api/execute", json=post_body, headers=node_headers or None)
                 resp.raise_for_status()
                 data = resp.json()
         except Exception as e:

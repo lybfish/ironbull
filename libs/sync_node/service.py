@@ -69,9 +69,13 @@ def sync_balance_from_nodes(
         if not accounts:
             continue
         payload = {"tasks": _tasks_for_node(accounts), "sandbox": sandbox}
+        node_headers = {}
+        secret = config.get_str("node_auth_secret", "").strip()
+        if secret:
+            node_headers["X-Center-Token"] = secret
         try:
             with httpx.Client(timeout=timeout) as client:
-                resp = client.post(f"{base_url}/api/sync-balance", json=payload)
+                resp = client.post(f"{base_url}/api/sync-balance", json=payload, headers=node_headers or None)
                 resp.raise_for_status()
                 data = resp.json()
         except Exception as e:
@@ -136,9 +140,13 @@ def sync_positions_from_nodes(
         if not accounts:
             continue
         payload = {"tasks": _tasks_for_node(accounts), "sandbox": sandbox}
+        node_headers = {}
+        secret = config.get_str("node_auth_secret", "").strip()
+        if secret:
+            node_headers["X-Center-Token"] = secret
         try:
             with httpx.Client(timeout=timeout) as client:
-                resp = client.post(f"{base_url}/api/sync-positions", json=payload)
+                resp = client.post(f"{base_url}/api/sync-positions", json=payload, headers=node_headers or None)
                 resp.raise_for_status()
                 data = resp.json()
         except Exception as e:
