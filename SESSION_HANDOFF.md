@@ -106,7 +106,10 @@
   10. **12 个接口入参 `user_id` 统一改为 `email`**（user/info、apikey、unbind、recharge、logs、strategy open/close/strategies、team、set-market-node、rewards、withdraw、withdrawals）
   11. **点卡转账改为类型分开**：新增 `type` 参数（1=自充互转 self→self，2=赠送互转 gift→gift），返回 `type`/`type_name`/`from_self_after`/`from_gift_after`/`to_self_after`/`to_gift_after`
   12. 点卡流水响应字段 `user_id` → `member_id`（仅返回层映射，内部统一 `user_id`）
-- 19 个接口请求参数和返回字段全部与文档 v1.3.1 一致
+- **第四轮（文档再次对齐）**：
+  13. **status 对外 1=正常 2=禁用**：用户列表、用户详情、accounts[].status 在响应中映射（库仍 0/1）
+  14. **点卡流水**：`create_time` 改为 int 时间戳，新增 `create_time_str`（Y-m-d H:i:s）；`change_type_name` 按是否传 email 分场景（用户流水：1 充值 2 赠送 3 转出 4 转入 5 盈利扣费；商户流水：1 后台充值 2 后台赠送 3 分发给用户）；用户流水增加 `source_type_name`（自充/赠送）
+- 19 个接口请求参数和返回字段与文档 v1.3.1 一致
 
 ### 监控告警系统（已完成）
 - **libs/monitor/ 模块**（4 个组件）：
@@ -128,7 +131,7 @@
 - **财务闭环**：所有余额变动（点卡、奖励）均有流水记录；提现有完整审核流程
 - **监控告警**：轻量级巡检守护 + Telegram 告警 + 管理后台监控面板
 - **命名统一**：全项目 `member_id` → `user_id`，仅 point-card/logs 返回层映射为 `member_id`
-- **测试**：69 个用例全部通过（原 47 + 监控模块 22）
+- **测试**：90 个用例全部通过（含监控 22、Merchant API 接口级等）
 
 ### 性能与稳定性优化（已完成）
 - **Dashboard 缓存**：`GET /api/dashboard/summary` 使用 Redis 缓存 60s（key: `ironbull:cache:dashboard:summary`），Redis 不可用时自动回退到直查 DB；响应增加 `cached: true/false`

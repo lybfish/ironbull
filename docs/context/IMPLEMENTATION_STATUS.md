@@ -552,6 +552,10 @@
 - 19 个接口请求参数和返回字段全部与文档 v1.3.1 一致
 - **测试**：47 个用例全部通过（含 3 个转账类型测试）
 
+### 第四轮：文档再次对齐（status / 点卡流水）✅
+- **status 对外约定**：用户列表、用户详情、user/info 内 accounts[].status 响应为 1=正常、2=禁用（库内仍 0/1，仅 API 层映射）
+- **点卡流水**：`create_time` 为 int 时间戳，`create_time_str` 为 Y-m-d H:i:s；`change_type_name` 按是否传 email 分用户/商户两套文案；用户流水增加 `source_type_name`（1=自充 2=赠送）
+
 ---
 
 ## 已完成（Done）- 监控告警系统 ✅
@@ -606,6 +610,22 @@
   - TestNodeChecker（4 例）：在线/离线/无心跳/to_dict
   - TestDbChecker（4 例）：MySQL+Redis正常/MySQL失败/Redis失败/to_dict
   - TestAlerter（9 例）：首次告警/去重/冷却后重发/恢复通知/已正常跳过恢复/process_service/process_node/process_db
+
+---
+
+## 已完成（Done）- 性能与稳定性优化 ✅
+
+### Dashboard 缓存 ✅
+- `GET /api/dashboard/summary` 使用 Redis 缓存 60s（key: `ironbull:cache:dashboard:summary`）
+- Redis 不可用时回退直查 DB；响应增加 `cached: true/false`
+
+### 订单/成交分页 total ✅
+- `count_orders` / `count_fills` 与 `list_orders` / `list_fills` 使用相同过滤条件
+- Service 层返回 `(list, total)`；`GET /api/orders`、`GET /api/fills` 的 `total` 为符合条件的总条数
+
+### 索引迁移 013 ✅
+- `migrations/013_perf_order_fill_list_indexes.sql`：`idx_order_tenant_account_time`、`idx_fill_tenant_account_time`
+- `scripts/run_migration_013.py`：幂等执行（先查 information_schema 再 ADD INDEX）
 
 ---
 
