@@ -17,7 +17,11 @@ from ..schemas import ok
 
 router = APIRouter(prefix="/merchant", tags=["pointcard"])
 
-CHANGE_TYPE_NAME = {1: "后台充值", 2: "后台赠送", 3: "分发给用户", 4: "转入", 5: "扣费"}
+# 商户代理商流水（未传 email）：change_type 中文名
+CHANGE_TYPE_NAME_AGENT = {1: "后台充值", 2: "后台赠送", 3: "分发给用户"}
+# 用户点卡流水（传了 email）：change_type 中文名
+CHANGE_TYPE_NAME_USER = {1: "充值", 2: "赠送", 3: "转出", 4: "转入", 5: "盈利扣费"}
+SOURCE_TYPE_NAME = {1: "自充", 2: "赠送"}
 
 
 @router.get("/balance")
@@ -84,13 +88,19 @@ def point_card_logs(
         start_time=start_time,
         end_time=end_time,
     )
+    is_user_flow = filter_user_id is not None
+    name_map = CHANGE_TYPE_NAME_USER if is_user_flow else CHANGE_TYPE_NAME_AGENT
     list_data = []
     for log in items:
-        list_data.append({
+        created_ts = int(log.created_at.timestamp()) if log.created_at else 0
+        created_str = log.created_at.strftime("%Y-%m-%d %H:%M:%S") if log.created_at else ""
+        # 用户流水：source_type 按文档 1=自充 2=赠送（用 card_type）；商户流水用原 source_type
+        src_type = (log.card_type or 0) if is_user_flow else (log.source_type or 0)
+        row = {
             "id": log.id,
             "change_type": log.change_type,
-            "change_type_name": CHANGE_TYPE_NAME.get(log.change_type, ""),
-            "source_type": log.source_type,
+            "change_type_name": name_map.get(log.change_type, ""),
+            "source_type": src_type,
             "amount": float(log.amount or 0),
             "before_self": float(log.before_self or 0),
             "after_self": float(log.after_self or 0),
@@ -99,6 +109,10 @@ def point_card_logs(
             "member_id": log.related_user_id or log.user_id,
             "to_type": log.card_type,
             "remark": log.remark or "",
-            "create_time": log.created_at.strftime("%Y-%m-%d %H:%M:%S") if log.created_at else "",
-        })
+            "create_time": created_ts,
+            "create_time_str": created_str,
+        }
+        if is_user_flow and (log.card_type or 0) in SOURCE_TYPE_NAME:
+            row["source_type_name"] = SOURCE_TYPE_NAME.get(log.card_type, "")
+        list_data.append(row)
     return ok({"list": list_data, "total": total, "page": page, "limit": limit})

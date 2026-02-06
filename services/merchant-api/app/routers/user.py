@@ -93,6 +93,7 @@ def users_list(
     repo = MemberRepository(db)
     items, total = repo.list_users(tenant.id, page, limit, email, invite_code, status)
     list_data = []
+    # 文档约定：status 1=正常 2=禁用（库存 0=禁用 1=正常）
     for u in items:
         list_data.append({
             "user_id": u.id,
@@ -103,7 +104,7 @@ def users_list(
             "point_card_self": float(u.point_card_self or 0),
             "point_card_gift": float(u.point_card_gift or 0),
             "point_card_total": float(u.point_card_self or 0) + float(u.point_card_gift or 0),
-            "status": u.status,
+            "status": 2 if u.status == 0 else 1,
             "create_time": u.created_at.strftime("%Y-%m-%d %H:%M:%S") if u.created_at else "",
         })
     return ok({"list": list_data, "total": total, "page": page, "limit": limit})
@@ -132,6 +133,7 @@ def user_info(
             inviter_invite_code = inviter.invite_code or ""
     # 账户
     accounts = repo.get_accounts_by_user(user.id)
+    # 文档约定：accounts[].status 1=正常 2=禁用（库存 0=禁用 1=正常）
     acc_list = [{
         "account_id": a.id,
         "exchange": a.exchange,
@@ -139,7 +141,7 @@ def user_info(
         "balance": float(a.balance or 0),
         "futures_balance": float(a.futures_balance or 0),
         "futures_available": float(a.futures_available or 0),
-        "status": a.status,
+        "status": 2 if (a.status or 0) == 0 else 1,
     } for a in accounts]
     # 策略
     strategies = svc.get_user_strategies(user.id, tenant.id)
@@ -150,12 +152,13 @@ def user_info(
     invite_count = repo.count_invitees(user.id)
     sub_ids = repo.get_all_sub_user_ids(user.id)
     self_hold = float(level_svc.get_self_hold(user.id))
+    # 文档约定：status 1=正常 2=禁用（库存 0=禁用 1=正常）
     return ok({
         "user_id": user.id,
         "email": user.email,
         "invite_code": user.invite_code,
         "inviter_invite_code": inviter_invite_code,
-        "status": user.status,
+        "status": 2 if user.status == 0 else 1,
         "create_time": user.created_at.strftime("%Y-%m-%d %H:%M:%S") if user.created_at else "",
         "invite_count": invite_count,
         "point_card_self": float(user.point_card_self or 0),

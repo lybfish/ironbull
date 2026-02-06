@@ -554,6 +554,61 @@
 
 ---
 
+## 已完成（Done）- 监控告警系统 ✅
+
+### libs/monitor/ 监控模块 ✅
+- 状态：已实现并验证（22 个单元测试通过）
+- 组件：
+  - `health_checker.py`：服务健康巡检器 — 并发 HTTP GET 各服务 `/health` 端点，返回 status/latency/error
+  - `node_checker.py`：节点心跳超时检测 — 查 `dim_execution_node.last_heartbeat_at`，超时标记为 offline
+  - `db_checker.py`：DB/Redis 连通性检测 — MySQL `SELECT 1` + Redis `ping`
+  - `alerter.py`：告警管理器 — 集成 `TelegramNotifier.send_alert()`；去重（同一告警 N 秒内不重复发送）；恢复通知（服务恢复时发一条恢复消息）；告警级别 critical/warning/info
+
+### scripts/monitor_daemon.py 巡检守护脚本 ✅
+- 状态：已实现
+- 功能：
+  - 定时循环（默认 60s）执行三项检查：服务健康、节点心跳、DB/Redis
+  - 状态变更时通过 alerter 发送 Telegram 告警
+  - 支持参数：`--interval 60`、`--services data-api,merchant-api,signal-monitor`
+  - SIGINT/SIGTERM 优雅退出
+  - 由 `deploy/start.sh` 管理（start/stop/restart/status）
+
+### data-api 监控端点 ✅
+- `GET /api/monitor/status`：返回所有服务 + 节点 + DB/Redis 实时状态
+- 需 admin JWT 鉴权
+- 响应结构：`{ overall, services[], nodes[], db: { mysql_ok, redis_ok, latency... } }`
+
+### admin-web 系统监控页面 ✅
+- 页面：`services/admin-web/src/views/Monitor.vue`
+- 功能：
+  - 总体状态卡片（overall healthy/degraded）
+  - 服务健康列表（名称、状态标签、延迟、错误信息）
+  - 节点心跳表（编码、名称、在线/离线、最后心跳时间、距今秒数）
+  - DB/Redis 详情面板（状态、延迟、错误信息）
+  - 30 秒自动刷新 + 手动刷新按钮
+- 侧边栏：新增"系统监控"菜单项
+
+### 配置项 ✅
+- `config/default.yaml` 新增：
+  - `monitor_enabled`：是否启用监控守护（默认 true）
+  - `monitor_interval`：巡检间隔秒数（默认 60）
+  - `monitor_services`：服务列表（name + url）
+  - `monitor_node_timeout`：节点心跳超时秒数（默认 180）
+  - `monitor_alert_cooldown`：同一告警去重间隔秒数（默认 300）
+
+### deploy/start.sh 集成 ✅
+- 新增 `monitor-daemon` 服务定义
+- 与其他服务统一管理（start/stop/restart/status）
+
+### 测试 ✅
+- `tests/test_monitor.py`：22 个用例
+  - TestHealthChecker（5 例）：正常/异常/连接拒绝/多服务顺序/to_dict
+  - TestNodeChecker（4 例）：在线/离线/无心跳/to_dict
+  - TestDbChecker（4 例）：MySQL+Redis正常/MySQL失败/Redis失败/to_dict
+  - TestAlerter（9 例）：首次告警/去重/冷却后重发/恢复通知/已正常跳过恢复/process_service/process_node/process_db
+
+---
+
 ## 风险/技术债（Known Debts）
 - MTF 策略与宏观数据：v0 可先做“接口预留 + mock 数据”，不阻塞最小链路
 - queue/持久化：v0 可先用内存队列或直接同步调用，v1 再换 Redis/Kafka

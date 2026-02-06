@@ -43,7 +43,8 @@
 - **节点鉴权**：services/execution-node/app/main.py、signal-monitor、libs/sync_node、node_execute_worker
 - **节点心跳**：services/execution-node/app/main.py（lifespan + _heartbeat_loop）
 - **管理后台鉴权**：libs/admin/、libs/core/auth/jwt.py、services/data-api/app/（deps.py + routers/auth.py）
-- **管理后台页面**：services/admin-web/src/（views/ 16 个页面，api/index.js，router/index.js，components/Layout.vue）
+- **管理后台页面**：services/admin-web/src/（views/ 17 个页面，api/index.js，router/index.js，components/Layout.vue）
+- **监控告警**：libs/monitor/（health_checker + node_checker + db_checker + alerter）、scripts/monitor_daemon.py、services/data-api/app/routers/monitor.py
 - **财务流水**：libs/pointcard/（models + service）、libs/reward/（models + service + withdrawal_service + repository）
 - **提现管理**：libs/reward/withdrawal_service.py、services/data-api/app/routers/withdrawals.py、admin-web/views/Withdrawals.vue
 - **Merchant API**：services/merchant-api/app/routers/（user/reward/pointcard/strategy）— 19 个接口
@@ -107,21 +108,40 @@
   12. 点卡流水响应字段 `user_id` → `member_id`（仅返回层映射，内部统一 `user_id`）
 - 19 个接口请求参数和返回字段全部与文档 v1.3.1 一致
 
+### 监控告警系统（已完成）
+- **libs/monitor/ 模块**（4 个组件）：
+  - `health_checker.py`：并发 HTTP GET 各服务 `/health`，返回 status/latency/error
+  - `node_checker.py`：查 `dim_execution_node` 心跳超时检测（默认 180s）
+  - `db_checker.py`：MySQL `SELECT 1` + Redis `ping` 连通性检测
+  - `alerter.py`：告警管理器 — 集成 Telegram 通知、同一告警去重（cooldown）、恢复通知
+- **scripts/monitor_daemon.py**：巡检守护脚本，定时循环（默认 60s）执行三项检查，状态变更触发 Telegram 告警。支持 `--interval` / `--services` 参数，SIGINT/SIGTERM 优雅退出
+- **data-api GET /api/monitor/status**：实时返回所有服务 + 节点 + DB/Redis 状态（需 admin JWT）
+- **admin-web 系统监控页面**（Monitor.vue）：系统状态卡片、服务健康列表（绿/红灯）、节点在线状态表、DB/Redis 详情面板、30 秒自动刷新
+- **config/default.yaml**：新增 `monitor_enabled`、`monitor_interval`、`monitor_services`、`monitor_node_timeout`、`monitor_alert_cooldown` 配置项
+- **deploy/start.sh**：新增 `monitor-daemon` 服务（start/stop/restart/status）
+- **测试**：22 个用例（HealthChecker 5 + NodeChecker 4 + DbChecker 4 + Alerter 9），全部通过
+
 ## 当前代码状态
 
-- **admin-web 前端**：共 16 页（新增提现管理页）
+- **admin-web 前端**：共 17 页（新增系统监控页）
 - **Merchant API**：19 个接口，与文档 v1.3.1 完全对齐（全部 email 化、转账分类型）
 - **财务闭环**：所有余额变动（点卡、奖励）均有流水记录；提现有完整审核流程
+- **监控告警**：轻量级巡检守护 + Telegram 告警 + 管理后台监控面板
 - **命名统一**：全项目 `member_id` → `user_id`，仅 point-card/logs 返回层映射为 `member_id`
-- **测试**：47 个用例全部通过
+- **测试**：69 个用例全部通过（原 47 + 监控模块 22）
+
+### 性能与稳定性优化（已完成）
+- **Dashboard 缓存**：`GET /api/dashboard/summary` 使用 Redis 缓存 60s（key: `ironbull:cache:dashboard:summary`），Redis 不可用时自动回退到直查 DB；响应增加 `cached: true/false`
+- **订单/成交分页 total**：`count_orders` / `count_fills` 与 `list_orders` / `list_fills` 使用相同过滤条件；`list_orders` / `list_fills` 返回 `(list, total)`；`GET /api/orders`、`GET /api/fills` 的 `total` 为符合条件的总条数（不再为当前页条数）
+- **索引迁移**：`migrations/013_perf_order_fill_list_indexes.sql` 新增 `idx_order_tenant_account_time`、`idx_fill_tenant_account_time`，优化按租户+账户+时间排序的列表查询
 
 ## 下次可以做的
 
 - **平台层 100% + 模块层 100%**：核心功能全部完成
 - 可选方向：
-  - Merchant API 接口级测试（TestClient 验证签名、参数、返回格式）
   - admin-web 构建验证（`npm run build`）
-  - UI 优化 / 性能优化 / 更多策略 / 监控告警 / 多语言
+  - UI 优化 / 更多策略 / 多语言
+  - 监控告警增强（更多服务端点、历史告警日志、邮件通道）
   - 文档持续同步
 
 ---
