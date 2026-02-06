@@ -47,7 +47,7 @@ class PositionModel(BaseModel):
 
 class AccountContextModel(BaseModel):
     account_id: int
-    member_id: int
+    user_id: int
     balance: float
     available: float
     frozen: float = 0.0

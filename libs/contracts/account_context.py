@@ -40,7 +40,7 @@ class AccountContext:
     
     Attributes:
         account_id: 账户ID
-        member_id: 用户ID
+        user_id: 用户ID
         balance: 总余额
         available: 可用余额
         frozen: 冻结金额
@@ -53,7 +53,7 @@ class AccountContext:
     """
     
     account_id: int
-    member_id: int
+    user_id: int
     
     # 余额
     balance: float                          # 总余额

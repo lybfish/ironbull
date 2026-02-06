@@ -99,7 +99,7 @@ signal = {
     "timestamp": 1700021600,
     "status": "pending"
 }
-account = {"account_id": 1, "member_id": 100, "balance": 10000, "available": 8000, "frozen": 0}
+account = {"account_id": 1, "user_id": 100, "balance": 10000, "available": 8000, "frozen": 0}
 print(json.dumps({"signal": signal, "account": account}))
 PY
 )
@@ -129,7 +129,7 @@ signal = json.loads('''$risk_signal''')
 print(json.dumps({
   "signal_id": signal["signal_id"],
   "account_id": 1,
-  "member_id": 100,
+  "user_id": 100,
   "platform": "crypto",
   "exchange": "binance",
   "symbol": signal["symbol"],

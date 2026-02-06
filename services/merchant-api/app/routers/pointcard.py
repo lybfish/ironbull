@@ -33,16 +33,21 @@ def balance(
 
 @router.post("/user/recharge")
 def user_recharge(
-    user_id: int = Form(...),
+    email: str = Form(...),
     amount: float = Form(...),
     type: int = Form(2),
     tenant: Tenant = Depends(get_tenant),
     db: Session = Depends(get_db),
 ):
     """给用户充值/赠送点卡。type=1 充值(self)，type=2 赠送(gift)"""
+    from libs.member.repository import MemberRepository
+    repo = MemberRepository(db)
+    user = repo.get_user_by_email(email.strip(), tenant.id)
+    if not user:
+        return {"code": 1, "msg": "用户不存在", "data": None}
     use_self = type == 1
     svc = PointCardService(db)
-    success, err, data = svc.recharge_user(tenant.id, user_id, Decimal(str(amount)), use_self)
+    success, err, data = svc.recharge_user(tenant.id, user.id, Decimal(str(amount)), use_self)
     if not success:
         return {"code": 1, "msg": err, "data": None}
     return ok(data, msg="分发成功")
@@ -53,20 +58,29 @@ def point_card_logs(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1),
     change_type: Optional[int] = None,
-    member_id: Optional[int] = None,
+    email: Optional[str] = None,
     start_time: Optional[str] = None,
     end_time: Optional[str] = None,
     tenant: Tenant = Depends(get_tenant),
     db: Session = Depends(get_db),
 ):
-    """点卡流水（商户维度，可筛 member_id）"""
+    """点卡流水（商户维度，可筛 email）"""
+    # 若传了 email 先解析为 user_id
+    filter_user_id = None
+    if email and email.strip():
+        from libs.member.repository import MemberRepository
+        repo_m = MemberRepository(db)
+        u = repo_m.get_user_by_email(email.strip(), tenant.id)
+        if not u:
+            return ok({"list": [], "total": 0, "page": page, "limit": limit})
+        filter_user_id = u.id
     repo = PointCardRepository(db)
     items, total = repo.list_logs(
         tenant_id=tenant.id,
         page=page,
         limit=limit,
         change_type=change_type,
-        member_id=member_id,
+        user_id=filter_user_id,
         start_time=start_time,
         end_time=end_time,
     )
@@ -82,7 +96,7 @@ def point_card_logs(
             "after_self": float(log.after_self or 0),
             "before_gift": float(log.before_gift or 0),
             "after_gift": float(log.after_gift or 0),
-            "member_id": log.user_id,
+            "member_id": log.related_user_id or log.user_id,
             "to_type": log.card_type,
             "remark": log.remark or "",
             "create_time": log.created_at.strftime("%Y-%m-%d %H:%M:%S") if log.created_at else "",

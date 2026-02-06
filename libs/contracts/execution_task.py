@@ -21,7 +21,7 @@ class ExecutionTask:
         task_id: 任务唯一ID
         signal_id: 关联的信号ID
         account_id: 账户ID
-        member_id: 用户ID
+        user_id: 用户ID
         platform: 平台类型，crypto / mt5
         exchange: 交易所/Broker，binance / okx / mt5_broker_name
         symbol: 交易对
@@ -42,7 +42,7 @@ class ExecutionTask:
     # 来源
     signal_id: str
     account_id: int
-    member_id: int
+    user_id: int
     
     # 目标
     platform: str                           # crypto / mt5

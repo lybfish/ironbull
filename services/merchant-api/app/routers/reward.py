@@ -34,10 +34,11 @@ def transfer_point_card(
     from_email: str = Form(...),
     to_email: str = Form(...),
     amount: float = Form(...),
+    type: int = Form(1),
     tenant: Tenant = Depends(get_tenant),
     db: Session = Depends(get_db),
 ):
-    """点卡互转（同一邀请链路，通过邮箱）"""
+    """点卡互转（同一邀请链路）type=1 自充互转(self→self), type=2 赠送互转(gift→gift)"""
     from libs.member.repository import MemberRepository
     repo = MemberRepository(db)
     from_user = repo.get_user_by_email(from_email.strip(), tenant.id)
@@ -49,18 +50,26 @@ def transfer_point_card(
     if from_user.id == to_user.id:
         return {"code": 1, "msg": "不能给自己转账", "data": None}
     svc = PointCardService(db)
-    success, err, data = svc.transfer(tenant.id, from_user.id, to_user.id, Decimal(str(amount)))
+    success, err, data = svc.transfer(tenant.id, from_user.id, to_user.id, Decimal(str(amount)), transfer_type=type)
     if not success:
         return {"code": 1, "msg": err, "data": None}
-    # 补充邮箱到返回数据
-    data["from_email"] = from_email.strip()
-    data["to_email"] = to_email.strip()
-    return ok(data, msg="转账成功")
+    type_name = data["type_name"]
+    return ok({
+        "from_email": from_email.strip(),
+        "to_email": to_email.strip(),
+        "type": data["type"],
+        "type_name": type_name,
+        "amount": data["amount"],
+        "from_self_after": data["from_self_after"],
+        "from_gift_after": data["from_gift_after"],
+        "to_self_after": data["to_self_after"],
+        "to_gift_after": data["to_gift_after"],
+    }, msg=f"{type_name}成功")
 
 
 @router.get("/user/team")
 def user_team(
-    user_id: int,
+    email: str = Query(...),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1),
     tenant: Tenant = Depends(get_tenant),
@@ -69,11 +78,11 @@ def user_team(
     """用户团队（直推）"""
     from libs.member.repository import MemberRepository
     repo = MemberRepository(db)
-    user = repo.get_user_by_id(user_id, tenant.id)
+    user = repo.get_user_by_email(email.strip(), tenant.id)
     if not user:
         return {"code": 1, "msg": "用户不存在", "data": None}
     level_svc = LevelService(db)
-    items, total = repo.get_direct_members(user_id, page, limit)
+    items, total = repo.get_direct_members(user.id, page, limit)
     list_data = []
     for u in items:
         sub_count = repo.count_invitees(u.id)
@@ -83,14 +92,13 @@ def user_team(
             "level": u.member_level or 0,
             "level_name": level_svc.get_level_name(u.member_level or 0),
             "is_market_node": u.is_market_node or 0,
-            "self_hold": float(level_svc.get_self_hold(u.id)),
             "team_performance": float(u.team_performance or 0),
             "sub_count": sub_count,
             "create_time": u.created_at.strftime("%Y-%m-%d %H:%M:%S") if u.created_at else "",
         })
-    sub_ids = repo.get_all_sub_user_ids(user_id)
+    sub_ids = repo.get_all_sub_user_ids(user.id)
     team_perf = repo.sum_futures_balance_by_user_ids(sub_ids) if sub_ids else Decimal("0")
-    self_hold = level_svc.get_self_hold(user_id)
+    self_hold = level_svc.get_self_hold(user.id)
     return ok({
         "list": list_data,
         "total": total,
@@ -99,15 +107,14 @@ def user_team(
         "team_stats": {
             "direct_count": total,
             "total_count": len(sub_ids),
-            "team_performance": float(team_perf),
-            "self_hold": float(self_hold),
+            "total_performance": float(team_perf),
         },
     })
 
 
 @router.post("/user/set-market-node")
 def set_market_node(
-    user_id: int = Form(...),
+    email: str = Form(...),
     is_node: int = Form(...),
     tenant: Tenant = Depends(get_tenant),
     db: Session = Depends(get_db),
@@ -115,7 +122,7 @@ def set_market_node(
     """设置市场节点"""
     from libs.member.repository import MemberRepository
     repo = MemberRepository(db)
-    user = repo.get_user_by_id(user_id, tenant.id)
+    user = repo.get_user_by_email(email.strip(), tenant.id)
     if not user:
         return {"code": 1, "msg": "用户不存在", "data": None}
     user.is_market_node = 1 if is_node else 0
@@ -125,7 +132,7 @@ def set_market_node(
 
 @router.get("/user/rewards")
 def user_rewards(
-    user_id: int,
+    email: str = Query(...),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1),
     reward_type: Optional[str] = None,
@@ -135,11 +142,11 @@ def user_rewards(
     """奖励记录"""
     from libs.member.repository import MemberRepository
     repo_m = MemberRepository(db)
-    user = repo_m.get_user_by_id(user_id, tenant.id)
+    user = repo_m.get_user_by_email(email.strip(), tenant.id)
     if not user:
         return {"code": 1, "msg": "用户不存在", "data": None}
     repo = RewardRepository(db)
-    items, total = repo.list_rewards(user_id, page, limit, reward_type)
+    items, total = repo.list_rewards(user.id, page, limit, reward_type)
     # 批量查 source_user 邮箱
     source_ids = {r.source_user_id for r in items if r.source_user_id}
     email_map = {}
@@ -166,7 +173,7 @@ def user_rewards(
 
 @router.post("/user/withdraw")
 def user_withdraw(
-    user_id: int = Form(...),
+    email: str = Form(...),
     amount: float = Form(...),
     wallet_address: str = Form(...),
     wallet_network: Optional[str] = Form("TRC20"),
@@ -175,8 +182,13 @@ def user_withdraw(
     db: Session = Depends(get_db),
 ):
     """申请提现"""
+    from libs.member.repository import MemberRepository
+    repo_m = MemberRepository(db)
+    user = repo_m.get_user_by_email(email.strip(), tenant.id)
+    if not user:
+        return {"code": 1, "msg": "用户不存在", "data": None}
     svc = WithdrawalService(db)
-    w, err = svc.apply(user_id, tenant.id, Decimal(str(amount)), wallet_address, wallet_network or "TRC20", remark)
+    w, err = svc.apply(user.id, tenant.id, Decimal(str(amount)), wallet_address, wallet_network or "TRC20", remark)
     if err:
         return {"code": 1, "msg": err, "data": None}
     return ok({
@@ -192,7 +204,7 @@ def user_withdraw(
 
 @router.get("/user/withdrawals")
 def user_withdrawals(
-    user_id: int,
+    email: str = Query(...),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1),
     status: Optional[int] = None,
@@ -202,11 +214,11 @@ def user_withdrawals(
     """提现记录"""
     from libs.member.repository import MemberRepository
     repo_m = MemberRepository(db)
-    user = repo_m.get_user_by_id(user_id, tenant.id)
+    user = repo_m.get_user_by_email(email.strip(), tenant.id)
     if not user:
         return {"code": 1, "msg": "用户不存在", "data": None}
     repo = RewardRepository(db)
-    items, total = repo.list_withdrawals(user_id, page, limit, status)
+    items, total = repo.list_withdrawals(user.id, page, limit, status)
     list_data = []
     for w in items:
         list_data.append({

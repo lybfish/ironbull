@@ -38,13 +38,16 @@
   - 策略绑定 / 交易所账户
   - 管理员管理（创建/编辑/重置密码/启用禁用）
 
-## 当前代码状态
+## 关键文件索引
 
-- **节点鉴权**：services/execution-node/app/main.py、signal-monitor、libs/sync_node、node_execute_worker。
-- **节点心跳**：services/execution-node/app/main.py（lifespan + _heartbeat_loop）。
-- **管理后台鉴权**：libs/admin/、libs/core/auth/jwt.py、services/data-api/app/（deps.py + routers/auth.py）。
-- **管理后台页面**：services/admin-web/src/（views/ 15 个页面，api/index.js，router/index.js，components/Layout.vue）。
-- **文档已同步**：NEXT_TASK.md 平台层标记 ✅，IMPLEMENTATION_STATUS.md 新增管理后台章节。
+- **节点鉴权**：services/execution-node/app/main.py、signal-monitor、libs/sync_node、node_execute_worker
+- **节点心跳**：services/execution-node/app/main.py（lifespan + _heartbeat_loop）
+- **管理后台鉴权**：libs/admin/、libs/core/auth/jwt.py、services/data-api/app/（deps.py + routers/auth.py）
+- **管理后台页面**：services/admin-web/src/（views/ 16 个页面，api/index.js，router/index.js，components/Layout.vue）
+- **财务流水**：libs/pointcard/（models + service）、libs/reward/（models + service + withdrawal_service + repository）
+- **提现管理**：libs/reward/withdrawal_service.py、services/data-api/app/routers/withdrawals.py、admin-web/views/Withdrawals.vue
+- **Merchant API**：services/merchant-api/app/routers/（user/reward/pointcard/strategy）— 19 个接口
+- **迁移脚本**：migrations/（001–011），最新 011_reward_log.sql
 
 ### 中心-节点联调（已完成）
 - **全链路已验证**：
@@ -72,11 +75,44 @@
 - **admin-web**：套餐管理页面（CRUD + 启停）、租户页面新增套餐列 + 分配套餐功能
 - **NEXT_TASK.md** 平台层全部 ✅
 
+### 财务流水补全 + 提现完整流程（已完成）
+- **后台充值补流水**：`data-api/routers/tenants.py` recharge 接口在更新余额时同步写入 `fact_point_card_log`
+- **新增 fact_reward_log 表**：记录所有 `reward_usdt` 变动（奖励发放 reward_in / 提现冻结 withdraw_freeze / 拒绝退回 withdraw_reject_return），含 before/after 余额快照
+  - `libs/reward/models.py` 新增 `RewardLog` 模型
+  - `libs/reward/service.py` 直推/级差/平级奖发放时写流水
+  - `libs/reward/withdrawal_service.py` 提现申请/拒绝时写流水
+  - 迁移 SQL：`migrations/011_reward_log.sql`
+- **提现完整生命周期**：
+  - `WithdrawalService` 新增 `approve()`（0→1 审核通过）、`reject()`（0→2 拒绝+退回余额+写流水）、`complete()`（1→3 打款完成+累加 withdrawn_reward）
+  - `data-api/routers/withdrawals.py`：GET 列表 + POST 通过/拒绝/完成
+  - `admin-web/views/Withdrawals.vue`：提现管理页面（状态筛选、通过确认、拒绝弹窗、完成弹窗填 TxHash）
+- **测试**：`test_recharge_log.py`（2例）+ `test_withdrawal.py`（8例），全量 44 测试通过
+
+### Merchant API 对齐文档（已完成）
+- 对照 `_legacy_readonly/old3/quanttrade/docs/merchant-api.md`，修正 6 处差异：
+  1. `POST /merchant/user/create`：参数从 `inviter_id`(int) 改为 `invite_code`(string)，通过邀请码查找邀请人
+  2. `GET /merchant/user/info`：补全 `inviter_invite_code`、`level`、`level_name`、`is_market_node`、`self_hold`、`team_direct_count`、`team_total_count`、`team_performance`、`reward_usdt`、`total_reward`、`withdrawn_reward` 共 11 个字段
+  3. `POST /merchant/user/transfer-point-card`：参数从 `from_user_id`/`to_user_id` 改为 `from_email`/`to_email`
+  4. `GET /merchant/user/rewards`：`source_email` 从空字符串改为批量查询实际邮箱
+  5. `GET /merchant/strategies`：补 `status` 字段
+  6. 删除 3 个冗余接口（`user/balance`、`user/level`、`user/reward-balance`），数据已合并到 `user/info`
+- 接口总数从 22 精简为 19 个
+
+## 当前代码状态
+
+- **admin-web 前端**：共 16 页（新增提现管理页）
+- **Merchant API**：19 个接口，与文档完全对齐
+- **财务闭环**：所有余额变动（点卡、奖励）均有流水记录；提现有完整审核流程
+- **测试**：44 个用例全部通过
+
 ## 下次可以做的
 
 - **平台层 100% + 模块层 100%**：核心功能全部完成
-- 可选方向：UI 优化 / 性能优化 / 更多策略 / 监控告警 / 多语言 等
-- 其他业务或 NEXT_TASK.md 中的待办
+- 可选方向：
+  - Merchant API 接口级测试
+  - admin-web 构建验证（`npm run build`）
+  - UI 优化 / 性能优化 / 更多策略 / 监控告警 / 多语言
+  - SESSION_HANDOFF / IMPLEMENTATION_STATUS / NEXT_TASK 文档持续同步
 
 ---
 *新开聊天时：@SESSION_HANDOFF.md 然后说「按这个继续」即可接上进度。*

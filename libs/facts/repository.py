@@ -48,7 +48,7 @@ class FactsRepository:
         signal_id: str,
         task_id: str,
         account_id: int,
-        member_id: int,
+        user_id: int,
         symbol: str,
         side: str,
         trade_type: str,
@@ -81,7 +81,7 @@ class FactsRepository:
             signal_id=signal_id,
             task_id=task_id,
             account_id=account_id,
-            member_id=member_id,
+            user_id=user_id,
             symbol=symbol,
             canonical_symbol=canonical_symbol,
             exchange=exchange,
@@ -142,7 +142,7 @@ class FactsRepository:
     def create_ledger(
         self,
         account_id: int,
-        member_id: int,
+        user_id: int,
         ledger_type: str,
         amount: float,
         currency: str = "USDT",
@@ -159,7 +159,7 @@ class FactsRepository:
         
         ledger = Ledger(
             account_id=account_id,
-            member_id=member_id,
+            user_id=user_id,
             trade_id=trade_id,
             signal_id=signal_id,
             ledger_type=ledger_type,
@@ -201,7 +201,7 @@ class FactsRepository:
     def create_freeze(
         self,
         account_id: int,
-        member_id: int,
+        user_id: int,
         freeze_type: str,
         amount: float,
         currency: str = "USDT",
@@ -216,7 +216,7 @@ class FactsRepository:
         
         freeze = FreezeRecord(
             account_id=account_id,
-            member_id=member_id,
+            user_id=user_id,
             signal_id=signal_id,
             task_id=task_id,
             freeze_type=freeze_type,
@@ -389,7 +389,7 @@ class FactsRepository:
         signal_id: Optional[str] = None,
         task_id: Optional[str] = None,
         account_id: Optional[int] = None,
-        member_id: Optional[int] = None,
+        user_id: Optional[int] = None,
         status_before: Optional[str] = None,
         status_after: Optional[str] = None,
         source_ip: Optional[str] = None,
@@ -426,7 +426,7 @@ class FactsRepository:
             signal_id=signal_id,
             task_id=task_id,
             account_id=account_id,
-            member_id=member_id,
+            user_id=user_id,
             action=action,
             status_before=status_before,
             status_after=status_after,

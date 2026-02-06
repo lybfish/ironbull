@@ -38,7 +38,7 @@ class Trade(Base):
     signal_id = Column(String(64), nullable=False, index=True, comment="信号ID")
     task_id = Column(String(64), nullable=False, index=True, comment="执行任务ID")
     account_id = Column(Integer, nullable=False, index=True, comment="账户ID")
-    member_id = Column(Integer, nullable=False, index=True, comment="会员ID")
+    user_id = Column(Integer, nullable=False, index=True, comment="用户ID")
     
     # 交易标的
     symbol = Column(String(32), nullable=False, comment="交易对")
@@ -104,7 +104,7 @@ class Ledger(Base):
     
     # 关联ID
     account_id = Column(Integer, nullable=False, index=True, comment="账户ID")
-    member_id = Column(Integer, nullable=False, index=True, comment="会员ID")
+    user_id = Column(Integer, nullable=False, index=True, comment="用户ID")
     trade_id = Column(BigInteger, nullable=True, index=True, comment="关联交易ID")
     signal_id = Column(String(64), nullable=True, index=True, comment="关联信号ID")
     
@@ -143,7 +143,7 @@ class FreezeRecord(Base):
     
     # 关联ID
     account_id = Column(Integer, nullable=False, index=True, comment="账户ID")
-    member_id = Column(Integer, nullable=False, index=True, comment="会员ID")
+    user_id = Column(Integer, nullable=False, index=True, comment="用户ID")
     signal_id = Column(String(64), nullable=True, index=True, comment="关联信号ID")
     task_id = Column(String(64), nullable=True, index=True, comment="关联任务ID")
     
@@ -232,7 +232,7 @@ class AuditLog(Base):
     signal_id = Column(String(64), nullable=True, index=True, comment="信号ID")
     task_id = Column(String(64), nullable=True, index=True, comment="执行任务ID")
     account_id = Column(Integer, nullable=True, index=True, comment="账户ID")
-    member_id = Column(Integer, nullable=True, index=True, comment="会员ID")
+    user_id = Column(Integer, nullable=True, index=True, comment="用户ID")
     
     # 审计动作
     action = Column(String(64), nullable=False, index=True, comment="动作类型")

@@ -57,7 +57,7 @@ SUBMIT_RESP=$(curl -s -X POST "$DISPATCHER_URL/api/execution/submit-async" \
     -d "{
         \"signal_id\": \"$SIGNAL_ID\",
         \"account_id\": 1001,
-        \"member_id\": 100,
+        \"user_id\": 100,
         \"platform\": \"crypto\",
         \"exchange\": \"binance\",
         \"symbol\": \"BTC/USDT\",
@@ -86,7 +86,7 @@ SUBMIT_RESP2=$(curl -s -X POST "$DISPATCHER_URL/api/execution/submit-async" \
     -d "{
         \"signal_id\": \"$SIGNAL_ID\",
         \"account_id\": 1001,
-        \"member_id\": 100,
+        \"user_id\": 100,
         \"platform\": \"crypto\",
         \"exchange\": \"binance\",
         \"symbol\": \"BTC/USDT\",

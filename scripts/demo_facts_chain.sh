@@ -62,7 +62,7 @@ risk_resp=$(curl -s -X POST "$RISK_CONTROL_URL/api/risk/check" \
     },
     \"account\": {
       \"account_id\": 1001,
-      \"member_id\": 100,
+      \"user_id\": 100,
       \"balance\": 10000.0,
       \"available\": 9500.0,
       \"frozen\": 500.0
@@ -80,7 +80,7 @@ exec_resp=$(curl -s -X POST "$EXEC_DISPATCHER_URL/api/execution/submit" \
   -d "{
     \"signal_id\": \"$signal_id\",
     \"account_id\": 1001,
-    \"member_id\": 100,
+    \"user_id\": 100,
     \"platform\": \"crypto\",
     \"exchange\": \"binance\",
     \"symbol\": \"BTCUSDT\",

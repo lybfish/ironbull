@@ -111,19 +111,13 @@ def users_list(
 
 @router.get("/user/info")
 def user_info(
-    user_id: Optional[int] = Query(None),
-    email: Optional[str] = Query(None),
+    email: str = Query(...),
     tenant: Tenant = Depends(get_tenant),
     db: Session = Depends(get_db),
 ):
     """用户详情（合并 balance/level/reward-balance，一次返回全部信息）"""
-    if not user_id and not email:
-        return {"code": 1, "msg": "请提供 user_id 或 email", "data": None}
     svc = MemberService(db)
-    if user_id:
-        user = svc.get_user(user_id, tenant.id)
-    else:
-        user = svc.get_user_by_email(email, tenant.id)
+    user = svc.get_user_by_email(email.strip(), tenant.id)
     if not user:
         return {"code": 1, "msg": "用户不存在", "data": None}
     from libs.member.repository import MemberRepository
@@ -186,7 +180,7 @@ def user_info(
 
 @router.post("/user/apikey")
 def user_apikey(
-    user_id: int = Form(...),
+    email: str = Form(...),
     exchange: str = Form(...),
     api_key: str = Form(...),
     api_secret: str = Form(...),
@@ -196,7 +190,10 @@ def user_apikey(
 ):
     """绑定用户 API Key"""
     svc = MemberService(db)
-    acc, err = svc.bind_api_key(user_id, tenant.id, exchange, api_key, api_secret, account_type=account_type)
+    user = svc.get_user_by_email(email.strip(), tenant.id)
+    if not user:
+        return {"code": 1, "msg": "用户不存在", "data": None}
+    acc, err = svc.bind_api_key(user.id, tenant.id, exchange, api_key, api_secret, account_type=account_type)
     if err:
         return {"code": 1, "msg": err, "data": None}
     return ok({
@@ -208,13 +205,16 @@ def user_apikey(
 
 @router.post("/user/apikey/unbind")
 def user_apikey_unbind(
-    user_id: int = Form(...),
+    email: str = Form(...),
     account_id: int = Form(...),
     tenant: Tenant = Depends(get_tenant),
     db: Session = Depends(get_db),
 ):
     """解绑用户 API Key"""
     svc = MemberService(db)
-    if not svc.unbind_api_key(user_id, account_id, tenant.id):
+    user = svc.get_user_by_email(email.strip(), tenant.id)
+    if not user:
+        return {"code": 1, "msg": "用户不存在", "data": None}
+    if not svc.unbind_api_key(user.id, account_id, tenant.id):
         return {"code": 1, "msg": "账户不存在", "data": None}
     return ok(None, msg="解绑成功")

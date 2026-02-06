@@ -44,7 +44,7 @@ class LevelConfig(Base):
 
 class User(Base):
     """
-    会员表（dim_user），id 即 member_id
+    会员/用户表（dim_user），id 即 user_id
     """
     __tablename__ = "dim_user"
 

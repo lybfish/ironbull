@@ -489,15 +489,56 @@
 
 ### admin-web 管理后台 ✅
 - 状态：Vue 3 + Vite + Element Plus，端口 5174
-- 页面（共 12 页）：
+- 页面（共 16 页）：
   - 概览 Dashboard（平台汇总 + 租户绩效）
   - 订单 / 成交 / 持仓 / 资金账户 / 流水（数据查看）
   - 绩效分析 / 策略管理 / 信号监控（业务监控）
-  - 租户管理（CRUD + 启用禁用 + 查看密钥）
+  - 租户管理（CRUD + 启用禁用 + 查看密钥 + 充值点卡）
   - 用户管理（按租户筛选）
   - 管理员管理（创建/编辑/重置密码/启用禁用）
+  - 策略绑定（只读查看）
+  - 交易所账户（只读查看，API Key 脱敏）
+  - 套餐管理（CRUD + 启停）
+  - 提现管理（列表 + 通过/拒绝/完成操作）
 - 登录：用户名 + 密码（无需 tenant_id），JWT 存 localStorage
 - 租户/账户切换：右上角下拉，query 参数传递
+
+## 已完成（Done）- 财务流水补全 + 提现完整流程 ✅
+
+### 后台充值补流水 ✅
+- `services/data-api/app/routers/tenants.py`：recharge 接口在更新 `point_card_self` / `point_card_gift` 后同步写入 `fact_point_card_log`
+- 包含完整 before/after 余额快照
+
+### fact_reward_log 奖励余额流水表 ✅
+- 记录所有 `reward_usdt` 变动：奖励发放(`reward_in`) / 提现冻结(`withdraw_freeze`) / 拒绝退回(`withdraw_reject_return`)
+- 组件：
+  - `libs/reward/models.py`：`RewardLog` 模型
+  - `libs/reward/repository.py`：`create_reward_log` + `list_reward_logs`
+  - `libs/reward/service.py`：直推/级差/平级奖发放时写流水
+  - `libs/reward/withdrawal_service.py`：提现申请/拒绝时写流水
+  - `migrations/011_reward_log.sql`
+
+### 提现完整生命周期 ✅
+- `WithdrawalService` 四个方法：`apply()`(创建+冻结) → `approve()`(0→1 审核通过) → `complete()`(1→3 打款完成+累加 withdrawn_reward)；`reject()`(0→2 拒绝+退回余额)
+- `data-api/routers/withdrawals.py`：GET 列表 + POST 通过/拒绝/完成 四个端点
+- `admin-web/views/Withdrawals.vue`：提现管理页面（状态筛选、通过确认、拒绝弹窗输入理由、完成弹窗输入 TxHash）
+
+### 测试覆盖 ✅
+- `test_recharge_log.py`（2 例）：后台充值 self/gift 均写入 fact_point_card_log
+- `test_withdrawal.py`（8 例）：申请/余额不足/低于最小/通过/拒绝退回+流水/重复拒绝/完成/未审核完成
+- 全量 44 测试通过
+
+## 已完成（Done）- Merchant API 对齐文档 ✅
+
+### 接口修正（6 处差异）✅
+- 对照 `_legacy_readonly/old3/quanttrade/docs/merchant-api.md` 逐一修正：
+  1. `POST /merchant/user/create`：`inviter_id`(int) → `invite_code`(string)，通过邀请码查邀请人
+  2. `GET /merchant/user/info`：补全 11 个字段（`inviter_invite_code`、`level`、`level_name`、`is_market_node`、`self_hold`、`team_direct_count`、`team_total_count`、`team_performance`、`reward_usdt`、`total_reward`、`withdrawn_reward`）
+  3. `POST /merchant/user/transfer-point-card`：`from_user_id`/`to_user_id` → `from_email`/`to_email`
+  4. `GET /merchant/user/rewards`：`source_email` 批量查询填充实际邮箱
+  5. `GET /merchant/strategies`：补 `status` 字段
+  6. 删除 3 个冗余接口：`user/balance`、`user/level`、`user/reward-balance`（数据已合并到 `user/info`）
+- Merchant API 总接口数：22 → 19 个
 
 ---
 

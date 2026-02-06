@@ -120,6 +120,105 @@ def test_deduct_for_profit_creates_pool_and_distributes(session_rollback):
     assert pool.status == 2  # 已结算（distribute_for_pool 会设为 2）
 
 
+def test_transfer_self_type(session_rollback):
+    """点卡转账 type=1：自充互转 self→self"""
+    member_repo = MemberRepository(session_rollback)
+    tenant_repo = TenantRepository(session_rollback)
+    tenant = tenant_repo.get_by_id(TENANT_ID)
+    user1 = member_repo.get_user_by_id(USER_ID, TENANT_ID)
+    if not tenant or not user1:
+        pytest.skip("需要存在 tenant_id=1 user_id=1")
+    items, total = member_repo.list_users(TENANT_ID, 1, 10)
+    user2 = None
+    for u in items:
+        if u.id != USER_ID:
+            user2 = u
+            break
+    if not user2:
+        pytest.skip("需要至少两个用户")
+    user1.point_card_self = Decimal("100")
+    user1.point_card_gift = Decimal("50")
+    member_repo.update_user(user1)
+    user2.point_card_self = Decimal("10")
+    user2.point_card_gift = Decimal("20")
+    member_repo.update_user(user2)
+    session_rollback.flush()
+    pc_svc = PointCardService(session_rollback)
+    ok, err, data = pc_svc.transfer(TENANT_ID, user1.id, user2.id, Decimal("30"), transfer_type=1)
+    assert ok, err
+    assert data["type"] == 1
+    assert data["type_name"] == "自充互转"
+    assert data["from_self_after"] == 70.0  # 100-30
+    assert data["from_gift_after"] == 50.0  # 不变
+    assert data["to_self_after"] == 40.0    # 10+30
+    assert data["to_gift_after"] == 20.0    # 不变
+
+
+def test_transfer_gift_type(session_rollback):
+    """点卡转账 type=2：赠送互转 gift→gift"""
+    member_repo = MemberRepository(session_rollback)
+    tenant_repo = TenantRepository(session_rollback)
+    tenant = tenant_repo.get_by_id(TENANT_ID)
+    user1 = member_repo.get_user_by_id(USER_ID, TENANT_ID)
+    if not tenant or not user1:
+        pytest.skip("需要存在 tenant_id=1 user_id=1")
+    items, total = member_repo.list_users(TENANT_ID, 1, 10)
+    user2 = None
+    for u in items:
+        if u.id != USER_ID:
+            user2 = u
+            break
+    if not user2:
+        pytest.skip("需要至少两个用户")
+    user1.point_card_self = Decimal("100")
+    user1.point_card_gift = Decimal("80")
+    member_repo.update_user(user1)
+    user2.point_card_self = Decimal("10")
+    user2.point_card_gift = Decimal("5")
+    member_repo.update_user(user2)
+    session_rollback.flush()
+    pc_svc = PointCardService(session_rollback)
+    ok, err, data = pc_svc.transfer(TENANT_ID, user1.id, user2.id, Decimal("25"), transfer_type=2)
+    assert ok, err
+    assert data["type"] == 2
+    assert data["type_name"] == "赠送互转"
+    assert data["from_self_after"] == 100.0  # 不变
+    assert data["from_gift_after"] == 55.0   # 80-25
+    assert data["to_self_after"] == 10.0     # 不变
+    assert data["to_gift_after"] == 30.0     # 5+25
+
+
+def test_transfer_insufficient_balance(session_rollback):
+    """点卡转账：余额不足时应拒绝"""
+    member_repo = MemberRepository(session_rollback)
+    tenant_repo = TenantRepository(session_rollback)
+    tenant = tenant_repo.get_by_id(TENANT_ID)
+    user1 = member_repo.get_user_by_id(USER_ID, TENANT_ID)
+    if not tenant or not user1:
+        pytest.skip("需要存在 tenant_id=1 user_id=1")
+    items, total = member_repo.list_users(TENANT_ID, 1, 10)
+    user2 = None
+    for u in items:
+        if u.id != USER_ID:
+            user2 = u
+            break
+    if not user2:
+        pytest.skip("需要至少两个用户")
+    user1.point_card_self = Decimal("10")
+    user1.point_card_gift = Decimal("5")
+    member_repo.update_user(user1)
+    session_rollback.flush()
+    pc_svc = PointCardService(session_rollback)
+    # self 不足
+    ok, err, _ = pc_svc.transfer(TENANT_ID, user1.id, user2.id, Decimal("50"), transfer_type=1)
+    assert not ok
+    assert "不足" in err
+    # gift 不足
+    ok, err, _ = pc_svc.transfer(TENANT_ID, user1.id, user2.id, Decimal("50"), transfer_type=2)
+    assert not ok
+    assert "不足" in err
+
+
 def test_execution_targets_exclude_zero_balance(session_rollback):
     """get_execution_targets_by_strategy_code 返回的列表中，每个 target 对应用户点卡应 > 0"""
     svc = MemberService(session_rollback)

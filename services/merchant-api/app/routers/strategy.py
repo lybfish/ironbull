@@ -44,7 +44,7 @@ def strategies_list(
 
 @router.post("/user/strategy/open")
 def strategy_open(
-    user_id: int = Form(...),
+    email: str = Form(...),
     strategy_id: int = Form(...),
     account_id: int = Form(...),
     mode: int = Form(2),
@@ -54,7 +54,10 @@ def strategy_open(
 ):
     """开启策略（需满足最小点卡余额，默认 1.0）"""
     svc = MemberService(db)
-    binding, err = svc.open_strategy(user_id, tenant.id, strategy_id, account_id, mode=mode, min_point_card=min_point_card)
+    user = svc.get_user_by_email(email.strip(), tenant.id)
+    if not user:
+        return {"code": 1, "msg": "用户不存在", "data": None}
+    binding, err = svc.open_strategy(user.id, tenant.id, strategy_id, account_id, mode=mode, min_point_card=min_point_card)
     if err:
         return {"code": 1, "msg": err, "data": None}
     return ok({
@@ -67,7 +70,7 @@ def strategy_open(
 
 @router.post("/user/strategy/close")
 def strategy_close(
-    user_id: int = Form(...),
+    email: str = Form(...),
     strategy_id: int = Form(...),
     account_id: int = Form(...),
     tenant: Tenant = Depends(get_tenant),
@@ -75,18 +78,24 @@ def strategy_close(
 ):
     """关闭策略"""
     svc = MemberService(db)
-    if not svc.close_strategy(user_id, tenant.id, strategy_id, account_id):
+    user = svc.get_user_by_email(email.strip(), tenant.id)
+    if not user:
+        return {"code": 1, "msg": "用户不存在", "data": None}
+    if not svc.close_strategy(user.id, tenant.id, strategy_id, account_id):
         return {"code": 1, "msg": "策略绑定不存在", "data": None}
     return ok(None, msg="关闭成功")
 
 
 @router.get("/user/strategies")
 def user_strategies(
-    user_id: int,
+    email: str = Query(...),
     tenant: Tenant = Depends(get_tenant),
     db: Session = Depends(get_db),
 ):
     """用户已绑定的策略列表"""
     svc = MemberService(db)
-    list_data = svc.get_user_strategies(user_id, tenant.id)
+    user = svc.get_user_by_email(email.strip(), tenant.id)
+    if not user:
+        return {"code": 1, "msg": "用户不存在", "data": None}
+    list_data = svc.get_user_strategies(user.id, tenant.id)
     return ok(list_data)

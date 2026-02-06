@@ -5,7 +5,7 @@ SIGNAL_HUB_URL=${SIGNAL_HUB_URL:-http://127.0.0.1:8001}
 RISK_CONTROL_URL=${RISK_CONTROL_URL:-http://127.0.0.1:8002}
 DISPATCHER_URL=${DISPATCHER_URL:-http://127.0.0.1:8003}
 
-account_payload='{"account_id":1,"member_id":100,"balance":10000,"available":8000,"frozen":0}'
+account_payload='{"account_id":1,"user_id":100,"balance":10000,"available":8000,"frozen":0}'
 
 create_signal_payload='{
   "strategy_code": "demo_macross",
@@ -88,7 +88,7 @@ signal=json.loads('''$risk_signal''')
 print(json.dumps({
   "signal_id": signal["signal_id"],
   "account_id": 1,
-  "member_id": 100,
+  "user_id": 100,
   "platform": "crypto",
   "exchange": "binance",
   "symbol": signal["symbol"],

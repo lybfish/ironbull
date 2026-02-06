@@ -61,7 +61,7 @@ RESULT=$(curl -s -X POST "$RISK_URL/api/risk/check" \
         },
         "account": {
             "account_id": 1001,
-            "member_id": 100,
+            "user_id": 100,
             "balance": 10000,
             "available": 8000,
             "frozen": 2000
@@ -94,7 +94,7 @@ RESULT=$(curl -s -X POST "$RISK_URL/api/risk/check" \
         },
         "account": {
             "account_id": 1002,
-            "member_id": 100,
+            "user_id": 100,
             "balance": 100,
             "available": 50,
             "frozen": 50
@@ -127,7 +127,7 @@ RESULT=$(curl -s -X POST "$RISK_URL/api/risk/check" \
         },
         "account": {
             "account_id": 1003,
-            "member_id": 100,
+            "user_id": 100,
             "balance": 100000,
             "available": 80000,
             "frozen": 20000
@@ -163,7 +163,7 @@ RESULT=$(curl -s -X POST "$RISK_URL/api/risk/check" \
         },
         "account": {
             "account_id": 1004,
-            "member_id": 100,
+            "user_id": 100,
             "balance": 100,
             "available": 50,
             "frozen": 50

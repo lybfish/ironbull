@@ -34,7 +34,7 @@ except ImportError:
 class ExecutionSubmitRequest(BaseModel):
     signal_id: str
     account_id: int
-    member_id: int
+    user_id: int
     platform: str
     exchange: str
     symbol: str
@@ -197,7 +197,7 @@ def submit(req: ExecutionSubmitRequest, request: Request):
         task_id=task_id,
         signal_id=req.signal_id,
         account_id=req.account_id,
-        member_id=req.member_id,
+        user_id=req.user_id,
         platform=req.platform,
         exchange=req.exchange,
         symbol=req.symbol,
@@ -257,7 +257,7 @@ def submit(req: ExecutionSubmitRequest, request: Request):
                 signal_id=task.signal_id,
                 task_id=task_id,
                 account_id=task.account_id,
-                member_id=task.member_id,
+                user_id=task.user_id,
                 symbol=task.symbol,
                 side=task.side,
                 trade_type="OPEN",  # v0 简化：默认 OPEN
@@ -283,7 +283,7 @@ def submit(req: ExecutionSubmitRequest, request: Request):
             if node_result.success and node_result.fee and node_result.fee > 0:
                 repo.create_ledger(
                     account_id=task.account_id,
-                    member_id=task.member_id,
+                    user_id=task.user_id,
                     ledger_type="TRADE_FEE",
                     amount=-node_result.fee,  # 费用为负
                     currency=node_result.fee_currency or "USDT",
@@ -321,7 +321,7 @@ def submit(req: ExecutionSubmitRequest, request: Request):
                 signal_id=task.signal_id,
                 task_id=task_id,
                 account_id=task.account_id,
-                member_id=task.member_id,
+                user_id=task.user_id,
                 status_before=SignalStatus.PASSED.value,
                 status_after=new_status,
                 success=node_result.success,
@@ -400,7 +400,7 @@ def submit_async(req: ExecutionSubmitRequest, request: Request):
         payload={
             "signal_id": req.signal_id,
             "account_id": req.account_id,
-            "member_id": req.member_id,
+            "user_id": req.user_id,
             "platform": req.platform,
             "exchange": req.exchange,
             "symbol": req.symbol,
@@ -448,7 +448,7 @@ def submit_async(req: ExecutionSubmitRequest, request: Request):
                     signal_id=req.signal_id,
                     task_id=task_id,
                     account_id=req.account_id,
-                    member_id=req.member_id,
+                    user_id=req.user_id,
                     status_before=SignalStatus.PASSED.value,
                     status_after=SignalStatus.PASSED.value,
                     success=True,

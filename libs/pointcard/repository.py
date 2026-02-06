@@ -4,6 +4,7 @@ Pointcard Repository - 点卡流水数据访问
 
 from typing import Optional, List
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from .models import PointCardLog
@@ -25,7 +26,6 @@ class PointCardRepository:
         page: int = 1,
         limit: int = 20,
         change_type: Optional[int] = None,
-        member_id: Optional[int] = None,
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
     ) -> tuple[List[PointCardLog], int]:
@@ -33,9 +33,10 @@ class PointCardRepository:
         if tenant_id is not None:
             q = q.filter(PointCardLog.tenant_id == tenant_id)
         if user_id is not None:
-            q = q.filter(PointCardLog.user_id == user_id)
-        if member_id is not None:
-            q = q.filter(PointCardLog.user_id == member_id)
+            q = q.filter(or_(
+                PointCardLog.user_id == user_id,
+                PointCardLog.related_user_id == user_id,
+            ))
         if change_type is not None:
             q = q.filter(PointCardLog.change_type == change_type)
         if start_time:

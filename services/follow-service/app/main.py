@@ -402,7 +402,7 @@ async def submit_to_dispatcher(
     payload = {
         "signal_id": task.signal_id,
         "account_id": relation.follower_account_id,
-        "member_id": relation.follower_id,
+        "user_id": relation.follower_id,
         "platform": relation.platform,
         "exchange": relation.exchange,
         "symbol": task.symbol,

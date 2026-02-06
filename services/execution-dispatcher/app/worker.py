@@ -194,7 +194,7 @@ class ExecutionHandler(TaskHandler):
                 signal_id=message.signal_id or "",
                 task_id=message.task_id,
                 account_id=payload.get("account_id", 0),
-                member_id=payload.get("member_id", 0),
+                user_id=payload.get("user_id", 0),
                 symbol=payload.get("symbol", ""),
                 side=payload.get("side", ""),
                 trade_type="OPEN",
@@ -220,7 +220,7 @@ class ExecutionHandler(TaskHandler):
             if node_result.success and node_result.fee and node_result.fee > 0:
                 repo.create_ledger(
                     account_id=payload.get("account_id", 0),
-                    member_id=payload.get("member_id", 0),
+                    user_id=payload.get("user_id", 0),
                     ledger_type="TRADE_FEE",
                     amount=-node_result.fee,
                     currency=node_result.fee_currency or "USDT",
@@ -259,7 +259,7 @@ class ExecutionHandler(TaskHandler):
                 signal_id=message.signal_id,
                 task_id=message.task_id,
                 account_id=payload.get("account_id"),
-                member_id=payload.get("member_id"),
+                user_id=payload.get("user_id"),
                 status_before=SignalStatus.PASSED.value,
                 status_after=new_status,
                 success=node_result.success,
