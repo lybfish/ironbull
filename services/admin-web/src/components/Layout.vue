@@ -21,6 +21,8 @@
         <div class="menu-divider"></div>
         <el-menu-item index="/tenants">租户管理</el-menu-item>
         <el-menu-item index="/users">用户管理</el-menu-item>
+        <el-menu-item index="/bindings">策略绑定</el-menu-item>
+        <el-menu-item index="/exchange-accounts">交易所账户</el-menu-item>
         <el-menu-item index="/admins">管理员</el-menu-item>
       </el-menu>
     </el-aside>

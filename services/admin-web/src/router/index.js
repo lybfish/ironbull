@@ -21,6 +21,8 @@ const routes = [
       { path: 'signal-monitor', name: 'SignalMonitor', component: () => import('../views/SignalMonitor.vue'), meta: { title: '信号监控' } },
       { path: 'tenants', name: 'Tenants', component: () => import('../views/Tenants.vue'), meta: { title: '租户管理' } },
       { path: 'users', name: 'Users', component: () => import('../views/Users.vue'), meta: { title: '用户管理' } },
+      { path: 'bindings', name: 'Bindings', component: () => import('../views/Bindings.vue'), meta: { title: '策略绑定' } },
+      { path: 'exchange-accounts', name: 'ExchangeAccounts', component: () => import('../views/ExchangeAccounts.vue'), meta: { title: '交易所账户' } },
       { path: 'admins', name: 'Admins', component: () => import('../views/Admins.vue'), meta: { title: '管理员' } },
     ],
   },

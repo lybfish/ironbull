@@ -159,6 +159,22 @@ export async function toggleTenant(id) {
   const { data } = await api.patch(`/api/tenants/${id}/toggle`)
   return data
 }
+export async function rechargeTenant(id, amount, cardType = 'self') {
+  const { data } = await api.post(`/api/tenants/${id}/recharge`, { amount, card_type: cardType })
+  return data
+}
+
+// ---- 策略绑定 ----
+export async function getBindingsAdmin(params = {}) {
+  const { data } = await api.get('/api/strategy-bindings-admin', { params })
+  return data
+}
+
+// ---- 交易所账户 ----
+export async function getExchangeAccounts(params = {}) {
+  const { data } = await api.get('/api/exchange-accounts', { params })
+  return data
+}
 
 // ---- 管理员管理 ----
 export async function getAdmins(params = {}) {

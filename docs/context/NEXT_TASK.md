@@ -73,16 +73,17 @@
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 平台层（Platform）- 部分完成
+### 平台层（Platform）- 大部分完成
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ 能力           │ 状态  │ 说明                                   │
 ├─────────────────────────────────────────────────────────────────┤
-│ 租户管理        │  ✅   │ dim_tenant, TenantService              │
-│ 用户管理        │  ✅   │ dim_user, MemberService, 邀请链路      │
-│ 认证鉴权        │  ✅   │ Merchant API AppKey+Sign               │
-│ 点卡/奖励       │  ✅   │ 点卡扣费、利润池、分销自动结算、开策略校验点卡 │
-│ 角色权限        │  ❌   │ 无 Role/Permission                     │
+│ 租户管理        │  ✅   │ dim_tenant, TenantService, 后台CRUD    │
+│ 用户管理        │  ✅   │ dim_user, MemberService, 后台查看      │
+│ 后台管理员      │  ✅   │ dim_admin, 独立登录JWT, 平台级超管      │
+│ 认证鉴权        │  ✅   │ 后台JWT + Merchant API AppKey+Sign     │
+│ 点卡/奖励       │  ✅   │ 点卡扣费/充值、利润池、分销结算         │
+│ 管理后台        │  ✅   │ admin-web: 概览/租户/用户/管理员等12页  │
 │ 配额计费        │  ❌   │ 未实现                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -108,16 +109,20 @@
 
 ---
 
-### 选项 2：多租户与身份（推荐优先级：⭐⭐⭐⭐）✅ 部分完成
+### 选项 2：多租户与身份（推荐优先级：⭐⭐⭐⭐）✅ 已完成
 **目标**：平台层建设与管理后台鉴权
 
 **已实现**：
-- [x] Tenant / User 表（dim_tenant, dim_user）已有
-- [x] 管理后台登录：POST /api/auth/login（tenant_id + email + password）→ JWT
-- [x] data-api 鉴权：请求头 `Authorization: Bearer <token>` 时从 JWT 取 tenant_id，无 token 时需 query 传 tenant_id
-- [x] admin-web 登录页、token 存储、请求头携带、退出与路由守卫
+- [x] dim_admin 表，后台管理员独立于租户/用户（平台级超管）
+- [x] 管理后台登录：POST /api/auth/login（username + password）→ JWT（admin_id）
+- [x] data-api 鉴权：Bearer JWT 校验 admin_id，tenant_id 通过 query 参数选择
+- [x] admin-web 登录页、token 存储、路由守卫
+- [x] 租户管理 CRUD（创建/编辑/启用禁用/查看密钥）
+- [x] 用户管理（按租户筛选查看）
+- [x] 管理员管理（创建/编辑/重置密码/启用禁用）
+- [x] 平台级 Dashboard 概览
 
-**可选后续**：JWT 刷新、角色/权限中间件、生产环境配置 jwt_secret
+**可选后续**：JWT 刷新、生产环境配置 jwt_secret、配额计费
 
 ---
 
@@ -211,9 +216,9 @@ python3 scripts/local_monitor.py -m auto -i 60
 
 ### 当前技术债
 - v0 使用内存存储（signal-hub/follow-service）
-- v0 没有认证（所有 API 开放）
-- 缺少 REST API 查询接口
-- 没有前端界面
+- ~~v0 没有认证~~ → 已有后台JWT + Merchant API签名
+- ~~缺少 REST API 查询接口~~ → data-api 已有
+- ~~没有前端界面~~ → admin-web 12页已完成
 
 ---
 
@@ -234,9 +239,9 @@ python3 scripts/local_monitor.py -m auto -i 60
 │ │   ✅    │   ✅    │                     ✅                              ││
 │ └─────────┴─────────┴─────────────────────────────────────────────────────┘│
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                              平台层 (Platform) ❌                            │
-│   Tenant │ User │ Role │ Permission │ Auth │ Audit │ Quota                 │
-│    ❌    │  ❌  │  ❌  │     ❌     │  ❌  │  ⚠️   │  ❌                   │
+│                              平台层 (Platform) ✅                            │
+│   Tenant │ User │ Admin│  Auth(JWT) │ Admin-Web │ Quota                   │
+│    ✅    │  ✅  │  ✅  │     ✅     │    ✅     │  ❌                     │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 

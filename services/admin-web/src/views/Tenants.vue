@@ -31,6 +31,7 @@
           <el-button link :type="row.status === 1 ? 'danger' : 'success'" size="small" @click="onToggle(row)">
             {{ row.status === 1 ? '禁用' : '启用' }}
           </el-button>
+          <el-button link type="success" size="small" @click="showRecharge(row)">充值</el-button>
           <el-button link type="info" size="small" @click="showSecret(row)">密钥</el-button>
         </template>
       </el-table-column>
@@ -68,13 +69,35 @@
         <el-button @click="secretVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <!-- 充值对话框 -->
+    <el-dialog v-model="rechargeVisible" title="充值点卡" width="400px">
+      <el-form :model="rechargeForm" label-width="80px">
+        <el-form-item label="租户">
+          <el-text>{{ rechargeName }}</el-text>
+        </el-form-item>
+        <el-form-item label="类型">
+          <el-radio-group v-model="rechargeForm.cardType">
+            <el-radio value="self">自充点卡</el-radio>
+            <el-radio value="gift">赠送点卡</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="金额">
+          <el-input-number v-model="rechargeForm.amount" :min="0.01" :precision="2" :step="100" style="width:200px" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="rechargeVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="onRecharge">确认充值</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getTenants, createTenant, updateTenant, toggleTenant } from '../api'
+import { getTenants, createTenant, updateTenant, toggleTenant, rechargeTenant } from '../api'
 
 const loading = ref(false)
 const list = ref([])
@@ -149,6 +172,34 @@ function showSecret(row) {
   secretData.app_key = row.app_key
   secretData.app_secret = row.app_secret
   secretVisible.value = true
+}
+
+const rechargeVisible = ref(false)
+const rechargeId = ref(null)
+const rechargeName = ref('')
+const rechargeForm = reactive({ amount: 100, cardType: 'self' })
+
+function showRecharge(row) {
+  rechargeId.value = row.id
+  rechargeName.value = row.name
+  rechargeForm.amount = 100
+  rechargeForm.cardType = 'self'
+  rechargeVisible.value = true
+}
+
+async function onRecharge() {
+  if (rechargeForm.amount <= 0) return ElMessage.warning('金额必须大于0')
+  saving.value = true
+  try {
+    await rechargeTenant(rechargeId.value, rechargeForm.amount, rechargeForm.cardType)
+    ElMessage.success('充值成功')
+    rechargeVisible.value = false
+    await fetchData()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.detail || '充值失败')
+  } finally {
+    saving.value = false
+  }
 }
 
 onMounted(fetchData)

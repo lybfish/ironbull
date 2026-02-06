@@ -466,6 +466,39 @@
 
 详见 [docs/context/PLAN_EXECUTION_NODES.md](context/PLAN_EXECUTION_NODES.md)。
 
+## 已完成（Done）- 管理后台独立鉴权 + 平台管理 ✅
+
+### dim_admin 独立管理员体系 ✅
+- 状态：已实现并验证
+- **设计**：后台管理员独立于 dim_tenant / dim_user，平台级超管可查看所有租户数据
+- 组件：
+  - `libs/admin/`：Admin model + AdminService（登录验证、改密码）
+  - `libs/core/auth/jwt.py`：JWT payload 含 admin_id + username
+  - `migrations/009_admin.sql`：dim_admin 表 + 初始账号(admin/admin123)
+- 认证流程：
+  - POST /api/auth/login（username + password → JWT）
+  - GET /api/auth/me（JWT → admin info）
+  - POST /api/auth/change-password
+  - 管理员通过 query 参数 tenant_id 切换查看不同租户
+
+### data-api 管理接口 ✅
+- **Dashboard**：GET /api/dashboard/summary（平台汇总：租户/用户/订单/节点/绑定数）
+- **租户管理**：GET/POST /api/tenants、PUT /api/tenants/:id、PATCH /api/tenants/:id/toggle
+- **用户管理**：GET /api/users（支持按租户筛选）
+- **管理员管理**：GET/POST /api/admins、PUT /api/admins/:id、PATCH /api/admins/:id/toggle、POST /api/admins/:id/reset-password
+
+### admin-web 管理后台 ✅
+- 状态：Vue 3 + Vite + Element Plus，端口 5174
+- 页面（共 12 页）：
+  - 概览 Dashboard（平台汇总 + 租户绩效）
+  - 订单 / 成交 / 持仓 / 资金账户 / 流水（数据查看）
+  - 绩效分析 / 策略管理 / 信号监控（业务监控）
+  - 租户管理（CRUD + 启用禁用 + 查看密钥）
+  - 用户管理（按租户筛选）
+  - 管理员管理（创建/编辑/重置密码/启用禁用）
+- 登录：用户名 + 密码（无需 tenant_id），JWT 存 localStorage
+- 租户/账户切换：右上角下拉，query 参数传递
+
 ---
 
 ## 风险/技术债（Known Debts）

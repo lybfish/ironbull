@@ -1,13 +1,15 @@
 """
 Data API - 租户管理（仅管理员可访问）
 
-GET    /api/tenants          -> 租户列表
-POST   /api/tenants          -> 创建租户
-PUT    /api/tenants/{id}     -> 编辑租户
-PATCH  /api/tenants/{id}/toggle -> 启用/禁用
+GET    /api/tenants              -> 租户列表
+POST   /api/tenants              -> 创建租户
+PUT    /api/tenants/{id}         -> 编辑租户
+PATCH  /api/tenants/{id}/toggle  -> 启用/禁用
+POST   /api/tenants/{id}/recharge -> 充值点卡
 """
 
 import secrets
+from decimal import Decimal
 from typing import Dict, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -119,3 +121,31 @@ def toggle_tenant(
     db.merge(tenant)
     db.flush()
     return {"success": True, "data": _tenant_dict(tenant)}
+
+
+class RechargeBody(BaseModel):
+    amount: float
+    card_type: str = "self"  # self=自充, gift=赠送
+
+
+@router.post("/{tenant_id}/recharge")
+def recharge_point_card(
+    tenant_id: int,
+    body: RechargeBody,
+    _admin: Dict[str, Any] = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """给租户充值点卡"""
+    if body.amount <= 0:
+        raise HTTPException(status_code=400, detail="充值金额必须大于0")
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="租户不存在")
+    amount = Decimal(str(body.amount))
+    if body.card_type == "gift":
+        tenant.point_card_gift = (tenant.point_card_gift or 0) + amount
+    else:
+        tenant.point_card_self = (tenant.point_card_self or 0) + amount
+    db.merge(tenant)
+    db.flush()
+    return {"success": True, "data": _tenant_dict(tenant), "message": f"已充值 {body.amount} 点卡({body.card_type})"}
