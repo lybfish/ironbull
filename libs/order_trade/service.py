@@ -7,7 +7,7 @@ OrderTradeService 提供订单和成交的核心业务逻辑
 
 import uuid
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -350,18 +350,16 @@ class OrderTradeService:
         order = self._get_order_or_raise(order_id, tenant_id)
         return _order_to_dto(order)
     
-    def list_orders(self, filter: OrderFilter) -> List[OrderDTO]:
+    def list_orders(self, filter: OrderFilter) -> Tuple[List[OrderDTO], int]:
         """
-        查询订单列表
+        查询订单列表及总数（分页用）
         
-        Args:
-            filter: 过滤条件
-            
         Returns:
-            订单 DTO 列表
+            (订单 DTO 列表, 符合条件的总数)
         """
+        total = self.order_repo.count_orders(filter)
         orders = self.order_repo.list_orders(filter)
-        return [_order_to_dto(o) for o in orders]
+        return [_order_to_dto(o) for o in orders], total
     
     def get_active_orders(
         self,
@@ -520,18 +518,16 @@ class OrderTradeService:
         fills = self.fill_repo.get_fills_by_order(order_id, tenant_id)
         return [_fill_to_dto(f) for f in fills]
     
-    def list_fills(self, filter: FillFilter) -> List[FillDTO]:
+    def list_fills(self, filter: FillFilter) -> Tuple[List[FillDTO], int]:
         """
-        查询成交列表
+        查询成交列表及总数（分页用）
         
-        Args:
-            filter: 过滤条件
-            
         Returns:
-            成交列表
+            (成交 DTO 列表, 符合条件的总数)
         """
+        total = self.fill_repo.count_fills(filter)
         fills = self.fill_repo.list_fills(filter)
-        return [_fill_to_dto(f) for f in fills]
+        return [_fill_to_dto(f) for f in fills], total
     
     # ============ 聚合查询 ============
     

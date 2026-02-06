@@ -286,23 +286,27 @@ class OrderRepository:
     
     def count_orders(self, filter: OrderFilter) -> int:
         """
-        统计订单数量
-        
-        Args:
-            filter: 过滤条件
-            
-        Returns:
-            订单数量
+        统计订单数量（与 list_orders 使用相同过滤条件）
         """
         conditions = [Order.tenant_id == filter.tenant_id]
-        
         if filter.account_id:
             conditions.append(Order.account_id == filter.account_id)
+        if filter.symbol:
+            conditions.append(Order.symbol == filter.symbol)
+        if filter.exchange:
+            conditions.append(Order.exchange == filter.exchange)
+        if filter.side:
+            conditions.append(Order.side == filter.side)
         if filter.status:
             conditions.append(Order.status == filter.status)
         if filter.statuses:
             conditions.append(Order.status.in_(filter.statuses))
-        
+        if filter.signal_id:
+            conditions.append(Order.signal_id == filter.signal_id)
+        if filter.start_time:
+            conditions.append(Order.created_at >= filter.start_time)
+        if filter.end_time:
+            conditions.append(Order.created_at <= filter.end_time)
         stmt = select(func.count(Order.id)).where(and_(*conditions))
         return self.session.execute(stmt).scalar() or 0
     
@@ -520,21 +524,21 @@ class FillRepository:
     
     def count_fills(self, filter: FillFilter) -> int:
         """
-        统计成交数量
-        
-        Args:
-            filter: 过滤条件
-            
-        Returns:
-            成交数量
+        统计成交数量（与 list_fills 使用相同过滤条件）
         """
         conditions = [Fill.tenant_id == filter.tenant_id]
-        
         if filter.account_id:
             conditions.append(Fill.account_id == filter.account_id)
         if filter.order_id:
             conditions.append(Fill.order_id == filter.order_id)
-        
+        if filter.symbol:
+            conditions.append(Fill.symbol == filter.symbol)
+        if filter.side:
+            conditions.append(Fill.side == filter.side)
+        if filter.start_time:
+            conditions.append(Fill.filled_at >= filter.start_time)
+        if filter.end_time:
+            conditions.append(Fill.filled_at <= filter.end_time)
         stmt = select(func.count(Fill.id)).where(and_(*conditions))
         return self.session.execute(stmt).scalar() or 0
     

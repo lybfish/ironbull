@@ -35,12 +35,12 @@ def run(tenant_id: int, account_id: int) -> int:
     try:
         # 1. fact_order
         order_svc = OrderTradeService(session)
-        orders = order_svc.list_orders(OrderFilter(tenant_id=tenant_id, account_id=account_id, limit=500))
+        orders, order_total = order_svc.list_orders(OrderFilter(tenant_id=tenant_id, account_id=account_id, limit=500))
         order_count = len(orders)
         filled_orders = [o for o in orders if o.status == "FILLED"]
 
         # 2. fact_fill
-        fills = order_svc.list_fills(FillFilter(tenant_id=tenant_id, account_id=account_id, limit=500))
+        fills, fill_total = order_svc.list_fills(FillFilter(tenant_id=tenant_id, account_id=account_id, limit=500))
         fill_count = len(fills)
 
         # 3. fact_position

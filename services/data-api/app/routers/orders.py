@@ -60,8 +60,8 @@ def list_orders(
         offset=offset,
     )
     svc = OrderTradeService(db)
-    orders = svc.list_orders(filt)
-    return {"success": True, "data": [dto_to_dict(o) for o in orders], "total": len(orders)}
+    orders, total = svc.list_orders(filt)
+    return {"success": True, "data": [dto_to_dict(o) for o in orders], "total": total}
 
 
 @router.get("/fills")
@@ -90,5 +90,5 @@ def list_fills(
         offset=offset,
     )
     svc = OrderTradeService(db)
-    fills = svc.list_fills(filt)
-    return {"success": True, "data": [dto_to_dict(f) for f in fills], "total": len(fills)}
+    fills, total = svc.list_fills(filt)
+    return {"success": True, "data": [dto_to_dict(f) for f in fills], "total": total}
