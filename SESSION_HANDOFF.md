@@ -17,16 +17,21 @@
 - **仅中心可调鉴权**：节点配置 `node_auth_enabled`、`node_auth_secret`（可选 `node_allowed_ips`），校验请求头 `X-Center-Token`；中心 signal-monitor、sync_node、node_execute_worker 在 POST 节点时带该头。详见 PLAN_EXECUTION_NODES.md 5.4 节。
 - **子机自动心跳**：execution-node 配置 `center_url`（中心 data-api 地址）+ `node_code` 后，启动时自动定时 POST 中心 `/api/nodes/{node_code}/heartbeat`；支持 `heartbeat_interval`（默认 60s）；同时支持 `node_auth_secret` 鉴权头；GET /health 展示心跳状态。详见 PLAN_EXECUTION_NODES.md 5.3 节。
 
+- **管理后台独立鉴权体系**：新建 `dim_admin` 表（独立于 dim_tenant / dim_user），后台(admin-web)只有管理员可登录；JWT payload 含 `admin_id` + `username`；管理员是平台级超管，可查看所有租户数据，通过 `tenant_id` query 参数切换租户视角；登录表单改为 用户名+密码（去掉了 tenant_id + email）。初始账号：admin / admin123。
+
 ## 当前代码状态
 
 - 鉴权已接在：services/execution-node/app/main.py（verify_center_token）、signal-monitor、libs/sync_node/service.py、scripts/node_execute_worker.py。
 - 心跳已接在：services/execution-node/app/main.py（lifespan + _heartbeat_loop）。
 - 未配置 `node_auth_secret` 时行为与之前一致（兼容）；未配置 `center_url` 或 `node_code` 时不发心跳（兼容）。
+- **管理后台鉴权**：libs/admin（Admin model + AdminService），libs/core/auth/jwt.py（admin_id payload），services/data-api/app/deps.py（get_current_admin），services/data-api/app/routers/auth.py（login/me/change-password），admin-web Login.vue + api/index.js + Layout.vue。
 
 ## 下次可以做的
 
 - 在子机用 `dist/execution-node/` 实际打可执行文件（PyInstaller）并跑通。
 - 配置中心与节点的 `node_auth_secret` + `center_url` + `node_code` 做联调验证。
+- admin-web 前端 build + 连接 data-api 做端到端登录联调。
+- 管理后台功能：租户列表/管理、管理员账号管理等。
 - 其他业务或 NEXT_TASK.md 中的待办。
 
 ---

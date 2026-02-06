@@ -5,6 +5,7 @@
 import axios from 'axios'
 
 const TOKEN_KEY = 'ironbull_admin_token'
+const ADMIN_NAME_KEY = 'ironbull_admin_name'
 
 const devBase = import.meta.env.VITE_API_BASE_URL != null && import.meta.env.VITE_API_BASE_URL !== ''
   ? import.meta.env.VITE_API_BASE_URL
@@ -21,25 +22,23 @@ export function getToken() {
   return localStorage.getItem(TOKEN_KEY)
 }
 
-const LOGIN_EMAIL_KEY = 'ironbull_admin_email'
-
-export function setToken(token, email) {
+export function setToken(token, nickname) {
   if (token) {
     localStorage.setItem(TOKEN_KEY, token)
-    if (email) localStorage.setItem(LOGIN_EMAIL_KEY, email)
+    if (nickname) localStorage.setItem(ADMIN_NAME_KEY, nickname)
   } else {
     localStorage.removeItem(TOKEN_KEY)
-    localStorage.removeItem(LOGIN_EMAIL_KEY)
+    localStorage.removeItem(ADMIN_NAME_KEY)
   }
 }
 
-export function getLoginEmail() {
-  return localStorage.getItem(LOGIN_EMAIL_KEY) || ''
+export function getAdminName() {
+  return localStorage.getItem(ADMIN_NAME_KEY) || ''
 }
 
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(LOGIN_EMAIL_KEY)
+  localStorage.removeItem(ADMIN_NAME_KEY)
 }
 
 api.interceptors.request.use((config) => {
@@ -65,10 +64,9 @@ export function setTenantAccount(tenantId, accountId) {
   if (accountId != null) api.defaults.params.account_id = accountId
 }
 
-export async function login(tenantId, email, password) {
+export async function login(username, password) {
   const { data } = await api.post('/api/auth/login', {
-    tenant_id: tenantId,
-    email: email.trim(),
+    username: username.trim(),
     password,
   })
   return data
@@ -129,6 +127,46 @@ export async function getStrategyBindings(params = {}) {
 
 export async function getSignalMonitorStatus() {
   const { data } = await api.get('/api/signal-monitor/status')
+  return data
+}
+
+// ---- 租户管理 ----
+export async function getTenants(params = {}) {
+  const { data } = await api.get('/api/tenants', { params })
+  return data
+}
+export async function createTenant(body) {
+  const { data } = await api.post('/api/tenants', body)
+  return data
+}
+export async function updateTenant(id, body) {
+  const { data } = await api.put(`/api/tenants/${id}`, body)
+  return data
+}
+export async function toggleTenant(id) {
+  const { data } = await api.patch(`/api/tenants/${id}/toggle`)
+  return data
+}
+
+// ---- 管理员管理 ----
+export async function getAdmins(params = {}) {
+  const { data } = await api.get('/api/admins', { params })
+  return data
+}
+export async function createAdmin(body) {
+  const { data } = await api.post('/api/admins', body)
+  return data
+}
+export async function updateAdmin(id, body) {
+  const { data } = await api.put(`/api/admins/${id}`, body)
+  return data
+}
+export async function toggleAdmin(id) {
+  const { data } = await api.patch(`/api/admins/${id}/toggle`)
+  return data
+}
+export async function resetAdminPassword(id, newPassword) {
+  const { data } = await api.post(`/api/admins/${id}/reset-password`, { new_password: newPassword })
   return data
 }
 

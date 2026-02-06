@@ -5,11 +5,8 @@
         <span>IronBull 管理后台</span>
       </template>
       <el-form ref="formRef" :model="form" :rules="rules" label-width="80px">
-        <el-form-item label="租户ID" prop="tenant_id">
-          <el-input-number v-model="form.tenant_id" :min="1" controls-position="right" style="width:100%" />
-        </el-form-item>
-        <el-form-item label="邮箱" prop="email">
-          <el-input v-model="form.email" placeholder="登录邮箱" />
+        <el-form-item label="用户名" prop="username">
+          <el-input v-model="form.username" placeholder="管理员用户名" />
         </el-form-item>
         <el-form-item label="密码" prop="password">
           <el-input v-model="form.password" type="password" placeholder="密码" show-password @keyup.enter="onLogin" />
@@ -26,19 +23,17 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import api, { login as apiLogin, setToken } from '../api'
+import { login as apiLogin, setToken } from '../api'
 
 const router = useRouter()
 const formRef = ref(null)
 const loading = ref(false)
 const form = reactive({
-  tenant_id: 1,
-  email: '',
+  username: '',
   password: '',
 })
 const rules = {
-  tenant_id: [{ required: true, message: '请输入租户ID', trigger: 'blur' }],
-  email: [{ required: true, message: '请输入邮箱', trigger: 'blur' }],
+  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
 }
 
@@ -46,8 +41,8 @@ async function onLogin() {
   await formRef.value?.validate().catch(() => {})
   loading.value = true
   try {
-    const res = await apiLogin(form.tenant_id, form.email, form.password)
-    setToken(res.token, res.email)
+    const res = await apiLogin(form.username, form.password)
+    setToken(res.token, res.nickname)
     ElMessage.success('登录成功')
     router.replace('/')
   } catch (e) {

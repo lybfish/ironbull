@@ -27,14 +27,14 @@ def _get_secret() -> str:
     return secret
 
 
-def encode(tenant_id: int, user_id: int, exp_hours: int = DEFAULT_EXP_HOURS) -> str:
-    """签发 JWT，payload 含 tenant_id、user_id、exp。"""
+def encode(admin_id: int, username: str, exp_hours: int = DEFAULT_EXP_HOURS) -> str:
+    """签发 JWT，payload 含 admin_id、username、exp。仅用于管理后台登录。"""
     if not pyjwt:
         raise RuntimeError("PyJWT not installed")
     now = int(time.time())
     payload = {
-        "tenant_id": tenant_id,
-        "user_id": user_id,
+        "admin_id": admin_id,
+        "username": username,
         "iat": now,
         "exp": now + exp_hours * 3600,
     }

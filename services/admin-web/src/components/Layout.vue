@@ -18,13 +18,16 @@
         <el-menu-item index="/analytics">绩效分析</el-menu-item>
         <el-menu-item index="/strategies">策略管理</el-menu-item>
         <el-menu-item index="/signal-monitor">信号监控</el-menu-item>
+        <div class="menu-divider"></div>
+        <el-menu-item index="/tenants">租户管理</el-menu-item>
+        <el-menu-item index="/admins">管理员</el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>
       <el-header class="header">
         <span class="title">{{ $route.meta.title || '管理后台' }}</span>
         <div class="header-right">
-          <span class="user">{{ loginEmail || '已登录' }}</span>
+          <span class="user">{{ adminName }}</span>
           <el-button link type="danger" size="small" @click="onLogout">退出</el-button>
           <el-input-number v-model="tenantId" :min="1" size="small" controls-position="right" style="width:90px; margin-left:12px" @change="onTenantChange" />
           <span class="label">租户</span>
@@ -42,12 +45,12 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { setTenantAccount, clearToken, getLoginEmail } from '../api'
+import { setTenantAccount, clearToken, getAdminName } from '../api'
 
 const router = useRouter()
 const tenantId = ref(1)
 const accountId = ref(1)
-const loginEmail = computed(() => getLoginEmail())
+const adminName = computed(() => getAdminName() || '管理员')
 
 function onLogout() {
   clearToken()
@@ -87,4 +90,5 @@ onMounted(applyParams)
 .header-right .user { color: #666; font-size: 12px; margin-right: 8px; }
 .header-right .label { margin-left: 4px; color: #666; font-size: 12px; }
 .main { background: #f0f2f5; padding: 16px; overflow: auto; }
+.menu-divider { height: 1px; background: rgba(255,255,255,0.1); margin: 8px 16px; }
 </style>

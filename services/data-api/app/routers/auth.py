@@ -1,47 +1,73 @@
 """
-Data API - 登录与 JWT
+Data API - 管理后台登录
 
-POST /api/auth/login  -> 签发 JWT
+POST /api/auth/login  -> 管理员登录，签发 JWT
+GET  /api/auth/me     -> 当前管理员信息
+POST /api/auth/change-password -> 修改密码
 """
 
-from typing import Optional
+from typing import Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from libs.member import MemberService
+from libs.admin import AdminService
 from libs.core.auth import jwt_encode
 
-from ..deps import get_db
+from ..deps import get_db, get_current_admin
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 class LoginBody(BaseModel):
-    tenant_id: int
-    email: str
+    username: str
     password: str
 
 
 class LoginResponse(BaseModel):
     token: str
-    tenant_id: int
-    user_id: int
-    email: str
+    admin_id: int
+    username: str
+    nickname: str
 
 
 @router.post("/login", response_model=LoginResponse)
 def login(body: LoginBody, db: Session = Depends(get_db)):
-    """管理后台登录：租户ID + 邮箱 + 密码，返回 JWT。"""
-    svc = MemberService(db)
-    user = svc.verify_login(body.tenant_id, body.email.strip(), body.password)
-    if not user:
-        raise HTTPException(status_code=401, detail="租户/邮箱或密码错误")
-    token = jwt_encode(tenant_id=user.tenant_id, user_id=user.id)
+    """管理后台登录：用户名 + 密码，返回 JWT。"""
+    svc = AdminService(db)
+    admin = svc.verify_login(body.username.strip(), body.password)
+    if not admin:
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    token = jwt_encode(admin_id=admin.id, username=admin.username)
     return LoginResponse(
         token=token,
-        tenant_id=user.tenant_id,
-        user_id=user.id,
-        email=user.email,
+        admin_id=admin.id,
+        username=admin.username,
+        nickname=admin.nickname or admin.username,
     )
+
+
+@router.get("/me")
+def me(current_admin: Dict[str, Any] = Depends(get_current_admin)):
+    """返回当前登录管理员信息（从 JWT 解析）"""
+    return {"success": True, "data": current_admin}
+
+
+class ChangePasswordBody(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@router.post("/change-password")
+def change_password(
+    body: ChangePasswordBody,
+    current_admin: Dict[str, Any] = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """修改当前管理员密码"""
+    svc = AdminService(db)
+    err = svc.change_password(current_admin["admin_id"], body.old_password, body.new_password)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return {"success": True, "message": "密码已修改"}
