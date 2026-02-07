@@ -312,7 +312,7 @@ def monitor_loop():
                                             dispatch_result.get("success_count", 0),
                                         )
                                     except Exception as e:
-                                        log.error("strategy dispatch error [%s]", sig.get("side"), error=str(e))
+                                        log.error(f"strategy dispatch error [{sig.get('side')}]", error=str(e))
 
                                 # 推送通知
                                 if NOTIFY_ON_SIGNAL:
