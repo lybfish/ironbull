@@ -29,4 +29,4 @@ class PointCardLog(Base):
     before_gift = Column(DECIMAL(20, 8), nullable=False, default=0)
     after_gift = Column(DECIMAL(20, 8), nullable=False, default=0)
     remark = Column(String(255), nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)

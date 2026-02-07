@@ -84,7 +84,7 @@ class WithdrawalService:
         from datetime import datetime
         w.status = 1
         w.audit_by = admin_id
-        w.audit_at = datetime.utcnow()
+        w.audit_at = datetime.now()
         self.repo.update_withdrawal(w)
         return w, ""
 
@@ -101,7 +101,7 @@ class WithdrawalService:
         w.status = 2
         w.reject_reason = reason
         w.audit_by = admin_id
-        w.audit_at = datetime.utcnow()
+        w.audit_at = datetime.now()
         self.repo.update_withdrawal(w)
         # 退回 reward_usdt
         user = self.member_repo.get_user_by_id(w.user_id)
@@ -133,7 +133,7 @@ class WithdrawalService:
         from datetime import datetime
         w.status = 3
         w.tx_hash = tx_hash or None
-        w.completed_at = datetime.utcnow()
+        w.completed_at = datetime.now()
         self.repo.update_withdrawal(w)
         # 更新用户已提现累计
         user = self.member_repo.get_user_by_id(w.user_id)

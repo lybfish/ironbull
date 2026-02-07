@@ -247,7 +247,7 @@ class FactsRepository:
         freeze = session.query(FreezeRecord).filter(FreezeRecord.id == freeze_id).first()
         if freeze and freeze.status == "frozen":
             freeze.status = "released"
-            freeze.released_at = datetime.utcnow()
+            freeze.released_at = datetime.now()
             if self._owns_session:
                 session.commit()
             logger.info("freeze released", freeze_id=freeze_id)

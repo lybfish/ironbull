@@ -168,7 +168,7 @@ class PositionService:
         position.status = PositionStatus.OPEN.value
         
         if not position.opened_at:
-            position.opened_at = dto.filled_at or datetime.utcnow()
+            position.opened_at = dto.filled_at or datetime.now()
         
         if dto.leverage:
             position.leverage = dto.leverage
@@ -189,7 +189,7 @@ class PositionService:
             realized_pnl=None,
             source_type="FILL",
             source_id=dto.fill_id,
-            changed_at=dto.filled_at or datetime.utcnow(),
+            changed_at=dto.filled_at or datetime.now(),
         )
         
         return self._to_dto(position)
@@ -238,7 +238,7 @@ class PositionService:
         # 判断是否完全平仓
         if new_quantity == 0:
             position.status = PositionStatus.CLOSED.value
-            position.closed_at = dto.filled_at or datetime.utcnow()
+            position.closed_at = dto.filled_at or datetime.now()
             position.avg_cost = Decimal("0")
             position.total_cost = Decimal("0")
             change_type = ChangeType.CLOSE
@@ -259,7 +259,7 @@ class PositionService:
             realized_pnl=realized_pnl,
             source_type="FILL",
             source_id=dto.fill_id,
-            changed_at=dto.filled_at or datetime.utcnow(),
+            changed_at=dto.filled_at or datetime.now(),
         )
         
         return self._to_dto(position)
@@ -316,7 +316,7 @@ class PositionService:
             realized_pnl=None,
             source_type="ORDER",
             source_id=dto.order_id,
-            changed_at=dto.freeze_at or datetime.utcnow(),
+            changed_at=dto.freeze_at or datetime.now(),
         )
         
         return self._to_dto(position)
@@ -371,7 +371,7 @@ class PositionService:
             realized_pnl=None,
             source_type="ORDER",
             source_id=dto.order_id,
-            changed_at=dto.freeze_at or datetime.utcnow(),
+            changed_at=dto.freeze_at or datetime.now(),
         )
         
         return self._to_dto(position)

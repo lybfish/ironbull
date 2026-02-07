@@ -47,7 +47,7 @@ class AdminService:
         if not admin.password_hash.startswith("$2b$"):
             admin.password_hash = _hash_password(password)
         # 更新最后登录时间
-        admin.last_login_at = datetime.utcnow()
+        admin.last_login_at = datetime.now()
         self.db.merge(admin)
         self.db.flush()
         return admin

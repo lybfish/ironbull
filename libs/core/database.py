@@ -76,6 +76,9 @@ def init_database(echo: bool = False) -> None:
     pool_timeout = config.get_int("db_pool_timeout", 30)
     pool_recycle = config.get_int("db_pool_recycle", 3600)
     
+    # 设置 MySQL 会话时区为 Asia/Shanghai，确保 NOW() / CURRENT_TIMESTAMP 返回北京时间
+    from sqlalchemy import event
+
     _engine = create_engine(
         url,
         poolclass=QueuePool,
@@ -85,6 +88,12 @@ def init_database(echo: bool = False) -> None:
         pool_recycle=pool_recycle,
         echo=echo,
     )
+
+    @event.listens_for(_engine, "connect")
+    def _set_timezone(dbapi_conn, connection_record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("SET time_zone = '+08:00'")
+        cursor.close()
     
     _SessionLocal = sessionmaker(
         autocommit=False,

@@ -260,7 +260,7 @@ class TradeCooldownRule(RiskRule):
         if not ctx.last_trade_time:
             return None
         
-        elapsed = (datetime.utcnow() - ctx.last_trade_time).total_seconds()
+        elapsed = (datetime.now() - ctx.last_trade_time).total_seconds()
         
         if elapsed < self.cooldown_seconds:
             remaining = self.cooldown_seconds - elapsed

@@ -78,7 +78,7 @@ class Trade(Base):
     timeframe = Column(String(8), nullable=True, comment="时间周期")
     
     # 时间戳
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
     executed_at = Column(DateTime, nullable=True, comment="执行完成时间")
     
     # 追踪
@@ -121,7 +121,7 @@ class Ledger(Base):
     description = Column(String(256), nullable=True, comment="流水描述")
     
     # 时间
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
     
     # 追踪
     request_id = Column(String(64), nullable=True, index=True, comment="请求追踪ID")
@@ -158,7 +158,7 @@ class FreezeRecord(Base):
     status = Column(String(16), nullable=False, default="frozen", comment="frozen/released")
     
     # 时间
-    frozen_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    frozen_at = Column(DateTime, default=datetime.now, nullable=False)
     released_at = Column(DateTime, nullable=True, comment="解冻时间")
     
     # 描述
@@ -203,7 +203,7 @@ class SignalEvent(Base):
     error_message = Column(Text, nullable=True, comment="错误信息")
     
     # 时间
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
     
     # 追踪
     request_id = Column(String(64), nullable=True, index=True, comment="请求追踪ID")
@@ -255,7 +255,7 @@ class AuditLog(Base):
     retry_count = Column(Integer, default=0, comment="重试次数")
     
     # 时间
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
     duration_ms = Column(Integer, nullable=True, comment="操作耗时(毫秒)")
     
     # 追踪

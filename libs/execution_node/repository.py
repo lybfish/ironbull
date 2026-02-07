@@ -33,7 +33,7 @@ class ExecutionNodeRepository:
         node = self.get_by_code(node_code)
         if not node:
             return False
-        node.last_heartbeat_at = datetime.utcnow()
+        node.last_heartbeat_at = datetime.now()
         self.db.merge(node)
         self.db.flush()
         return True

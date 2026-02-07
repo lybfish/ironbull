@@ -21,5 +21,5 @@ class ExecutionNode(Base):
     base_url = Column(String(255), nullable=False)
     status = Column(Integer, nullable=False, default=1)  # 1 在线 0 禁用
     last_heartbeat_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)

@@ -115,7 +115,7 @@ class LedgerService:
             fee=Decimal("0"),
             source_type="DEPOSIT",
             source_id=dto.source_id,
-            transaction_at=dto.deposit_at or datetime.utcnow(),
+            transaction_at=dto.deposit_at or datetime.now(),
             remark=dto.remark,
         )
         
@@ -186,7 +186,7 @@ class LedgerService:
             fee=Decimal("0"),
             source_type="WITHDRAW",
             source_id=dto.source_id,
-            transaction_at=dto.withdraw_at or datetime.utcnow(),
+            transaction_at=dto.withdraw_at or datetime.now(),
             remark=dto.remark,
         )
         
@@ -280,7 +280,7 @@ class LedgerService:
             source_type="FILL",
             source_id=dto.fill_id,
             symbol=dto.symbol,
-            transaction_at=dto.settled_at or datetime.utcnow(),
+            transaction_at=dto.settled_at or datetime.now(),
         )
         
         return self._to_account_dto(account)
@@ -333,7 +333,7 @@ class LedgerService:
             fee=Decimal("0"),
             source_type="ORDER",
             source_id=dto.order_id,
-            transaction_at=dto.freeze_at or datetime.utcnow(),
+            transaction_at=dto.freeze_at or datetime.now(),
         )
         
         return self._to_account_dto(account)
@@ -384,7 +384,7 @@ class LedgerService:
             fee=Decimal("0"),
             source_type="ORDER",
             source_id=dto.order_id,
-            transaction_at=dto.freeze_at or datetime.utcnow(),
+            transaction_at=dto.freeze_at or datetime.now(),
         )
         
         return self._to_account_dto(account)
@@ -573,7 +573,7 @@ class LedgerService:
             net_value=net_value,
             daily_return=daily_return,
             cumulative_return=cumulative_return,
-            snapshot_at=snapshot_at or datetime.utcnow(),
+            snapshot_at=snapshot_at or datetime.now(),
         )
         
         self.snapshot_repo.create(snapshot)
@@ -667,7 +667,7 @@ class LedgerService:
             source_id=source_id,
             symbol=symbol,
             status=TransactionStatus.COMPLETED.value,
-            transaction_at=transaction_at or datetime.utcnow(),
+            transaction_at=transaction_at or datetime.now(),
             remark=remark,
         )
         

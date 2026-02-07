@@ -59,7 +59,7 @@ class PerformanceSnapshot(Base):
     net_value = Column(Float, nullable=False, default=1.0, comment="净值(初始1.0)")
     
     # 元数据
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
     
     __table_args__ = (
         UniqueConstraint('tenant_id', 'account_id', 'snapshot_date', name='uk_performance_daily'),
@@ -129,8 +129,8 @@ class TradeStatistics(Base):
     total_fee = Column(Float, nullable=False, default=0, comment="总手续费")
     
     # 元数据
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
     
     __table_args__ = (
         UniqueConstraint(
@@ -198,8 +198,8 @@ class RiskMetrics(Base):
     tracking_error = Column(Float, nullable=True, comment="跟踪误差")
     
     # 元数据
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
     
     __table_args__ = (
         UniqueConstraint(

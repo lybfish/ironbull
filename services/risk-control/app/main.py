@@ -217,7 +217,7 @@ def _get_account_stats(account_id: int) -> Dict[str, Any]:
         repo = FactsRepository()
         
         # 今日交易数
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         stats["daily_trade_count"] = repo.count_trades_since(account_id, today_start)
         
         # 本周交易数

@@ -79,9 +79,9 @@ class Order(Base):
     error_message = Column(Text, nullable=True, comment="错误信息")
     
     # 时间戳
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, comment="创建时间")
+    created_at = Column(DateTime, default=datetime.now, nullable=False, comment="创建时间")
     submitted_at = Column(DateTime, nullable=True, comment="提交到交易所时间")
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, 
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, 
                         nullable=False, comment="最后更新时间")
     
     # 追踪
@@ -164,7 +164,7 @@ class Fill(Base):
     
     # 时间戳
     filled_at = Column(DateTime, nullable=False, comment="成交时间（交易所时间）")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, comment="记录创建时间")
+    created_at = Column(DateTime, default=datetime.now, nullable=False, comment="记录创建时间")
     
     # 追踪
     request_id = Column(String(64), nullable=True, index=True, comment="请求追踪ID")

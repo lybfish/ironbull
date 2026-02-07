@@ -118,7 +118,7 @@ class PositionRepository:
     
     def update(self, position: Position) -> Position:
         """更新持仓"""
-        position.updated_at = datetime.utcnow()
+        position.updated_at = datetime.now()
         self.session.flush()
         return position
     

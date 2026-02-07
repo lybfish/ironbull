@@ -37,7 +37,7 @@ class TaskMessage:
     max_retries: int = 3                  # 最大重试次数
     
     # 时间
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     scheduled_at: Optional[str] = None    # 预定执行时间
     
     def to_json(self) -> str:

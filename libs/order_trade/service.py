@@ -194,7 +194,7 @@ class OrderTradeService:
             tenant_id=tenant_id,
             exchange_order_id=exchange_order_id,
             status=OrderStatus.SUBMITTED,
-            submitted_at=submitted_at or datetime.utcnow(),
+            submitted_at=submitted_at or datetime.now(),
         )
         
         # 重新获取更新后的订单

@@ -45,7 +45,7 @@ OrderTrade Module - 订单与成交管理
             side="BUY",
             quantity=0.01,
             price=50000.0,
-            filled_at=datetime.utcnow(),
+            filled_at=datetime.now(),
         ))
         
         session.commit()

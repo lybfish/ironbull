@@ -156,7 +156,7 @@ class TradeSettlementService:
         Returns:
             SettlementResult: 结算结果
         """
-        filled_at = filled_at or datetime.utcnow()
+        filled_at = filled_at or datetime.now()
         
         try:
             # 1. 记录成交到 OrderTrade
@@ -431,7 +431,7 @@ class TradeSettlementService:
             order_id=order_id,
             tenant_id=self.tenant_id,
             exchange_order_id=exchange_order_id,
-            submitted_at=datetime.utcnow(),
+            submitted_at=datetime.now(),
         )
     
     def fail_order(

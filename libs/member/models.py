@@ -49,8 +49,8 @@ class Strategy(Base):
     show_to_user = Column(Integer, nullable=False, default=0, comment="是否对用户/商户展示 0否 1是")
     user_display_name = Column(String(100), nullable=True, comment="对用户展示的名称，空则用 name")
     user_description = Column(String(500), nullable=True, comment="对用户展示的描述，空则用 description")
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
 
     # ---- 便捷方法 ----
     def get_symbols(self):
@@ -76,7 +76,7 @@ class LevelConfig(Base):
     level_name = Column(String(10), nullable=False)
     min_team_perf = Column(DECIMAL(20, 2), nullable=False)
     diff_rate = Column(DECIMAL(10, 4), nullable=False)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
 
 
 class User(Base):
@@ -102,8 +102,8 @@ class User(Base):
     total_reward = Column(DECIMAL(20, 8), nullable=False, default=0)
     withdrawn_reward = Column(DECIMAL(20, 8), nullable=False, default=0)
     status = Column(Integer, nullable=False, default=1)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
 
 
 class ExchangeAccount(Base):
@@ -127,8 +127,8 @@ class ExchangeAccount(Base):
     execution_node_id = Column(Integer, nullable=True, default=None, index=True, comment="执行节点ID，空=本机")
     last_sync_at = Column(DateTime, nullable=True)
     last_sync_error = Column(String(255), nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
 
 
 class TenantStrategy(Base):
@@ -149,8 +149,8 @@ class TenantStrategy(Base):
     min_capital = Column(DECIMAL(20, 2), nullable=True, comment="最低资金覆盖，空则用主策略")
     status = Column(Integer, nullable=False, default=1, comment="1=对租户用户展示 0=不展示")
     sort_order = Column(Integer, nullable=False, default=0)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
 
 
 class StrategyBinding(Base):
@@ -168,5 +168,5 @@ class StrategyBinding(Base):
     total_profit = Column(DECIMAL(20, 8), nullable=False, default=0)
     total_trades = Column(Integer, nullable=False, default=0)
     status = Column(Integer, nullable=False, default=1)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)

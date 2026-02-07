@@ -96,7 +96,7 @@ class IdempotencyChecker:
         """
         redis = get_redis()
         key = self._key(idempotency_key)
-        now = datetime.utcnow().isoformat()
+        now = datetime.now().isoformat()
         
         record = IdempotencyRecord(
             key=idempotency_key,
@@ -140,12 +140,12 @@ class IdempotencyChecker:
             record = IdempotencyRecord(
                 key=idempotency_key,
                 state=TaskState.PENDING,
-                created_at=datetime.utcnow().isoformat(),
+                created_at=datetime.now().isoformat(),
             )
         
         record.state = TaskState.COMPLETED
         record.result = result
-        record.updated_at = datetime.utcnow().isoformat()
+        record.updated_at = datetime.now().isoformat()
         
         redis.setex(key, self.ttl, record.to_json())
         
@@ -167,12 +167,12 @@ class IdempotencyChecker:
             record = IdempotencyRecord(
                 key=idempotency_key,
                 state=TaskState.PENDING,
-                created_at=datetime.utcnow().isoformat(),
+                created_at=datetime.now().isoformat(),
             )
         
         record.state = TaskState.FAILED
         record.error = error
-        record.updated_at = datetime.utcnow().isoformat()
+        record.updated_at = datetime.now().isoformat()
         
         redis.setex(key, self.ttl, record.to_json())
         

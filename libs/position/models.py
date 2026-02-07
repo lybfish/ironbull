@@ -70,8 +70,8 @@ class Position(Base):
     # 时间戳
     opened_at = Column(DateTime, nullable=True, comment="开仓时间")
     closed_at = Column(DateTime, nullable=True, comment="平仓时间")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, comment="记录创建时间")
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow,
+    created_at = Column(DateTime, default=datetime.now, nullable=False, comment="记录创建时间")
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now,
                         nullable=False, comment="最后更新时间")
     
     __table_args__ = (
@@ -165,7 +165,7 @@ class PositionChange(Base):
     
     # 时间戳
     changed_at = Column(DateTime, nullable=False, comment="变动时间")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, comment="记录创建时间")
+    created_at = Column(DateTime, default=datetime.now, nullable=False, comment="记录创建时间")
     
     # 备注
     remark = Column(Text, nullable=True, comment="备注说明")

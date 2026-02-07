@@ -1489,7 +1489,7 @@ class LiveTrader(Trader):
                         fee=Decimal(str(result.commission)) if result.commission else Decimal("0"),
                         fee_currency=result.commission_asset or "USDT",
                         exchange_trade_id=exchange_order_id,
-                        filled_at=datetime.utcnow(),
+                        filled_at=datetime.now(),
                         position_side=position_side or "NONE",
                         market_type=self.market_type,
                     )
@@ -1525,7 +1525,7 @@ class LiveTrader(Trader):
                     order_id=order_id,
                     tenant_id=self._tenant_id,
                     exchange_order_id=exchange_order_id,
-                    submitted_at=datetime.utcnow(),
+                    submitted_at=datetime.now(),
                 )
             
             # 如果有成交，记录成交
@@ -1543,7 +1543,7 @@ class LiveTrader(Trader):
                     side=result.side.value.upper(),
                     quantity=result.filled_quantity,
                     price=result.filled_price,
-                    filled_at=datetime.utcnow(),
+                    filled_at=datetime.now(),
                     exchange_trade_id=exchange_order_id,
                     fee=result.commission,
                     fee_currency=result.commission_asset,

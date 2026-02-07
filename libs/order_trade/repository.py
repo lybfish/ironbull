@@ -135,7 +135,7 @@ class OrderRepository:
         """
         values = {
             "status": status.value,
-            "updated_at": datetime.utcnow(),
+            "updated_at": datetime.now(),
         }
         if error_code is not None:
             values["error_code"] = error_code
@@ -194,7 +194,7 @@ class OrderRepository:
                 total_fee=total_fee,
                 fee_currency=fee_currency,
                 status=status.value,
-                updated_at=datetime.utcnow(),
+                updated_at=datetime.now(),
             )
         )
         result = self.session.execute(stmt)
@@ -224,7 +224,7 @@ class OrderRepository:
         values = {
             "exchange_order_id": exchange_order_id,
             "status": status.value,
-            "updated_at": datetime.utcnow(),
+            "updated_at": datetime.now(),
         }
         if submitted_at:
             values["submitted_at"] = submitted_at

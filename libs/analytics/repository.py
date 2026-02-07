@@ -334,7 +334,7 @@ class TradeStatisticsRepository:
             for key, value in kwargs.items():
                 if hasattr(stat, key) and value is not None:
                     setattr(stat, key, value)
-            stat.updated_at = datetime.utcnow()
+            stat.updated_at = datetime.now()
             
             self.session.flush()
             return self._to_dto(stat)
@@ -515,7 +515,7 @@ class RiskMetricsRepository:
             for key, value in kwargs.items():
                 if hasattr(metric, key) and value is not None:
                     setattr(metric, key, value)
-            metric.updated_at = datetime.utcnow()
+            metric.updated_at = datetime.now()
             
             self.session.flush()
             return self._to_dto(metric)

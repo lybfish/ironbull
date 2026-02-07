@@ -62,8 +62,8 @@ class Account(Base):
     status = Column(String(16), nullable=False, default="ACTIVE", comment="状态: ACTIVE/FROZEN/CLOSED")
     
     # 时间戳
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, comment="创建时间")
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow,
+    created_at = Column(DateTime, default=datetime.now, nullable=False, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now,
                         nullable=False, comment="最后更新时间")
     
     __table_args__ = (
@@ -143,7 +143,7 @@ class Transaction(Base):
     
     # 时间戳
     transaction_at = Column(DateTime, nullable=False, comment="交易时间")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, comment="记录创建时间")
+    created_at = Column(DateTime, default=datetime.now, nullable=False, comment="记录创建时间")
     
     # 备注
     remark = Column(Text, nullable=True, comment="备注")
@@ -225,7 +225,7 @@ class EquitySnapshot(Base):
     
     # 快照时间
     snapshot_at = Column(DateTime, nullable=False, comment="快照时间")
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, comment="创建时间")
+    created_at = Column(DateTime, default=datetime.now, nullable=False, comment="创建时间")
     
     __table_args__ = (
         Index("idx_snapshot_account", "ledger_account_id"),

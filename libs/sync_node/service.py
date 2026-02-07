@@ -282,7 +282,7 @@ def sync_trades_from_nodes(
                     amount = cost if side == "SELL" else -cost
                     tx_type = "TRADE_SELL" if side == "SELL" else "TRADE_BUY"
                     ts = trade.get("timestamp")
-                    tx_at = datetime.utcfromtimestamp(ts / 1000) if ts else datetime.utcnow()
+                    tx_at = datetime.utcfromtimestamp(ts / 1000) if ts else datetime.now()
 
                     txn = Transaction(
                         transaction_id=generate_transaction_id(),

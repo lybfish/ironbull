@@ -22,5 +22,5 @@ class Admin(Base):
     nickname = Column(String(64), nullable=False, default="", comment="显示昵称")
     status = Column(Integer, nullable=False, default=1, comment="1正常 0禁用")
     last_login_at = Column(DateTime, nullable=True, comment="最后登录时间")
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)

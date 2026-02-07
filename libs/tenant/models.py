@@ -28,5 +28,5 @@ class Tenant(Base):
     undist_reward_total = Column(DECIMAL(20, 8), nullable=False, default=0, comment="累计网体未分配")
     status = Column(Integer, nullable=False, default=1, comment="状态 1正常 0禁用")
     quota_plan_id = Column(Integer, nullable=True, comment="套餐ID，关联 dim_quota_plan")
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)

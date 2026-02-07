@@ -61,7 +61,7 @@ class NodeChecker:
             .order_by(ExecutionNode.id)
             .all()
         )
-        now = datetime.utcnow()
+        now = datetime.now()
         results: List[NodeStatus] = []
         for node in nodes:
             hb = node.last_heartbeat_at

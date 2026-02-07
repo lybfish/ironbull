@@ -212,7 +212,7 @@ class ExecutionHandler(TaskHandler):
                 status="filled" if node_result.success else "failed",
                 error_code=node_result.error_code,
                 error_message=node_result.error_message,
-                executed_at=datetime.utcnow() if node_result.success else None,
+                executed_at=datetime.now() if node_result.success else None,
                 request_id=message.request_id,
             )
             

@@ -113,7 +113,7 @@ class AccountRepository:
     
     def update(self, account: Account) -> Account:
         """更新账户"""
-        account.updated_at = datetime.utcnow()
+        account.updated_at = datetime.now()
         self.session.flush()
         return account
     

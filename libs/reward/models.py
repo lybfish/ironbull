@@ -34,7 +34,7 @@ class ProfitPool(Base):
     status = Column(Integer, nullable=False, default=1)  # 1待结算 2已结算
     settle_batch = Column(String(50), nullable=True)
     settled_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
 
 
 class UserReward(Base):
@@ -54,7 +54,7 @@ class UserReward(Base):
     to_level = Column(Integer, nullable=True)
     settle_batch = Column(String(50), nullable=True)
     remark = Column(String(255), nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
 
 
 class RewardLog(Base):
@@ -73,7 +73,7 @@ class RewardLog(Base):
     before_balance = Column(DECIMAL(20, 8), nullable=False, default=0)
     after_balance = Column(DECIMAL(20, 8), nullable=False, default=0)
     remark = Column(String(255), nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
 
 
 class UserWithdrawal(Base):
@@ -95,5 +95,5 @@ class UserWithdrawal(Base):
     audit_by = Column(Integer, nullable=True)
     audit_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)

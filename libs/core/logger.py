@@ -23,7 +23,7 @@ class StructuredFormatter(logging.Formatter):
     
     def format(self, record: logging.LogRecord) -> str:
         log_data = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now().isoformat() + "Z",
             "level": record.levelname,
             "service_name": getattr(record, "service_name", "-"),
             "request_id": getattr(record, "request_id", "-"),

@@ -86,7 +86,7 @@ def apply_remote_results(
                 fee=Decimal("0"),
                 fee_currency="USDT",
                 exchange_trade_id=exchange_order_id,
-                filled_at=datetime.utcnow(),
+                filled_at=datetime.now(),
                 position_side=position_side,
                 market_type=market_type,
             )
