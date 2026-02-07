@@ -67,20 +67,12 @@ def list_nodes(
     # 统计每个节点绑定的账户数
     node_ids = [n.id for n in nodes]
     account_counts: Dict[int, int] = {}
-    if node_ids:
-        rows = (
-            db.query(ExchangeAccount.execution_node_id, db.query(ExchangeAccount.id).label("cnt"))
-            .filter(ExchangeAccount.execution_node_id.in_(node_ids))
-            .filter(ExchangeAccount.status == 1)
-            .all()
+    for nid in node_ids:
+        account_counts[nid] = (
+            db.query(ExchangeAccount)
+            .filter(ExchangeAccount.execution_node_id == nid, ExchangeAccount.status == 1)
+            .count()
         )
-        # 用更简单的方式统计
-        for nid in node_ids:
-            account_counts[nid] = (
-                db.query(ExchangeAccount)
-                .filter(ExchangeAccount.execution_node_id == nid, ExchangeAccount.status == 1)
-                .count()
-            )
 
     return {
         "success": True,

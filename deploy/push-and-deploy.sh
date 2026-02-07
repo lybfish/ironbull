@@ -2,7 +2,8 @@
 # ============================================================
 # IronBull 本地一键发布：push 后 SSH 到线上拉代码并执行 deploy（参考 old3 deploy.sh）
 # 用法：
-#   make push-deploy              # 本地 push → 线上 pull + 迁移 + 重启
+#   make push-deploy              # 本地 push → 线上 pull + 迁移 + 重启（有未提交修改会报错，需先 add/commit）
+#   make push-deploy COMMIT=1 MSG="fix: xxx"  # 自动 git add -A && git commit 后再 push
 #   make push-deploy BUILD=1      # 含线上构建 admin-web
 #   make push-deploy NO_MIGRATE=1
 #   make push-deploy DRY_RUN=1
@@ -21,6 +22,8 @@ NO_MIGRATE="${NO_MIGRATE:-}"
 BUILD="${BUILD:-}"
 DRY_RUN="${DRY_RUN:-}"
 NAME="${NAME:-}"
+COMMIT="${COMMIT:-}"
+MSG="${MSG:-deploy}"
 
 # 若通过 make push-deploy NAME=prod 调用，CONFIG_NAME 可能是 default，用 NAME
 [[ -n "$NAME" ]] && CONFIG_NAME="$NAME" && CONFIG_FILE="$SCRIPT_DIR/.deploy.$CONFIG_NAME.env"
@@ -75,6 +78,24 @@ echo ""
 
 cd "$ROOT"
 
+# 0. 未提交修改：要求先 add/commit，或使用 COMMIT=1 自动提交
+if [[ -n "$(git status --porcelain)" ]]; then
+    if [[ "$COMMIT" = "1" ]]; then
+        echo "[0/4] 存在未提交修改，自动 add + commit..."
+        run git add -A
+        run git commit -m "${MSG}" || true
+        echo ""
+    else
+        echo "存在未提交的修改，请先执行："
+        echo "  git add -A"
+        echo "  git commit -m \"你的提交说明\""
+        echo "然后再执行 make push-deploy"
+        echo ""
+        echo "或使用自动提交： make push-deploy COMMIT=1 MSG=\"提交说明\""
+        exit 1
+    fi
+fi
+
 # 1. 确保分支并 push
 echo "[1/4] 推送代码..."
 CUR="$(git rev-parse --abbrev-ref HEAD)"
@@ -114,12 +135,13 @@ if [[ "$HAS_REPO" != "yes" ]]; then
     echo ""
 fi
 
-# 3. SSH 到服务器执行 deploy
+# 3. SSH 到服务器执行 deploy（sudo 时用绝对路径，避免子进程 cwd 不同导致找不到脚本）
 echo "[3/4] 连接服务器并拉代码、发布..."
+DEPLOY_SCRIPT="$DEPLOY_PATH/deploy/deploy.sh"
 if [[ -n "$SUDO_CMD" ]]; then
-    REMOTE_RUN="cd $DEPLOY_PATH && $SUDO_CMD ./deploy/deploy.sh $REMOTE_ARGS"
+    REMOTE_RUN="cd $DEPLOY_PATH && $SUDO_CMD bash $DEPLOY_SCRIPT $REMOTE_ARGS"
 else
-    REMOTE_RUN="cd $DEPLOY_PATH && ./deploy/deploy.sh $REMOTE_ARGS"
+    REMOTE_RUN="cd $DEPLOY_PATH && bash $DEPLOY_SCRIPT $REMOTE_ARGS"
 fi
 ssh_cmd "$REMOTE_RUN"
 echo ""
