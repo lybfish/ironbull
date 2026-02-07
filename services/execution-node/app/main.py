@@ -223,14 +223,18 @@ async def _sync_positions_one(task: TaskItem, sandbox: bool) -> Dict[str, Any]:
             # 统一为规范 symbol（BTC/USDT），便于存储与跨所一致
             raw_sym = p.get("symbol") or ""
             sym = to_canonical_symbol(raw_sym, "future")
+            # 提取杠杆/强平价/未实现盈亏：区分 None（未返回）和 0（有效值）
+            _lev = p.get("leverage")
+            _liq = p.get("liquidationPrice")
+            _upnl = p.get("unrealizedPnl")
             out.append({
                 "symbol": sym or raw_sym,
                 "position_side": position_side,
                 "quantity": coin_qty,
                 "entry_price": float(p.get("entryPrice") or p.get("averagePrice") or 0),
-                "unrealized_pnl": float(p.get("unrealizedPnl") or 0),
-                "leverage": int(p.get("leverage") or 0),
-                "liquidation_price": float(p.get("liquidationPrice") or 0) if p.get("liquidationPrice") else None,
+                "unrealized_pnl": float(_upnl) if _upnl is not None else None,
+                "leverage": int(_lev) if _lev is not None else None,
+                "liquidation_price": float(_liq) if _liq is not None else None,
             })
         return {
             "account_id": task.account_id,

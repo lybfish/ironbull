@@ -200,7 +200,8 @@ def sync_positions_from_nodes(
                 sym = pos.get("symbol") or ""
                 ps = pos.get("position_side") or "NONE"
                 qty = Decimal(str(pos.get("quantity", 0)))
-                lev = int(pos.get("leverage") or 0) or None
+                lev_raw = pos.get("leverage")
+                lev = int(lev_raw) if lev_raw is not None else None
                 upnl_raw = pos.get("unrealized_pnl")
                 upnl = Decimal(str(upnl_raw)) if upnl_raw is not None else None
                 liq_raw = pos.get("liquidation_price")
