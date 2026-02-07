@@ -64,12 +64,18 @@ if [ "$DO_MIGRATE" = true ]; then
     if command -v stat >/dev/null 2>&1; then
         MIGRATE_OWNER=$(stat -c '%U' "$ROOT" 2>/dev/null) || true
     fi
+    # 加载 .env.production 以获取数据库连接等环境变量
+    ENV_PROD="$SCRIPT_DIR/.env.production"
+    MIGRATE_ENV=""
+    if [ -f "$ENV_PROD" ]; then
+        MIGRATE_ENV="set -a && source $ENV_PROD && set +a && "
+    fi
     if [ "$(id -u)" = "0" ] && [ -n "$MIGRATE_OWNER" ] && [ "$MIGRATE_OWNER" != "root" ]; then
         echo "  以用户 $MIGRATE_OWNER 执行迁移（当前为 root）"
-        run sudo -i -u "$MIGRATE_OWNER" bash -c "cd $ROOT && make migrate"
+        run sudo -i -u "$MIGRATE_OWNER" bash -c "${MIGRATE_ENV}cd $ROOT && make migrate"
     else
         # 使用 login shell 确保 PATH 包含 pip 安装路径
-        run bash -l -c "cd $ROOT && make migrate"
+        run bash -l -c "${MIGRATE_ENV}cd $ROOT && make migrate"
     fi
     echo ""
 else
