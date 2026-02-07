@@ -59,10 +59,17 @@ echo ""
 
 if [ "$DO_MIGRATE" = true ]; then
     echo "[2/5] 执行迁移 (migrate-013 ~ migrate-016)..."
-    run make migrate-013
-    run make migrate-014
-    run make migrate-015
-    run make migrate-016
+    # 若当前是 root 且项目属主非 root，以属主用户执行迁移（确保 Python 环境正确）
+    MIGRATE_OWNER=""
+    if command -v stat >/dev/null 2>&1; then
+        MIGRATE_OWNER=$(stat -c '%U' "$ROOT" 2>/dev/null) || true
+    fi
+    if [ "$(id -u)" = "0" ] && [ -n "$MIGRATE_OWNER" ] && [ "$MIGRATE_OWNER" != "root" ]; then
+        echo "  以用户 $MIGRATE_OWNER 执行迁移（当前为 root）"
+        run sudo -i -u "$MIGRATE_OWNER" bash -c "cd $ROOT && make migrate"
+    else
+        run make migrate
+    fi
     echo ""
 else
     echo "[2/5] 跳过迁移 (--no-migrate)"
