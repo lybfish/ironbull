@@ -84,8 +84,14 @@ export function getStrategies(params = {}) {
 export function getStrategyDetail(id) {
   return axios.get(`/strategies/${id}`)
 }
+export function createStrategy(data) {
+  return axios.post('/strategies', data)
+}
 export function updateStrategy(id, data) {
   return axios.post(`/strategies/${id}`, data)
+}
+export function deleteStrategy(id) {
+  return axios.delete(`/strategies/${id}`)
 }
 export function toggleStrategy(id) {
   return axios.patch(`/strategies/${id}/toggle`)
@@ -98,6 +104,9 @@ export function getBindingsAdmin(params = {}) {
 }
 export function updateBinding(bindingId, data) {
   return axios.put(`/strategy-bindings-admin/${bindingId}`, data)
+}
+export function deleteBinding(bindingId) {
+  return axios.delete(`/strategy-bindings-admin/${bindingId}`)
 }
 
 // ---- 交易所账户 ----

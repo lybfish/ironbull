@@ -107,6 +107,7 @@
           <template slot-scope="{row}">
             <el-button type="text" size="mini" icon="el-icon-view" @click="showDetail(row)">详情</el-button>
             <el-button type="text" size="mini" icon="el-icon-edit" @click="showEdit(row)">编辑</el-button>
+            <el-button v-if="row.status === 0" type="text" size="mini" icon="el-icon-delete" style="color:#F56C6C" @click="handleDeleteBinding(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -203,7 +204,7 @@
 </template>
 
 <script>
-import {getBindingsAdmin, updateBinding} from '@/api/admin'
+import {getBindingsAdmin, updateBinding, deleteBinding} from '@/api/admin'
 
 const RISK_PCT_MAP = {1: 0.01, 2: 0.015, 3: 0.02}
 
@@ -301,6 +302,26 @@ export default {
       if (!this.detailRow || !this.detailRow.user_id) return
       this.detailVisible = false
       this.$router.push({ path: '/user/manage', query: { user_id: this.detailRow.user_id } })
+    },
+    async handleDeleteBinding(row) {
+      try {
+        await this.$confirm(
+          `确定要删除绑定 #${row.id}（用户: ${row.user_email}，策略: ${row.strategy_name}）吗？`,
+          '删除确认',
+          { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'error' }
+        )
+      } catch { return }
+      try {
+        const res = await deleteBinding(row.id)
+        if (res.data.success) {
+          this.$message.success('删除成功')
+          this.fetchData()
+        } else {
+          this.$message.error(res.data.message || '删除失败')
+        }
+      } catch (e) {
+        this.$message.error(e.response?.data?.message || e.response?.data?.detail || '删除失败')
+      }
     },
     async fetchData() {
       this.loading = true

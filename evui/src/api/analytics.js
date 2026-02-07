@@ -13,6 +13,10 @@ export function getDashboardSummary() {
   return axios.get('/dashboard/summary')
 }
 
+export function getDashboardTrends(days = 30) {
+  return axios.get('/dashboard/trends', {params: {days}})
+}
+
 export function getPerformance(params = {}) {
   return axios.get('/analytics/performance', {params: {...defaultParams, ...params}})
 }

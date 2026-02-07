@@ -365,6 +365,125 @@
           </el-table>
           <el-empty v-else description="暂无交易所账户" :image-size="60" />
 
+          <!-- 当前持仓 -->
+          <div class="section-title" style="margin-top: 20px;">
+            <span>当前持仓</span>
+            <el-button type="text" size="mini" icon="el-icon-refresh" @click="loadUserPositions" style="margin-left:8px">刷新</el-button>
+            <el-button type="text" size="mini" @click="goToPositions" style="margin-left:4px">查看全部 →</el-button>
+          </div>
+          <el-table
+            v-if="userPositions.length"
+            :data="userPositions"
+            size="mini"
+            border
+            v-loading="userPosLoading"
+            :row-class-name="posPnlRowClass"
+            max-height="260">
+            <el-table-column label="交易对" width="110">
+              <template slot-scope="{ row }">
+                <span style="font-weight:600">{{ row.symbol }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="交易所" width="80" align="center">
+              <template slot-scope="{ row }">
+                <el-tag size="mini" effect="plain">{{ (row.exchange || '').toUpperCase() }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="方向" width="60" align="center">
+              <template slot-scope="{ row }">
+                <el-tag :type="(row.position_side||'').toUpperCase()==='LONG'?'success':'danger'" size="mini" effect="dark">
+                  {{ (row.position_side||'').toUpperCase()==='LONG'?'多':'空' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="数量" width="100" align="right">
+              <template slot-scope="{ row }">{{ formatNum(row.quantity) }}</template>
+            </el-table-column>
+            <el-table-column label="均价" width="100" align="right">
+              <template slot-scope="{ row }">{{ formatPrice(row.avg_cost) }}</template>
+            </el-table-column>
+            <el-table-column label="杠杆" width="60" align="center">
+              <template slot-scope="{ row }">{{ row.leverage || '-' }}x</template>
+            </el-table-column>
+            <el-table-column label="未实现盈亏" width="120" align="right">
+              <template slot-scope="{ row }">
+                <span :style="{color: Number(row.unrealized_pnl)>=0?'#67C23A':'#F56C6C', fontWeight:600}">
+                  {{ Number(row.unrealized_pnl)>=0?'+':'' }}{{ formatMoney(row.unrealized_pnl) }}
+                </span>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="70" align="center">
+              <template slot-scope="{ row }">
+                <el-tag :type="row.status==='OPEN'?'success':'info'" size="mini">{{ row.status==='OPEN'?'持仓':'已平' }}</el-tag>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-if="!userPosLoading && userPositions.length === 0" description="暂无持仓" :image-size="50" />
+
+          <!-- 最近订单 -->
+          <div class="section-title" style="margin-top: 20px;">
+            <span>最近订单</span>
+            <el-button type="text" size="mini" icon="el-icon-refresh" @click="loadUserOrders" style="margin-left:8px">刷新</el-button>
+            <el-button type="text" size="mini" @click="goToOrders" style="margin-left:4px">查看全部 →</el-button>
+          </div>
+          <el-table
+            v-if="userOrders.length"
+            :data="userOrders"
+            size="mini"
+            border
+            v-loading="userOrderLoading"
+            max-height="280">
+            <el-table-column label="交易对" width="100">
+              <template slot-scope="{ row }">
+                <span style="font-weight:600">{{ row.symbol }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="交易所" width="80" align="center">
+              <template slot-scope="{ row }">
+                <el-tag size="mini" effect="plain">{{ (row.exchange || '').toUpperCase() }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="方向" width="70" align="center">
+              <template slot-scope="{ row }">
+                <el-tag :type="(row.side||'').toUpperCase()==='BUY'?'success':'danger'" size="mini" effect="dark">
+                  {{ (row.side||'').toUpperCase()==='BUY'?'买入':'卖出' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="开/平" width="80" align="center">
+              <template slot-scope="{ row }">
+                <el-tag :type="(row.trade_type||'')==='CLOSE'?'warning':''" size="mini" effect="plain">
+                  {{ {OPEN:'开仓',CLOSE:'平仓',ADD:'加仓',REDUCE:'减仓'}[(row.trade_type||'OPEN').toUpperCase()]||'开仓' }}
+                </el-tag>
+                <div v-if="row.close_reason" style="font-size:10px;margin-top:1px">
+                  <el-tag :type="row.close_reason==='TP'?'success':'danger'" size="mini" effect="plain">
+                    {{ {SL:'止损',TP:'止盈',SIGNAL:'信号',MANUAL:'手动'}[(row.close_reason||'').toUpperCase()]||row.close_reason }}
+                  </el-tag>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="成交" width="110" align="right">
+              <template slot-scope="{ row }">
+                <span>{{ formatNum(row.filled_quantity) }}</span>
+                <span style="color:#C0C4CC"> / {{ formatNum(row.quantity) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="均价" width="100" align="right">
+              <template slot-scope="{ row }">{{ formatPrice(row.avg_price) }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="80" align="center">
+              <template slot-scope="{ row }">
+                <el-tag :type="{FILLED:'success',CANCELLED:'info',REJECTED:'danger',PENDING:'warning',PARTIAL:'warning'}[(row.status||'').toUpperCase()]||'info'" size="mini">
+                  {{ {FILLED:'已成交',CANCELLED:'已取消',REJECTED:'已拒绝',PENDING:'待处理',PARTIAL:'部分成交'}[(row.status||'').toUpperCase()]||row.status }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="时间" width="145">
+              <template slot-scope="{ row }">{{ formatDate(row.created_at) }}</template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-if="!userOrderLoading && userOrders.length === 0" description="暂无订单" :image-size="50" />
+
           <!-- 奖励记录 -->
           <div class="section-title" style="margin-top: 20px;">奖励记录</div>
           <el-button type="text" icon="el-icon-list" @click="loadRewards">
@@ -497,6 +616,7 @@ import {
   getTenants
 } from '@/api/admin'
 import { getRewards } from '@/api/finance'
+import { getPositions, getOrders } from '@/api/trading'
 
 const LEVEL_MAP = { 0: '普通', 1: 'V1', 2: 'V2', 3: 'V3', 4: 'V4', 5: 'V5' }
 
@@ -550,6 +670,12 @@ export default {
       rewardPage: 1,
       rewardPageSize: 10,
       rewardTotal: 0,
+
+      // ---- 用户持仓/订单 ----
+      userPositions: [],
+      userPosLoading: false,
+      userOrders: [],
+      userOrderLoading: false,
 
       // ---- 充值 ----
       rechargeVisible: false,
@@ -670,11 +796,16 @@ export default {
       this.rewardListLoaded = false
       this.rewardPage = 1
       this.rewardTotal = 0
+      this.userPositions = []
+      this.userOrders = []
       try {
         const res = await getUserDetail(row.id)
         const body = res.data
         if (body.success) {
           this.detailData = body.data
+          // 并行加载持仓和订单
+          this.loadUserPositions()
+          this.loadUserOrders()
         } else {
           this.$message.error(body.message || body.detail || '获取详情失败')
         }
@@ -729,6 +860,89 @@ export default {
       } finally {
         this.rewardLoading = false
       }
+    },
+
+    // ===================== 用户持仓/订单 =====================
+    _getUserAccountIds() {
+      if (!this.detailData || !this.detailData.accounts) return []
+      return this.detailData.accounts.map(a => a.id)
+    },
+    async loadUserPositions() {
+      const ids = this._getUserAccountIds()
+      if (!ids.length) { this.userPositions = []; return }
+      this.userPosLoading = true
+      try {
+        // 逐账户拉取并合并
+        const all = []
+        for (const aid of ids) {
+          const res = await getPositions({ account_id: aid, has_position: true })
+          const items = res.data.data || []
+          all.push(...items)
+        }
+        this.userPositions = all.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))
+      } catch (e) {
+        console.warn('加载用户持仓失败', e)
+      } finally {
+        this.userPosLoading = false
+      }
+    },
+    async loadUserOrders() {
+      const ids = this._getUserAccountIds()
+      if (!ids.length) { this.userOrders = []; return }
+      this.userOrderLoading = true
+      try {
+        const all = []
+        for (const aid of ids) {
+          const res = await getOrders({ account_id: aid, limit: 20 })
+          const items = res.data.data || []
+          all.push(...items)
+        }
+        // 按时间降序，最多展示20条
+        this.userOrders = all
+          .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+          .slice(0, 20)
+      } catch (e) {
+        console.warn('加载用户订单失败', e)
+      } finally {
+        this.userOrderLoading = false
+      }
+    },
+    goToPositions() {
+      if (!this.detailData) return
+      const ids = this._getUserAccountIds()
+      if (ids.length) {
+        this.$router.push({ path: '/trading/positions', query: { account_id: ids[0] } })
+      } else {
+        this.$router.push({ path: '/trading/positions' })
+      }
+    },
+    goToOrders() {
+      if (!this.detailData) return
+      const ids = this._getUserAccountIds()
+      if (ids.length) {
+        this.$router.push({ path: '/trading/orders', query: { account_id: ids[0] } })
+      } else {
+        this.$router.push({ path: '/trading/orders' })
+      }
+    },
+    posPnlRowClass({ row }) {
+      const pnl = Number(row.unrealized_pnl)
+      if (isNaN(pnl)) return ''
+      return pnl > 0 ? 'row-profit' : pnl < 0 ? 'row-loss' : ''
+    },
+    formatNum(val) {
+      if (val === null || val === undefined || val === '') return '-'
+      const n = Number(val)
+      if (isNaN(n)) return val
+      return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 6 })
+    },
+    formatPrice(val) {
+      if (val == null || val === '' || val === 0) return '-'
+      const n = Number(val)
+      if (isNaN(n)) return val
+      if (n >= 1000) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      if (n >= 1) return n.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
+      return n.toLocaleString('en-US', { minimumFractionDigits: 6, maximumFractionDigits: 8 })
     },
 
     // ===================== 状态切换 =====================
@@ -934,5 +1148,11 @@ export default {
 .money-total {
   color: #409eff;
   font-weight: 600;
+}
+::v-deep .row-profit {
+  background-color: rgba(103, 194, 58, 0.04) !important;
+}
+::v-deep .row-loss {
+  background-color: rgba(245, 108, 108, 0.04) !important;
 }
 </style>

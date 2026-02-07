@@ -18,6 +18,7 @@
 
     <el-card shadow="never">
       <div class="toolbar">
+        <el-button size="small" type="primary" icon="el-icon-plus" @click="openCreate">新建策略</el-button>
         <el-button size="small" icon="el-icon-refresh" @click="fetchData" :loading="loading">刷新</el-button>
       </div>
       <el-table v-loading="loading" :data="list" stripe border style="width:100%; margin-top:12px" size="small"
@@ -83,6 +84,7 @@
             <el-button size="mini" type="text" :icon="row.status === 1 ? 'el-icon-turn-off' : 'el-icon-open'" @click="toggleStrategy(row)">
               {{ row.status === 1 ? '禁用' : '启用' }}
             </el-button>
+            <el-button size="mini" type="text" icon="el-icon-delete" style="color:#F56C6C" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -133,11 +135,11 @@
       </div>
     </el-dialog>
 
-    <!-- 编辑弹窗 -->
-    <el-dialog title="编辑策略" :visible.sync="editVisible" width="640px" top="5vh" @close="editForm = {}">
+    <!-- 新建/编辑弹窗 -->
+    <el-dialog :title="isCreating ? '新建策略' : '编辑策略'" :visible.sync="editVisible" width="640px" top="5vh" @close="editForm = {}">
       <el-form ref="editFormRef" :model="editForm" label-width="110px" size="small">
-        <el-form-item label="编码">
-          <el-input v-model="editForm.code" disabled placeholder="编码不可修改"/>
+        <el-form-item label="编码" prop="code" :rules="isCreating ? [{required:true, message:'请输入策略编码'}] : []">
+          <el-input v-model="editForm.code" :disabled="!isCreating" :placeholder="isCreating ? '唯一标识，如 rsi_btc_5m' : '编码不可修改'"/>
         </el-form-item>
         <el-form-item label="策略名称" prop="name">
           <el-input v-model="editForm.name" placeholder="策略名称"/>
@@ -262,7 +264,7 @@
 </template>
 
 <script>
-import { getStrategies, updateStrategy, toggleStrategy } from '@/api/admin'
+import { getStrategies, createStrategy, updateStrategy, deleteStrategy, toggleStrategy } from '@/api/admin'
 
 export default {
   name: 'StrategyList',
@@ -275,6 +277,7 @@ export default {
       editVisible: false,
       editForm: {},
       editSaving: false,
+      isCreating: false,
       symbolOptions: [
         'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT',
         'AVAXUSDT', 'LINKUSDT', 'DOTUSDT', 'MATICUSDT', 'LTCUSDT', 'UNIUSDT', 'ATOMUSDT',
@@ -298,7 +301,30 @@ export default {
   methods: {
     formatTime(t) { return t ? t.replace('T', ' ').substring(0, 19) : '-' },
     showDetail(row) { this.detailData = row; this.detailVisible = true },
+    openCreate() {
+      this.isCreating = true
+      this.editForm = {
+        code: '',
+        name: '',
+        description: '',
+        symbol: '',
+        symbols: [],
+        timeframe: '',
+        exchange: '',
+        market_type: 'future',
+        min_capital: 200,
+        risk_level: 1,
+        capital: 0,
+        leverage: 20,
+        risk_mode: 1,
+        min_confidence: 50,
+        cooldown_minutes: 60,
+        status: 1
+      }
+      this.editVisible = true
+    },
     openEdit(row) {
+      this.isCreating = false
       const symbols = row.symbols
       const symbolsArr = Array.isArray(symbols) ? [...symbols] : (row.symbol ? [row.symbol] : [])
       this.editForm = {
@@ -323,7 +349,6 @@ export default {
       this.editVisible = true
     },
     async saveEdit() {
-      const id = this.editForm.id
       const symbols = this.editForm.symbols && this.editForm.symbols.length ? this.editForm.symbols : null
       const payload = {
         name: this.editForm.name,
@@ -344,15 +369,43 @@ export default {
       }
       this.editSaving = true
       try {
-        await updateStrategy(id, payload)
-        this.$message.success('保存成功')
+        if (this.isCreating) {
+          if (!this.editForm.code || !this.editForm.name) {
+            this.$message.warning('编码和名称为必填项')
+            this.editSaving = false
+            return
+          }
+          payload.code = this.editForm.code
+          await createStrategy(payload)
+          this.$message.success('新建成功')
+        } else {
+          await updateStrategy(this.editForm.id, payload)
+          this.$message.success('保存成功')
+        }
         this.editVisible = false
         this.fetchData()
       } catch (e) {
-        const msg = (e.response && e.response.data && (e.response.data.detail || e.response.data.message)) || e.message || '保存失败'
+        const msg = (e.response && e.response.data && (e.response.data.detail || e.response.data.message)) || e.message || '操作失败'
         this.$message.error(typeof msg === 'string' ? msg : JSON.stringify(msg))
       } finally {
         this.editSaving = false
+      }
+    },
+    async handleDelete(row) {
+      try {
+        await this.$confirm(
+          `确定要删除策略「${row.name}」(${row.code})吗？此操作不可恢复。`,
+          '删除确认',
+          { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'error' }
+        )
+      } catch { return }
+      try {
+        await deleteStrategy(row.id)
+        this.$message.success('删除成功')
+        this.fetchData()
+      } catch (e) {
+        const msg = (e.response && e.response.data && (e.response.data.detail || e.response.data.message)) || e.message || '删除失败'
+        this.$message.error(typeof msg === 'string' ? msg : JSON.stringify(msg))
       }
     },
     async toggleStrategy(row) {

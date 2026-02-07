@@ -172,9 +172,13 @@
             <el-tag size="mini" effect="plain">{{ (row.exchange || '').toUpperCase() }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="account_id" label="账户" width="70" align="center">
+        <el-table-column prop="account_id" label="账户" width="80" align="center">
           <template slot-scope="{row}">
-            <span class="text-muted">#{{ row.account_id }}</span>
+            <el-tooltip content="点击筛选此账户" placement="top">
+              <el-button type="text" size="mini" class="account-link" @click="filterByAccount(row.account_id)">
+                #{{ row.account_id }}
+              </el-button>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column label="方向" width="70" align="center">
@@ -533,6 +537,10 @@ export default {
     }
   },
   mounted() {
+    // 支持从URL参数预设筛选条件
+    if (this.$route.query.account_id) {
+      this.where.account_id = Number(this.$route.query.account_id) || this.$route.query.account_id
+    }
     this.fetchData()
     this.fetchAccounts()
   },
@@ -575,6 +583,10 @@ export default {
       } catch (e) {
         // 静默失败
       }
+    },
+    filterByAccount(accountId) {
+      this.where.account_id = accountId
+      this.fetchData()
     },
     resetQuery() {
       this.where = { symbol: '', position_side: '', exchange: '', account_id: '' }
@@ -831,6 +843,11 @@ export default {
 }
 .text-muted {
   color: #C0C4CC;
+}
+.account-link {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  padding: 0;
 }
 
 /* 行底色提示 */

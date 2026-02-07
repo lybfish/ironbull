@@ -17,7 +17,7 @@ from libs.ledger import LedgerService
 from libs.ledger.contracts import AccountFilter, TransactionFilter
 from libs.ledger.models import Account, Transaction
 
-from ..deps import get_db, get_tenant_id, get_account_id_optional
+from ..deps import get_db, get_tenant_id, get_account_id_optional, get_current_admin
 from ..serializers import dto_to_dict
 from ..utils import parse_datetime
 
@@ -34,6 +34,7 @@ def list_accounts(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
+    _admin: dict = Depends(get_current_admin),
 ):
     """资金账户列表（Ledger 层，按租户/账户/币种）"""
     try:
@@ -77,6 +78,7 @@ def list_transactions(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
+    _admin: dict = Depends(get_current_admin),
 ):
     """账务流水列表（按租户、账户、类型、时间范围）。返回 data[].remark 由业务写入，无固定枚举，详见 docs/api/LEDGER_REMARKS.md。"""
     try:

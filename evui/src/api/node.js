@@ -20,17 +20,6 @@ export function getNodeAccounts(id) {
   return axios.get(`/nodes/${id}/accounts`)
 }
 
-// ---- 账户分配 ----
-export function getExchangeAccounts(params = {}) {
-  return axios.get('/exchange-accounts', {params})
-}
-export function assignNode(accountId, data) {
-  return axios.put(`/exchange-accounts/${accountId}/assign-node`, data)
-}
-export function batchAssignNode(data) {
-  return axios.post('/exchange-accounts/batch-assign-node', data)
-}
-
 // ---- 同步 ----
 export function syncBalance(data = {}) {
   return axios.post('/sync/balance', data)
@@ -43,6 +32,9 @@ export function syncTrades(data = {}) {
 }
 export function syncMarkets(data = {}) {
   return axios.post('/sync/markets', data)
+}
+export function getMarkets(params = {}) {
+  return axios.get('/sync/markets', { params })
 }
 
 // ---- 持仓监控(SL/TP) ----

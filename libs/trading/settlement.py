@@ -190,6 +190,8 @@ class TradeSettlementService:
                 position_side=position_side,
                 market_type=market_type,
             )
+            if position is None:
+                raise RuntimeError(f"Position update failed for fill {fill.fill_id}, data may be inconsistent")
             
             # 3. 结算资金到 Ledger
             account = self._settle_ledger(
@@ -203,6 +205,9 @@ class TradeSettlementService:
                 realized_pnl=realized_pnl,
                 filled_at=filled_at,
             )
+            if account is None:
+                logger.error("ledger settlement returned None, position updated but ledger may be inconsistent",
+                             fill_id=fill.fill_id, order_id=order_id)
             
             logger.info(
                 "settlement completed",

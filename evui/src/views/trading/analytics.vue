@@ -179,7 +179,7 @@ import 'echarts/lib/component/grid'
 import 'echarts/lib/component/dataZoom'
 
 import {getPerformance, getRisk, getStatistics} from '@/api/analytics'
-import {getExchangeAccounts} from '@/api/node'
+import {getExchangeAccounts} from '@/api/admin'
 
 export default {
   name: 'Analytics',

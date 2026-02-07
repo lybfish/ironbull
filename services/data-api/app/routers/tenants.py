@@ -71,7 +71,7 @@ def _tenant_dict(t: Tenant, plan_name: str = None) -> dict:
         "id": t.id,
         "name": t.name,
         "app_key": t.app_key,
-        "app_secret": t.app_secret,
+        "app_secret": (t.app_secret[:8] + "****") if t.app_secret else None,  # 脱敏，仅显示前8位
         "root_user_id": t.root_user_id,
         "point_card_self": float(t.point_card_self or 0),
         "point_card_gift": float(t.point_card_gift or 0),

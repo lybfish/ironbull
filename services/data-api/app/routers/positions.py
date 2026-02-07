@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from libs.position import PositionService
 from libs.position.contracts import PositionFilter
 
-from ..deps import get_db, get_tenant_id, get_account_id_optional
+from ..deps import get_db, get_tenant_id, get_account_id_optional, get_current_admin
 from ..serializers import dto_to_dict
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,7 @@ def list_positions(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
+    _admin: dict = Depends(get_current_admin),
 ):
     """持仓列表（支持按租户、账户、标的、方向过滤）"""
     try:

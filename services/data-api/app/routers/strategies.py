@@ -24,6 +24,29 @@ router = APIRouter(prefix="/api", tags=["strategies"])
 RISK_MODE_PCT = {1: 0.01, 2: 0.015, 3: 0.02}
 
 
+class StrategyCreateBody(BaseModel):
+    code: str
+    name: str
+    description: Optional[str] = None
+    symbol: Optional[str] = None
+    symbols: Optional[List[str]] = None
+    timeframe: Optional[str] = None
+    exchange: Optional[str] = None
+    market_type: Optional[str] = "future"
+    min_capital: Optional[float] = 200
+    risk_level: Optional[int] = 1
+    capital: Optional[float] = 0
+    leverage: Optional[int] = 20
+    risk_mode: Optional[int] = 1
+    min_confidence: Optional[int] = 50
+    cooldown_minutes: Optional[int] = 60
+    status: Optional[int] = 1
+    config: Optional[Dict[str, Any]] = None
+    show_to_user: Optional[int] = 0
+    user_display_name: Optional[str] = None
+    user_description: Optional[str] = None
+
+
 class StrategyUpdateBody(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
@@ -51,6 +74,7 @@ def list_strategies(
     status: Optional[int] = Query(None, description="策略状态 1=启用 0=禁用，不传=全部"),
     tenant_id: Optional[int] = Depends(get_tenant_id_optional),
     db: Session = Depends(get_db),
+    _admin: Dict[str, Any] = Depends(get_current_admin),
 ):
     """策略目录列表（dim_strategy），不传 tenant_id 时返回全部策略"""
     repo = MemberRepository(db)
@@ -60,6 +84,80 @@ def list_strategies(
         "data": [_strategy_to_dict(s) for s in strategies],
         "total": len(strategies),
     }
+
+
+@router.post("/strategies")
+def create_strategy(
+    body: StrategyCreateBody,
+    _admin: Dict[str, Any] = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """新建策略"""
+    repo = MemberRepository(db)
+    # 检查 code 唯一性
+    existing = repo.get_strategy_by_code(body.code)
+    if existing:
+        raise HTTPException(status_code=400, detail=f"策略编码 '{body.code}' 已存在")
+    s = Strategy(
+        code=body.code,
+        name=body.name,
+        description=body.description,
+        symbol=body.symbol,
+        timeframe=body.timeframe,
+        exchange=body.exchange,
+        market_type=body.market_type or "future",
+        min_capital=body.min_capital or 200,
+        risk_level=body.risk_level or 1,
+        capital=body.capital or 0,
+        leverage=body.leverage or 20,
+        risk_mode=body.risk_mode or 1,
+        min_confidence=body.min_confidence or 50,
+        cooldown_minutes=body.cooldown_minutes or 60,
+        status=body.status if body.status is not None else 1,
+        config=body.config or {},
+        show_to_user=body.show_to_user or 0,
+        user_display_name=body.user_display_name,
+        user_description=body.user_description,
+    )
+    if body.symbols:
+        s.symbols = body.symbols
+    # 自动计算 amount_usdt
+    cap = float(s.capital or 0)
+    lev = int(s.leverage or 20)
+    rm = int(s.risk_mode or 1)
+    if cap > 0 and lev > 0:
+        pct = RISK_MODE_PCT.get(rm, 0.01)
+        s.amount_usdt = round(cap * pct * lev, 2)
+    repo.create_strategy(s)
+    db.commit()
+    return {"success": True, "data": _strategy_to_dict(s)}
+
+
+@router.delete("/strategies/{strategy_id}")
+def delete_strategy(
+    strategy_id: int,
+    _admin: Dict[str, Any] = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """删除策略（谨慎操作，会检查是否有绑定）"""
+    from libs.member.models import StrategyBinding
+    repo = MemberRepository(db)
+    s = repo.get_strategy_by_id(strategy_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="策略不存在")
+    # 检查是否有活跃绑定
+    active_bindings = db.query(StrategyBinding).filter(
+        StrategyBinding.strategy_code == s.code,
+        StrategyBinding.status == 1,
+    ).count()
+    if active_bindings > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"该策略还有 {active_bindings} 个活跃绑定，请先解除绑定后再删除"
+        )
+    repo.delete_strategy(strategy_id)
+    db.commit()
+    return {"success": True, "message": f"策略 '{s.name}' 已删除"}
 
 
 def _strategy_to_dict(s: Strategy) -> dict:
@@ -101,6 +199,7 @@ def _strategy_to_dict(s: Strategy) -> dict:
 def get_strategy(
     strategy_id: int,
     db: Session = Depends(get_db),
+    _admin: Dict[str, Any] = Depends(get_current_admin),
 ):
     """策略详情（单条）"""
     repo = MemberRepository(db)
@@ -179,6 +278,7 @@ def list_strategy_bindings(
     status: Optional[int] = Query(None, description="绑定状态 0=关闭 1=开启"),
     tenant_id: Optional[int] = Depends(get_tenant_id_optional),
     db: Session = Depends(get_db),
+    _admin: Dict[str, Any] = Depends(get_current_admin),
 ):
     """当前租户下的策略绑定列表（含用户、账户、点卡）。不传 tenant_id 时返回空列表，页面可正常加载。"""
     if tenant_id is None:

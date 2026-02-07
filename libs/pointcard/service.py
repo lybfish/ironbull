@@ -275,7 +275,19 @@ class PointCardService:
                 RewardService(self.db).distribute_for_pool(pp)
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning("distribute_for_pool failed: %s", e)
+                _logger = logging.getLogger(__name__)
+                _logger.error(
+                    "distribute_for_pool failed: user_id=%s pool_id=%s pool_amount=%s error=%s",
+                    user_id, pp.id, pool_amount, e,
+                )
+                # 标记利润池为待重试状态，避免奖励丢失
+                try:
+                    pp.status = 3  # 3=分发失败待重试
+                    pp.retry_count = (pp.retry_count or 0) + 1
+                    pp.last_error = str(e)[:500]
+                    self.db.flush()
+                except Exception:
+                    _logger.error("failed to mark profit_pool status=3 for pool_id=%s", pp.id)
         return True, "", {
             "self_deduct": float(self_deduct),
             "gift_deduct": float(gift_deduct),

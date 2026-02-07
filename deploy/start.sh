@@ -98,6 +98,16 @@ start_service() {
     # 进程已死或 pid 文件陈旧：删除以便本用户能写入新 pid（避免 root 部署留下的 pid 文件导致权限错误）
     rm -f "$pid_file" 2>/dev/null || true
 
+    # 日志文件过大时自动轮转（>200MB）
+    if [ -f "$log_file" ]; then
+        local log_size
+        log_size=$(stat -f%z "$log_file" 2>/dev/null || stat -c%s "$log_file" 2>/dev/null || echo 0)
+        if [ "$log_size" -gt 209715200 ] 2>/dev/null; then
+            mv "$log_file" "${log_file}.$(date +%Y%m%d-%H%M%S).bak"
+            echo "  [rotate] $name log rotated (was ${log_size} bytes)"
+        fi
+    fi
+
     echo "  [start] $name ..."
     cd "$dir"
     nohup $cmd >> "$log_file" 2>&1 &

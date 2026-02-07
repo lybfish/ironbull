@@ -79,7 +79,8 @@ const menuRoutes = [
     children: [
       {path: '/finance/withdrawals', component: () => import('@/views/finance/withdrawals'), meta: {title: '提现管理'}},
       {path: '/finance/pointcard-logs', component: () => import('@/views/finance/pointcard-logs'), meta: {title: '点卡流水'}},
-      {path: '/finance/rewards', component: () => import('@/views/finance/rewards'), meta: {title: '奖励记录'}}
+      {path: '/finance/rewards', component: () => import('@/views/finance/rewards'), meta: {title: '奖励记录'}},
+      {path: '/finance/profit-pools', component: () => import('@/views/finance/profit-pools'), meta: {title: '利润池管理'}}
     ]
   },
 

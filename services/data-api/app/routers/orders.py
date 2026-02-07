@@ -42,6 +42,7 @@ def list_orders(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
+    _admin: dict = Depends(get_current_admin),
 ):
     """订单列表（支持按租户、账户、标的、状态、交易类型、时间范围过滤）"""
     try:
@@ -81,6 +82,7 @@ def list_fills(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
+    _admin: dict = Depends(get_current_admin),
 ):
     """成交列表（支持按租户、账户、订单、标的、时间范围过滤）"""
     try:

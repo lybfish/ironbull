@@ -250,7 +250,145 @@
         </el-card>
       </el-tab-pane>
 
-      <!-- ═══════════ Tab 3: 信号冷却 ═══════════ -->
+      <!-- ═══════════ Tab 3: 市场信息 ═══════════ -->
+      <el-tab-pane label="市场信息" name="markets">
+        <el-card shadow="never">
+          <div slot="header" style="display:flex;align-items:center;justify-content:space-between">
+            <span style="font-weight:600">已同步的市场信息</span>
+            <span class="muted" v-if="mkTotal > 0" style="font-size:12px">共 {{ mkTotal }} 个交易对</span>
+          </div>
+          <!-- 筛选栏 -->
+          <el-form :inline="true" size="small" style="margin-bottom:12px">
+            <el-form-item label="交易所">
+              <el-select v-model="mkFilter.exchange" placeholder="全部" clearable style="width:120px" @change="fetchMarkets">
+                <el-option label="Binance" value="binance"/>
+                <el-option label="Gate" value="gate"/>
+                <el-option label="OKX" value="okx"/>
+              </el-select>
+            </el-form-item>
+            <el-form-item label="类型">
+              <el-select v-model="mkFilter.market_type" placeholder="全部" clearable style="width:110px" @change="fetchMarkets">
+                <el-option label="永续合约" value="swap"/>
+                <el-option label="现货" value="spot"/>
+              </el-select>
+            </el-form-item>
+            <el-form-item label="搜索">
+              <el-input v-model="mkFilter.symbol" placeholder="输入币种如 BTC" clearable style="width:160px"
+                @keyup.enter.native="fetchMarkets" @clear="fetchMarkets">
+                <i slot="prefix" class="el-icon-search"></i>
+              </el-input>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" icon="el-icon-search" @click="fetchMarkets">查询</el-button>
+              <el-button icon="el-icon-refresh-left" @click="resetMkFilter">重置</el-button>
+            </el-form-item>
+          </el-form>
+
+          <!-- 统计摘要 -->
+          <el-row :gutter="12" style="margin-bottom:12px" v-if="mkList.length > 0">
+            <el-col :span="6" v-for="ex in mkExchangeSummary" :key="ex.name">
+              <div class="mk-summary-card">
+                <span class="mk-summary-label">{{ ex.name.toUpperCase() }}</span>
+                <span class="mk-summary-value">{{ ex.count }}</span>
+                <span class="mk-summary-desc">个交易对</span>
+              </div>
+            </el-col>
+          </el-row>
+
+          <!-- 表格 -->
+          <el-table :data="mkPagedList" stripe border size="small" v-loading="mkLoading"
+            :header-cell-style="{background:'#fafafa'}" max-height="500">
+            <el-table-column label="交易对" width="130" fixed>
+              <template slot-scope="{row}">
+                <span style="font-weight:600">{{ row.canonical_symbol }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="交易所" width="90" align="center">
+              <template slot-scope="{row}">
+                <el-tag size="mini" :type="mkExTagType(row.exchange)" effect="plain">{{ (row.exchange || '').toUpperCase() }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="类型" width="80" align="center">
+              <template slot-scope="{row}">
+                <el-tag size="mini" :type="row.market_type==='swap'?'warning':''" effect="plain">
+                  {{ row.market_type === 'swap' ? '合约' : '现货' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="合约面值" width="100" align="right">
+              <template slot-scope="{row}">
+                <span v-if="row.contract_size && row.contract_size !== 1">{{ row.contract_size }}</span>
+                <span v-else class="muted">1</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="价格精度" width="80" align="center">
+              <template slot-scope="{row}">
+                <span v-if="row.price_precision != null">{{ row.price_precision }}</span>
+                <span v-else class="muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="数量精度" width="80" align="center">
+              <template slot-scope="{row}">
+                <span v-if="row.amount_precision != null">{{ row.amount_precision }}</span>
+                <span v-else class="muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="最小数量" width="100" align="right">
+              <template slot-scope="{row}">
+                <span v-if="row.min_quantity">{{ row.min_quantity }}</span>
+                <span v-else class="muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="最小金额" width="90" align="right">
+              <template slot-scope="{row}">
+                <span v-if="row.min_cost">{{ row.min_cost }}</span>
+                <span v-else class="muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="Tick Size" width="100" align="right">
+              <template slot-scope="{row}">
+                <span v-if="row.tick_size">{{ row.tick_size }}</span>
+                <span v-else class="muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="Step Size" width="100" align="right">
+              <template slot-scope="{row}">
+                <span v-if="row.step_size">{{ row.step_size }}</span>
+                <span v-else class="muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="基础/计价" width="110" align="center">
+              <template slot-scope="{row}">
+                <span style="font-weight:500">{{ row.base_currency }}</span>
+                <span class="muted"> / {{ row.quote_currency }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="同步时间" width="160">
+              <template slot-scope="{row}">{{ fmtDT(row.synced_at) }}</template>
+            </el-table-column>
+          </el-table>
+
+          <el-empty v-if="!mkLoading && mkList.length === 0" description="暂无市场数据，请先在「数据同步」中同步市场信息" :image-size="80"/>
+
+          <!-- 分页 -->
+          <div v-if="mkTotal > 0" style="margin-top:12px;display:flex;justify-content:space-between;align-items:center">
+            <span class="muted" style="font-size:12px">
+              显示 {{ (mkPage - 1) * mkPageSize + 1 }}–{{ Math.min(mkPage * mkPageSize, mkFilteredList.length) }} / {{ mkFilteredList.length }} 条
+            </span>
+            <el-pagination
+              background
+              layout="prev, pager, next, sizes"
+              :total="mkFilteredList.length"
+              :page-sizes="[20, 50, 100, 200]"
+              :page-size.sync="mkPageSize"
+              :current-page.sync="mkPage"
+              @size-change="mkPage = 1"
+              @current-change="() => {}"/>
+          </div>
+        </el-card>
+      </el-tab-pane>
+
+      <!-- ═══════════ Tab 4: 信号冷却 ═══════════ -->
       <el-tab-pane label="信号冷却" name="cooldown">
         <el-card shadow="never">
           <div slot="header">
@@ -278,7 +416,7 @@
 
 <script>
 import {
-  getNodes, syncBalance, syncPositions, syncTrades, syncMarkets,
+  getNodes, syncBalance, syncPositions, syncTrades, syncMarkets, getMarkets,
   getPositionMonitorStatus, getMonitoredPositions,
   triggerPositionMonitorScan, getRealtimePrices
 } from '@/api/node'
@@ -314,11 +452,33 @@ export default {
       monitoredPositions: [],
       loadingPositions: false,
       scanning: false,
+      // ── 市场信息 ──
+      mkLoading: false,
+      mkList: [],
+      mkTotal: 0,
+      mkPage: 1,
+      mkPageSize: 50,
+      mkFilter: { exchange: '', market_type: '', symbol: '' },
       // ── 实时价格 ──
       priceMap: {},
       loadingPrices: false,
       autoRefreshPrices: false,
-      priceTimer: null
+      priceTimer: null,
+      positionTimer: null
+    }
+  },
+  watch: {
+    // 切换 Tab 时管理定时器：离开 monitor 暂停，回到 monitor 恢复
+    activeTab(newTab, oldTab) {
+      if (oldTab === 'monitor' && newTab !== 'monitor') {
+        this.stopAutoRefresh()
+      }
+      if (newTab === 'monitor') {
+        this.fetchMonitoredPositions()
+      }
+      if (newTab === 'markets' && this.mkList.length === 0) {
+        this.fetchMarkets()
+      }
     }
   },
   mounted() {
@@ -574,7 +734,9 @@ export default {
     toggleAutoRefresh(val) {
       if (val) {
         this.fetchPrices()
-        this.priceTimer = setInterval(() => { this.fetchPrices() }, 10000) // 每10秒刷新
+        this.priceTimer = setInterval(() => { this.fetchPrices() }, 10000) // 每10秒刷新价格
+        // 每30秒刷新持仓列表，自动发现已平仓的持仓
+        this.positionTimer = setInterval(() => { this.fetchMonitoredPositions() }, 30000)
       } else {
         this.stopAutoRefresh()
       }
@@ -584,7 +746,63 @@ export default {
         clearInterval(this.priceTimer)
         this.priceTimer = null
       }
+      if (this.positionTimer) {
+        clearInterval(this.positionTimer)
+        this.positionTimer = null
+      }
       this.autoRefreshPrices = false
+    },
+
+    // ── 市场信息 ──
+    async fetchMarkets() {
+      this.mkLoading = true
+      this.mkPage = 1
+      try {
+        const params = {}
+        if (this.mkFilter.exchange) params.exchange = this.mkFilter.exchange
+        if (this.mkFilter.market_type) params.market_type = this.mkFilter.market_type
+        if (this.mkFilter.symbol) params.symbol = this.mkFilter.symbol
+        const res = await getMarkets(params)
+        this.mkList = res.data.data || []
+        this.mkTotal = res.data.total || this.mkList.length
+      } catch (e) {
+        this.$message.error('获取市场信息失败: ' + (e.response?.data?.detail || e.message))
+        this.mkList = []
+        this.mkTotal = 0
+      } finally {
+        this.mkLoading = false
+      }
+    },
+    resetMkFilter() {
+      this.mkFilter = { exchange: '', market_type: '', symbol: '' }
+      this.fetchMarkets()
+    },
+    mkExTagType(ex) {
+      const m = { binance: 'warning', gate: '', okx: 'success' }
+      return m[(ex || '').toLowerCase()] || 'info'
+    }
+  },
+  computed: {
+    mkFilteredList() {
+      // 前端二次过滤（symbol 模糊搜索，因为后端是精确匹配）
+      if (!this.mkFilter.symbol) return this.mkList
+      const kw = this.mkFilter.symbol.toUpperCase()
+      return this.mkList.filter(m =>
+        (m.canonical_symbol || '').toUpperCase().includes(kw) ||
+        (m.base_currency || '').toUpperCase().includes(kw)
+      )
+    },
+    mkPagedList() {
+      const start = (this.mkPage - 1) * this.mkPageSize
+      return this.mkFilteredList.slice(start, start + this.mkPageSize)
+    },
+    mkExchangeSummary() {
+      const map = {}
+      this.mkList.forEach(m => {
+        const ex = (m.exchange || 'unknown').toLowerCase()
+        map[ex] = (map[ex] || 0) + 1
+      })
+      return Object.keys(map).sort().map(name => ({ name, count: map[name] }))
     }
   }
 }
@@ -603,4 +821,16 @@ export default {
 .pm-num { color: #409EFF; font-size: 28px; }
 .pm-desc { font-size: 12px; color: #C0C4CC; }
 .muted { color: #C0C4CC; }
+.mk-summary-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #fafafa;
+  border-radius: 6px;
+  border: 1px solid #EBEEF5;
+}
+.mk-summary-label { font-weight: 600; color: #303133; font-size: 13px; }
+.mk-summary-value { font-size: 20px; font-weight: 700; color: #409EFF; }
+.mk-summary-desc { font-size: 12px; color: #909399; }
 </style>

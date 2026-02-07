@@ -31,7 +31,9 @@ class ProfitPool(Base):
     diff_distributed = Column(DECIMAL(20, 8), nullable=False, default=0, comment="级差已发放")
     peer_distributed = Column(DECIMAL(20, 8), nullable=False, default=0, comment="平级已发放")
     network_undistributed = Column(DECIMAL(20, 8), nullable=False, default=0, comment="网体未分配(条件不满足)")
-    status = Column(Integer, nullable=False, default=1)  # 1待结算 2已结算
+    status = Column(Integer, nullable=False, default=1)  # 1待结算 2已结算 3分发失败待重试
+    retry_count = Column(Integer, nullable=False, default=0, comment="重试次数")
+    last_error = Column(String(500), nullable=True, comment="最后一次失败原因")
     settle_batch = Column(String(50), nullable=True)
     settled_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.now)

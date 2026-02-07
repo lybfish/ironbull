@@ -2,12 +2,12 @@
 Data API - 用户管理（只读查看，仅管理员可访问）
 
 GET /api/users           -> 用户列表
-GET /api/users/{user_id} -> 用户详情（完整信息，复用 user_manage._user_detail）
+注：GET /api/users/{user_id} 在 user_manage.py 中定义，不在此重复
 """
 
 from typing import Dict, Any, Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -102,16 +102,4 @@ def list_users(
     }
 
 
-@router.get("/{user_id}")
-def user_detail(
-    user_id: int,
-    _admin: Dict[str, Any] = Depends(get_current_admin),
-    db: Session = Depends(get_db),
-):
-    """用户详情（完整信息：账户、团队、奖励等），与 user_manage 逻辑一致"""
-    from .user_manage import _user_detail as build_user_detail
-
-    u = db.query(User).filter(User.id == user_id).first()
-    if not u:
-        raise HTTPException(status_code=404, detail="用户不存在")
-    return {"success": True, "data": build_user_detail(u, db)}
+## GET /api/users/{user_id} 已统一在 user_manage.py 中实现，避免路由冲突

@@ -163,6 +163,49 @@
       </el-col>
     </el-row>
 
+    <!-- 趋势图表 -->
+    <el-row :gutter="15" style="margin-bottom: 15px;">
+      <el-col :lg="12" :md="24">
+        <el-card shadow="never">
+          <div slot="header" class="card-header-flex">
+            <span>每日订单量</span>
+            <el-radio-group v-model="trendDays" size="mini" @change="fetchTrends">
+              <el-radio-button :label="7">7天</el-radio-button>
+              <el-radio-button :label="30">30天</el-radio-button>
+              <el-radio-button :label="60">60天</el-radio-button>
+            </el-radio-group>
+          </div>
+          <div ref="chartOrders" style="height: 260px;" v-loading="trendLoading"></div>
+        </el-card>
+      </el-col>
+      <el-col :lg="12" :md="24">
+        <el-card shadow="never">
+          <div slot="header" class="card-header-flex">
+            <span>每日新增用户</span>
+          </div>
+          <div ref="chartUsers" style="height: 260px;" v-loading="trendLoading"></div>
+        </el-card>
+      </el-col>
+    </el-row>
+    <el-row :gutter="15" style="margin-bottom: 15px;">
+      <el-col :lg="12" :md="24">
+        <el-card shadow="never">
+          <div slot="header" class="card-header-flex">
+            <span>每日成交额 (USDT)</span>
+          </div>
+          <div ref="chartVolume" style="height: 260px;" v-loading="trendLoading"></div>
+        </el-card>
+      </el-col>
+      <el-col :lg="12" :md="24">
+        <el-card shadow="never">
+          <div slot="header" class="card-header-flex">
+            <span>每日利润池入池 (USDT)</span>
+          </div>
+          <div ref="chartPool" style="height: 260px;" v-loading="trendLoading"></div>
+        </el-card>
+      </el-col>
+    </el-row>
+
     <!-- 快捷方式 -->
     <el-row :gutter="15" style="margin-bottom: 15px;">
       <el-col :lg="3" :md="6" :sm="6" :xs="12">
@@ -344,16 +387,24 @@
 </template>
 
 <script>
-import {getDashboardSummary, getPerformance} from '@/api/analytics'
+import {getDashboardSummary, getPerformance, getDashboardTrends} from '@/api/analytics'
 import {getOrders, getPositions} from '@/api/trading'
 import {getMonitorStatus} from '@/api/monitor'
 import {getSignalEvents} from '@/api/admin'
+import * as echarts from 'echarts/core'
+import {LineChart, BarChart} from 'echarts/charts'
+import {GridComponent, TooltipComponent, LegendComponent} from 'echarts/components'
+import {CanvasRenderer} from 'echarts/renderers'
+
+echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
 export default {
   name: 'Workplace',
   data() {
     return {
       loading: true,
+      trendLoading: false,
+      trendDays: 30,
       defaultAvatar: require('@/assets/logo.png'),
       platform: {
         total_tenants: 0,
@@ -380,7 +431,8 @@ export default {
         signal_monitor: false,
         database: false
       },
-      recentSignals: []
+      recentSignals: [],
+      chartInstances: {}
     }
   },
   computed: {
@@ -403,6 +455,15 @@ export default {
   },
   mounted() {
     this.fetchData()
+    this.fetchTrends()
+    this.resizeHandler = () => {
+      Object.values(this.chartInstances).forEach(c => c && c.resize())
+    }
+    window.addEventListener('resize', this.resizeHandler)
+  },
+  beforeDestroy() {
+    window.removeEventListener('resize', this.resizeHandler)
+    Object.values(this.chartInstances).forEach(c => c && c.dispose())
   },
   methods: {
     formatMoney(val) {
@@ -486,6 +547,89 @@ export default {
       } finally {
         this.loading = false
       }
+    },
+    async fetchTrends() {
+      this.trendLoading = true
+      try {
+        const res = await getDashboardTrends(this.trendDays)
+        const d = (res.data && res.data.data) || res.data || {}
+        this.$nextTick(() => {
+          this.renderBarChart('chartOrders', d.dates || [], d.orders || [], '订单量', '#409EFF')
+          this.renderLineChart('chartUsers', d.dates || [], d.new_users || [], '新增用户', '#67C23A')
+          this.renderAreaChart('chartVolume', d.dates || [], d.trade_volume || [], '成交额', '#E6A23C')
+          this.renderAreaChart('chartPool', d.dates || [], d.pool_amount || [], '入池金额', '#F56C6C')
+        })
+      } catch (e) {
+        console.error('trends error', e)
+      } finally {
+        this.trendLoading = false
+      }
+    },
+    getChartInstance(refName) {
+      if (this.chartInstances[refName]) {
+        return this.chartInstances[refName]
+      }
+      const el = this.$refs[refName]
+      if (!el) { return null }
+      const chart = echarts.init(el)
+      this.chartInstances[refName] = chart
+      return chart
+    },
+    buildBaseOption(dates) {
+      return {
+        tooltip: {trigger: 'axis'},
+        grid: {left: 50, right: 20, top: 20, bottom: 30},
+        xAxis: {
+          type: 'category',
+          data: dates.map(d => d.slice(5)),
+          axisLabel: {fontSize: 11, color: '#909399'},
+          axisLine: {lineStyle: {color: '#E4E7ED'}}
+        },
+        yAxis: {
+          type: 'value',
+          splitLine: {lineStyle: {color: '#F2F6FC'}},
+          axisLabel: {fontSize: 11, color: '#909399'}
+        }
+      }
+    },
+    renderBarChart(refName, dates, data, name, color) {
+      const chart = this.getChartInstance(refName)
+      if (!chart) { return }
+      const opt = this.buildBaseOption(dates)
+      opt.series = [{
+        name: name, type: 'bar', data: data,
+        itemStyle: {color: color, borderRadius: [3, 3, 0, 0]},
+        barMaxWidth: 20
+      }]
+      chart.setOption(opt, true)
+    },
+    renderLineChart(refName, dates, data, name, color) {
+      const chart = this.getChartInstance(refName)
+      if (!chart) { return }
+      const opt = this.buildBaseOption(dates)
+      opt.series = [{
+        name: name, type: 'line', data: data,
+        smooth: true,
+        symbol: 'circle', symbolSize: 5,
+        lineStyle: {color: color, width: 2},
+        itemStyle: {color: color}
+      }]
+      chart.setOption(opt, true)
+    },
+    renderAreaChart(refName, dates, data, name, color) {
+      const chart = this.getChartInstance(refName)
+      if (!chart) { return }
+      const opt = this.buildBaseOption(dates)
+      opt.series = [{
+        name: name, type: 'line', data: data,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: {color: color, width: 2},
+        areaStyle: {color: {type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [{offset: 0, color: color + '40'}, {offset: 1, color: color + '05'}]
+        }}
+      }]
+      chart.setOption(opt, true)
     }
   }
 }

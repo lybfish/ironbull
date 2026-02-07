@@ -59,6 +59,15 @@
               <el-option label="减仓" value="REDUCE"/>
             </el-select>
           </el-form-item>
+          <el-form-item label="账户">
+            <el-select v-model="where.account_id" placeholder="全部" clearable style="width:160px">
+              <el-option
+                v-for="acc in accountOptions"
+                :key="acc.id"
+                :label="'[' + (acc.exchange || '').toUpperCase() + '] #' + acc.id"
+                :value="acc.id"/>
+            </el-select>
+          </el-form-item>
           <el-form-item label="日期范围">
             <el-date-picker
               v-model="where.dateRange"
@@ -101,9 +110,13 @@
             <el-tag size="mini" effect="plain">{{ (row.exchange || '').toUpperCase() }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="账户" width="60" align="center">
+        <el-table-column label="账户" width="80" align="center">
           <template slot-scope="{row}">
-            <span class="text-muted">#{{ row.account_id }}</span>
+            <el-tooltip content="点击筛选此账户" placement="top">
+              <el-button type="text" size="mini" class="account-link" @click="filterByAccount(row.account_id)">
+                #{{ row.account_id }}
+              </el-button>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column prop="side" label="方向" width="90" align="center">
@@ -214,7 +227,7 @@ export default {
       total: 0,
       currentPage: 1,
       pageSize: 20,
-      where: { symbol: '', status: '', side: '', exchange: '', trade_type: '', dateRange: null },
+      where: { symbol: '', status: '', side: '', exchange: '', trade_type: '', account_id: '', dateRange: null },
       accountOptions: []
     }
   },
@@ -240,6 +253,10 @@ export default {
     }
   },
   mounted() {
+    // 支持从URL参数预设筛选条件
+    if (this.$route.query.account_id) {
+      this.where.account_id = Number(this.$route.query.account_id) || this.$route.query.account_id
+    }
     this.fetchData()
     this.fetchAccounts()
   },
@@ -309,12 +326,16 @@ export default {
     goToFills(orderId) {
       this.$router.push({ path: '/trading/fills', query: { order_id: orderId } })
     },
+    filterByAccount(accountId) {
+      this.where.account_id = accountId
+      this.onSearch()
+    },
     onSearch() {
       this.currentPage = 1
       this.fetchData()
     },
     reset() {
-      this.where = { symbol: '', status: '', side: '', exchange: '', trade_type: '', dateRange: null }
+      this.where = { symbol: '', status: '', side: '', exchange: '', trade_type: '', account_id: '', dateRange: null }
       this.currentPage = 1
       this.fetchData()
     },
@@ -336,6 +357,7 @@ export default {
         if (this.where.side) params.side = this.where.side
         if (this.where.trade_type) params.trade_type = this.where.trade_type
         if (this.where.exchange) params.exchange = this.where.exchange
+        if (this.where.account_id) params.account_id = this.where.account_id
         if (this.where.dateRange && this.where.dateRange.length === 2) {
           params.start_time = this.where.dateRange[0] + 'T00:00:00'
           params.end_time = this.where.dateRange[1] + 'T23:59:59'
@@ -368,4 +390,5 @@ export default {
 .progress-cell { display: flex; flex-direction: column; gap: 2px; }
 .progress-text { font-size: 11px; color: #909399; text-align: center; }
 .text-muted { color: #C0C4CC; }
+.account-link { font-family: 'Courier New', monospace; font-size: 12px; padding: 0; }
 </style>

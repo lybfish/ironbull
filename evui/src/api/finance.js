@@ -43,3 +43,14 @@ export function getPointcardLogs(params = {}) {
 export function getRewards(params = {}) {
   return axios.get('/rewards', {params})
 }
+
+// ---- 利润池 ----
+export function getProfitPools(params = {}) {
+  return axios.get('/profit-pools', {params})
+}
+export function getProfitPoolStats() {
+  return axios.get('/profit-pools/stats')
+}
+export function retryProfitPool(id) {
+  return axios.post(`/profit-pools/${id}/retry`)
+}

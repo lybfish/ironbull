@@ -202,18 +202,22 @@ def _timeframe_to_minutes(tf: str) -> int:
 def is_in_cooldown(symbol: str, strategy: str, cooldown_minutes: int = 60) -> bool:
     """检查是否在冷却期（cooldown_minutes 来自策略配置）"""
     key = f"{strategy}:{symbol}"
+    now = datetime.now()
     with _state_lock:
         if key not in signal_cooldown:
             return False
         cooldown_until = signal_cooldown[key]
-    # 支持两种格式：datetime 表示冷却到期时间（新），或 datetime 表示设定时间（旧）
-    now = datetime.now()
-    if cooldown_until > now:
-        # 新格式：cooldown_until 是到期时间
+        # 支持两种格式：datetime 表示冷却到期时间（新），或 datetime 表示设定时间（旧）
+        if cooldown_until > now:
+            # 新格式：cooldown_until 是到期时间
+            return True
+        # 兼容旧格式：cooldown_until 是设定时间
+        elapsed = (now - cooldown_until).total_seconds() / 60
+        if elapsed >= cooldown_minutes:
+            # 已过冷却期，清理过期条目释放内存
+            del signal_cooldown[key]
+            return False
         return True
-    # 兼容旧格式：cooldown_until 是设定时间
-    elapsed = (now - cooldown_until).total_seconds() / 60
-    return elapsed < cooldown_minutes
 
 
 def set_cooldown(symbol: str, strategy: str, timeframe: str = "1h"):
@@ -357,7 +361,15 @@ def _write_signal_event(
         session.commit()
         session.close()
     except Exception as e:
-        log.warning("write signal event failed", event_type=event_type, error=str(e))
+        log.error("write signal event failed",
+                  signal_id=signal_id, event_type=event_type, status=status,
+                  account_id=account_id, error_message=error_message,
+                  error=str(e))
+        try:
+            session.rollback()
+            session.close()
+        except Exception:
+            pass
 
 
 def monitor_loop():

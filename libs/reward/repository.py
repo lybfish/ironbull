@@ -22,6 +22,16 @@ class RewardRepository:
     def get_pending_pools(self, limit: int = 100) -> List[ProfitPool]:
         return self.db.query(ProfitPool).filter(ProfitPool.status == 1).order_by(ProfitPool.id).limit(limit).all()
 
+    def get_failed_pools(self, limit: int = 100, max_retry: int = 10) -> List[ProfitPool]:
+        """获取分发失败待重试的利润池（status=3 且重试次数未超限）"""
+        return (
+            self.db.query(ProfitPool)
+            .filter(ProfitPool.status == 3, ProfitPool.retry_count < max_retry)
+            .order_by(ProfitPool.id)
+            .limit(limit)
+            .all()
+        )
+
     def update_profit_pool(self, p: ProfitPool) -> ProfitPool:
         self.db.merge(p)
         self.db.flush()

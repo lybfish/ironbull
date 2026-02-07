@@ -354,20 +354,31 @@ async def _close_position_local(
         )
         ok = result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
         if ok:
+            is_full_close = result.status == OrderStatus.FILLED
             position.close_reason = trigger_type
-            position.stop_loss = None
-            position.take_profit = None
             position.updated_at = datetime.now()
-            log.info(f"[LOCAL] {trigger_type}平仓成功",
-                     account_id=position.account_id, symbol=position.symbol,
-                     filled_qty=result.filled_quantity, filled_price=result.filled_price)
+
+            if is_full_close:
+                # 完全成交：清除 SL/TP，结算服务会将持仓设为 CLOSED
+                position.stop_loss = None
+                position.take_profit = None
+                log.info(f"[LOCAL] {trigger_type}平仓成功(全部成交)",
+                         account_id=position.account_id, symbol=position.symbol,
+                         filled_qty=result.filled_quantity, filled_price=result.filled_price)
+            else:
+                # 部分成交：保留 SL/TP，残留仓位仍受保护，下一轮监控会再次触发
+                log.warning(f"[LOCAL] {trigger_type}平仓部分成交，保留SL/TP保护残留仓位",
+                            account_id=position.account_id, symbol=position.symbol,
+                            filled_qty=result.filled_quantity, requested_qty=qty,
+                            remaining=qty - float(result.filled_quantity or 0))
+
             # 写入信号事件（信号历史可追踪）
             _write_close_signal_event(
                 session, position, trigger_type, current_price,
                 pm_signal_id, success=True,
             )
-            # 止损触发后设置策略冷却，防止立刻重新开仓
-            if trigger_type == "SL" and position.strategy_code and _on_sl_triggered_callback:
+            # 止损触发后设置策略冷却（仅全部成交时触发，部分成交等下一轮继续平）
+            if is_full_close and trigger_type == "SL" and position.strategy_code and _on_sl_triggered_callback:
                 try:
                     _on_sl_triggered_callback(position.symbol, position.strategy_code)
                     log.info("止损冷却已触发", symbol=position.symbol, strategy=position.strategy_code)
@@ -449,18 +460,31 @@ async def _close_position_remote(
             data = resp.json()
         ok = data.get("success", False)
         if ok:
+            filled_qty = float(data.get("filled_quantity") or qty)
+            filled_price = float(data.get("filled_price") or current_price)
+            # 判断是否完全平仓（成交量 ≥ 请求量的 99.5%，兼容浮点误差）
+            is_full_close = filled_qty >= qty * 0.995
+
             position.close_reason = trigger_type
-            position.stop_loss = None
-            position.take_profit = None
             position.updated_at = datetime.now()
-            log.info(f"[REMOTE] {trigger_type}平仓成功",
-                     account_id=position.account_id, symbol=position.symbol)
+
+            if is_full_close:
+                # 完全成交：清除 SL/TP，结算服务会将持仓设为 CLOSED
+                position.stop_loss = None
+                position.take_profit = None
+                log.info(f"[REMOTE] {trigger_type}平仓成功(全部成交)",
+                         account_id=position.account_id, symbol=position.symbol,
+                         filled_qty=filled_qty, filled_price=filled_price)
+            else:
+                # 部分成交：保留 SL/TP，残留仓位仍受保护，下一轮监控会再次触发
+                log.warning(f"[REMOTE] {trigger_type}平仓部分成交，保留SL/TP保护残留仓位",
+                            account_id=position.account_id, symbol=position.symbol,
+                            filled_qty=filled_qty, requested_qty=qty,
+                            remaining=qty - filled_qty)
 
             # 在中心侧做结算（写 order + fill + position update + ledger）
             if session:
                 try:
-                    filled_qty = float(data.get("filled_quantity") or qty)
-                    filled_price = float(data.get("filled_price") or current_price)
                     pm_signal_id = gen_id("PM")
                     settlement_svc = TradeSettlementService(
                         session=session,
@@ -500,11 +524,26 @@ async def _close_position_remote(
                     log.info("[REMOTE] 中心侧结算完成",
                              account_id=position.account_id, symbol=position.symbol)
                 except Exception as settle_err:
-                    log.warning("[REMOTE] 中心侧结算失败（平仓已成功）",
-                                account_id=position.account_id, error=str(settle_err))
+                    # 结算失败但交易所已平仓 → 手动更新持仓数量，防止 DB 与交易所不一致
+                    log.error("[REMOTE] 中心侧结算失败，回退手动更新持仓",
+                              account_id=position.account_id, symbol=position.symbol,
+                              error=str(settle_err))
+                    try:
+                        remaining = Decimal(str(qty)) - Decimal(str(filled_qty))
+                        if remaining <= 0:
+                            position.quantity = Decimal("0")
+                            position.available = Decimal("0")
+                            position.status = "CLOSED"
+                            position.closed_at = datetime.now()
+                        else:
+                            position.quantity = remaining
+                            position.available = remaining
+                        position.updated_at = datetime.now()
+                    except Exception as fallback_err:
+                        log.error("[REMOTE] 回退更新也失败", error=str(fallback_err))
 
-            # 止损触发后设置策略冷却
-            if trigger_type == "SL" and position.strategy_code and _on_sl_triggered_callback:
+            # 止损触发后设置策略冷却（仅全部成交时触发，部分成交等下一轮继续平）
+            if is_full_close and trigger_type == "SL" and position.strategy_code and _on_sl_triggered_callback:
                 try:
                     _on_sl_triggered_callback(position.symbol, position.strategy_code)
                     log.info("止损冷却已触发（远程）", symbol=position.symbol, strategy=position.strategy_code)

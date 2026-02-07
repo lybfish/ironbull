@@ -212,6 +212,19 @@ class MemberRepository:
         self.db.flush()
         return strategy
 
+    def create_strategy(self, strategy: Strategy) -> Strategy:
+        self.db.add(strategy)
+        self.db.flush()
+        return strategy
+
+    def delete_strategy(self, strategy_id: int) -> bool:
+        s = self.db.query(Strategy).filter(Strategy.id == strategy_id).first()
+        if not s:
+            return False
+        self.db.delete(s)
+        self.db.flush()
+        return True
+
     # ---------- TenantStrategy (租户策略实例) ----------
     def list_tenant_strategies(
         self,

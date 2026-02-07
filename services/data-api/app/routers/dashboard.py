@@ -2,18 +2,21 @@
 Data API - 平台级 Dashboard 汇总
 
 GET /api/dashboard/summary -> 平台汇总数据（Redis 缓存 60s，减轻 DB 压力）
+GET /api/dashboard/trends  -> 趋势数据（近 N 天的订单量、用户增长、交易额、利润池）
 """
 
-from typing import Dict, Any
+from datetime import datetime, timedelta
+from typing import Dict, Any, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, cast, Date
 
 from libs.tenant.models import Tenant
 from libs.member.models import User, StrategyBinding
-from libs.order_trade.models import Order
+from libs.order_trade.models import Order, Fill
 from libs.execution_node.models import ExecutionNode
+from libs.reward.models import ProfitPool
 
 from ..deps import get_db, get_current_admin
 
@@ -63,3 +66,72 @@ def summary(
     except Exception:
         pass
     return {"success": True, "data": data, "cached": False}
+
+
+@router.get("/trends")
+def trends(
+    days: int = Query(30, ge=7, le=90, description="趋势天数"),
+    _admin: Dict[str, Any] = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    近 N 天趋势数据：
+    - 每日订单量
+    - 每日新增用户
+    - 每日成交额
+    - 每日利润池入池金额
+    """
+    start_date = datetime.now() - timedelta(days=days)
+
+    # 构建日期序列
+    date_list = [(datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days - 1, -1, -1)]
+
+    # 1. 每日订单量
+    order_rows = (
+        db.query(cast(Order.created_at, Date).label("d"), func.count(Order.id))
+        .filter(Order.created_at >= start_date)
+        .group_by("d")
+        .all()
+    )
+    order_map = {str(r[0]): r[1] for r in order_rows}
+
+    # 2. 每日新增用户
+    user_rows = (
+        db.query(cast(User.created_at, Date).label("d"), func.count(User.id))
+        .filter(User.created_at >= start_date)
+        .group_by("d")
+        .all()
+    )
+    user_map = {str(r[0]): r[1] for r in user_rows}
+
+    # 3. 每日成交额 (fills.value)
+    try:
+        fill_rows = (
+            db.query(cast(Fill.traded_at, Date).label("d"), func.sum(Fill.value))
+            .filter(Fill.traded_at >= start_date)
+            .group_by("d")
+            .all()
+        )
+        fill_map = {str(r[0]): float(r[1] or 0) for r in fill_rows}
+    except Exception:
+        fill_map = {}
+
+    # 4. 每日利润池入池金额
+    pool_rows = (
+        db.query(cast(ProfitPool.created_at, Date).label("d"), func.sum(ProfitPool.pool_amount))
+        .filter(ProfitPool.created_at >= start_date)
+        .group_by("d")
+        .all()
+    )
+    pool_map = {str(r[0]): float(r[1] or 0) for r in pool_rows}
+
+    return {
+        "success": True,
+        "data": {
+            "dates": date_list,
+            "orders": [order_map.get(d, 0) for d in date_list],
+            "new_users": [user_map.get(d, 0) for d in date_list],
+            "trade_volume": [round(fill_map.get(d, 0), 2) for d in date_list],
+            "pool_amount": [round(pool_map.get(d, 0), 4) for d in date_list],
+        },
+    }

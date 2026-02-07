@@ -1708,8 +1708,8 @@ class LiveTrader(Trader):
             return balances
             
         except Exception as e:
-            logger.error("get balance failed", error=str(e))
-            return {}
+            logger.error("get balance failed", exchange=self.exchange_name, error=str(e))
+            raise RuntimeError(f"get_balance failed for {self.exchange_name}: {e}") from e
     
     async def close(self):
         """关闭连接"""

@@ -126,6 +126,23 @@ def list_bindings(
     }
 
 
+@router.delete("/{binding_id}")
+def delete_binding(
+    binding_id: int,
+    _admin: Dict[str, Any] = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """管理员删除策略绑定（先停止再删除）"""
+    binding = db.query(StrategyBinding).filter(StrategyBinding.id == binding_id).first()
+    if not binding:
+        return {"success": False, "message": "绑定不存在"}
+    if binding.status == 1:
+        return {"success": False, "message": "请先停止该绑定后再删除"}
+    db.delete(binding)
+    db.commit()
+    return {"success": True, "message": "绑定已删除"}
+
+
 @router.put("/{binding_id}")
 def update_binding(
     binding_id: int,

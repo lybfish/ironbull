@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from libs.analytics import AnalyticsService, TradeStatisticsRepository
 
-from ..deps import get_db, get_tenant_id
+from ..deps import get_db, get_tenant_id, get_current_admin
 from ..serializers import dto_to_dict
 from ..utils import parse_date
 
@@ -30,6 +30,7 @@ def get_performance(
     start_date: Optional[str] = Query(None, description="YYYY-MM-DD，净值曲线起始"),
     end_date: Optional[str] = Query(None, description="YYYY-MM-DD，净值曲线结束"),
     db: Session = Depends(get_db),
+    _admin: dict = Depends(get_current_admin),
 ):
     """绩效汇总与净值曲线。不传 account_id 时默认 1；不传 start_date/end_date 时仅返回汇总。"""
     try:
@@ -54,6 +55,7 @@ def get_risk(
     account_id: Optional[int] = Query(None, description="账户ID，不传时默认 1"),
     strategy_code: Optional[str] = Query(None),
     db: Session = Depends(get_db),
+    _admin: dict = Depends(get_current_admin),
 ):
     """最新风险指标（夏普、回撤、VaR 等）"""
     try:
@@ -75,6 +77,7 @@ def list_statistics(
     symbol: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
+    _admin: dict = Depends(get_current_admin),
 ):
     """交易统计列表（胜率、盈亏比、获利因子等）"""
     try:
