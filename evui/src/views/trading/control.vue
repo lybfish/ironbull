@@ -166,7 +166,7 @@
 </template>
 
 <script>
-import axios from 'axios'
+import { submitManualOrder } from '@/api/trading'
 
 export default {
   name: 'TradeControl',
@@ -241,6 +241,26 @@ export default {
           return false
         }
 
+        // ★ 安全确认对话框：防止误操作
+        const sideLabel = this.orderForm.side === 'buy' ? '买入(做多)' : '卖出(做空)'
+        const typeLabel = this.orderForm.order_type === 'market' ? '市价' : '限价'
+        const priceInfo = this.orderForm.order_type === 'limit' ? ` @ ${this.orderForm.price}` : ''
+        const confirmMsg = `即将向 ${this.exchangeLabel} 提交真实订单：\n\n`
+          + `方向：${sideLabel}\n`
+          + `类型：${typeLabel}\n`
+          + `标的：${this.orderForm.symbol}\n`
+          + `数量：${this.orderForm.amount}${priceInfo}\n\n`
+          + `此操作将直接在交易所执行，请确认无误！`
+        try {
+          await this.$confirm(confirmMsg, '订单确认', {
+            confirmButtonText: '确认下单',
+            cancelButtonText: '取消',
+            type: 'warning'
+          })
+        } catch (_) {
+          return // 用户取消
+        }
+
         this.submitting = true
         const now = new Date().toLocaleString('zh-CN')
         const orderData = {
@@ -256,7 +276,11 @@ export default {
         }
 
         try {
-          await axios.post('/manual-order', orderData)
+          const res = await submitManualOrder(orderData)
+          const resData = res.data || {}
+          if (resData.success === false) {
+            throw new Error(resData.error || resData.message || '下单失败')
+          }
           const platform = `${this.exchangeLabel} ${this.marketTypeLabel}`
           const message = `[${platform}] ${this.orderForm.side.toUpperCase()} ${this.orderForm.symbol} ${this.orderForm.amount} ${this.orderForm.order_type === 'limit' ? `@ ${this.orderForm.price}` : ''}`
           this.logs.unshift({

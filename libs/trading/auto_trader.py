@@ -307,6 +307,7 @@ class AutoTrader:
         stop_loss = signal.get("stop_loss", 0)
         take_profit = signal.get("take_profit", 0)
         confidence = signal.get("confidence", 0)
+        leverage = signal.get("leverage") or _config.get_int("default_leverage", 20)
         
         logger.info(
             "processing signal",
@@ -375,13 +376,16 @@ class AutoTrader:
                 # 获取 signal_id（用于 OrderTrade 关联）
                 signal_id = signal.get("signal_id")
                 
-                # 市价单开仓
+                # 市价单开仓（传入 leverage 确保设置逐仓保证金模式 + 杠杆倍数）
                 order_result = await trader.create_order(
                     symbol=symbol,
                     side=order_side,
                     order_type=OrderType.MARKET,
                     quantity=quantity,
-                    signal_id=signal_id,  # 传递 signal_id
+                    signal_id=signal_id,
+                    leverage=leverage,
+                    stop_loss=stop_loss or None,       # ★ 传入 SL/TP 写入订单记录
+                    take_profit=take_profit or None,
                 )
                 
                 if order_result.status in [OrderStatus.FILLED, OrderStatus.PARTIAL]:

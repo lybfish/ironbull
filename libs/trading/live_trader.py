@@ -476,22 +476,69 @@ class LiveTrader(Trader):
 
     async def ensure_isolated_margin_mode(self, symbol: str) -> None:
         """
-        合约：确保使用逐仓保证金模式（每 symbol 只尝试一次）。
+        合约：确保使用逐仓保证金模式。
         逐仓优势：单笔亏损不影响整个账户余额，风险隔离。
-        - Binance：用 set_margin_mode("isolated", symbol)，已是逐仓返回 -4046 可忽略。
-        - OKX：需通过 set-leverage 同时传 lever + mgnMode=isolated；先查当前杠杆以免改变用户设置。
-        - Gate：CCXT 不支持 set_margin_mode，统一账户默认全仓，跳过。
+
+        ★ 重要改进（2026-02）：
+        - 仅在 **成功切换或确认已是逐仓** 时缓存，失败不缓存，下次重试。
+        - 如果切换失败且不是"已有持仓"等可忽略原因，**抛出异常阻止下单**，
+          避免以全仓模式开仓。
+        - Gate：通过 privateFuturesPostSettlePositions 设 leverage（>0 即逐仓），
+          不再跳过。
+
+        Raises:
+            RuntimeError: 当逐仓模式无法设置且不应继续下单时。
         """
         if self.market_type != "future" or not symbol:
             return
         ccxt_sym = self._ccxt_symbol(symbol) if ":" not in symbol else symbol
+        # 仅在确认成功后缓存，失败不缓存以允许重试
         if ccxt_sym in self._margin_isolated_tried:
             return
-        self._margin_isolated_tried.add(ccxt_sym)
 
-        # --- Gate：统一账户默认全仓，CCXT 不支持切换，跳过 ---
+        # --- Gate：通过 leverage API 设定逐仓模式 ---
+        # Gate 统一账户 leverage > 0 即逐仓模式
         if self.exchange_name == "gateio":
-            logger.debug("gate unified account, skip margin mode switch", symbol=ccxt_sym)
+            try:
+                contract = self._gate_contract_name(symbol)
+                # 先查当前持仓杠杆
+                try:
+                    positions = await self.exchange.privateFuturesGetSettlePositionsContract({
+                        "settle": DEFAULT_SETTLE,
+                        "contract": contract,
+                    })
+                    # positions 可能是 dict 或 list
+                    pos_data = positions if isinstance(positions, dict) else (positions[0] if positions else {})
+                    current_leverage = int(pos_data.get("leverage", 0))
+                    current_mode = pos_data.get("mode", "")
+                    if current_leverage > 0 and current_mode != "cross":
+                        # 已经是逐仓（leverage > 0 且非 cross）
+                        logger.debug("gate already isolated margin", symbol=ccxt_sym, leverage=current_leverage)
+                        self._margin_isolated_tried.add(ccxt_sym)
+                        return
+                except Exception:
+                    pass
+
+                # 设置为逐仓：leverage > 0（用 DEFAULT_LEVERAGE_FALLBACK 兜底）
+                leverage_val = DEFAULT_LEVERAGE_FALLBACK
+                await self.exchange.privateFuturesPostSettlePositions({
+                    "settle": DEFAULT_SETTLE,
+                    "contract": contract,
+                    "leverage": str(leverage_val),
+                })
+                logger.info("gate margin set to isolated via leverage", symbol=ccxt_sym, leverage=leverage_val)
+                self._margin_isolated_tried.add(ccxt_sym)
+            except Exception as e:
+                err_str = str(e).lower()
+                # 已有持仓时可能无法切换，但持仓本身可能已经是逐仓
+                if "position" in err_str or "exist" in err_str:
+                    logger.warning("gate set isolated margin skipped (has position)", symbol=ccxt_sym, error=str(e))
+                    self._margin_isolated_tried.add(ccxt_sym)
+                else:
+                    logger.error("gate set isolated margin FAILED", symbol=ccxt_sym, error=str(e))
+                    raise RuntimeError(
+                        f"无法为 {ccxt_sym} 设置逐仓模式(Gate)，拒绝以全仓模式下单: {e}"
+                    )
             return
 
         # --- OKX：通过 leverage API 设 mgnMode=isolated（需同时传 lever） ---
@@ -510,6 +557,7 @@ class LiveTrader(Trader):
                     current_mgn = data[0].get("mgnMode", "")
                     if current_mgn == "isolated":
                         logger.debug("okx already isolated margin", symbol=ccxt_sym, lever=current_lever)
+                        self._margin_isolated_tried.add(ccxt_sym)
                         return
                 else:
                     current_lever = str(DEFAULT_LEVERAGE_FALLBACK)
@@ -521,30 +569,57 @@ class LiveTrader(Trader):
                     "lever": str(current_lever),
                 })
                 logger.info("okx margin set to isolated", symbol=ccxt_sym, lever=current_lever)
+                self._margin_isolated_tried.add(ccxt_sym)
             except Exception as e:
                 err_str = str(e).lower()
                 if "no need" in err_str or "already" in err_str:
                     logger.debug("okx margin already isolated", symbol=ccxt_sym)
+                    self._margin_isolated_tried.add(ccxt_sym)
+                elif "position" in err_str or "exist" in err_str:
+                    # 已有持仓无法切换，缓存但警告
+                    logger.warning("okx set isolated margin skipped (has position)", symbol=ccxt_sym, error=str(e))
+                    self._margin_isolated_tried.add(ccxt_sym)
                 else:
-                    logger.warning("okx set isolated margin failed, continue", symbol=ccxt_sym, error=str(e))
+                    logger.error("okx set isolated margin FAILED", symbol=ccxt_sym, error=str(e))
+                    raise RuntimeError(
+                        f"无法为 {ccxt_sym} 设置逐仓模式(OKX)，拒绝以全仓模式下单: {e}"
+                    )
             return
 
         # --- Binance 及其他：用 CCXT 统一接口 ---
         set_margin = getattr(self.exchange, "set_margin_mode", None)
         if not set_margin:
+            logger.warning("exchange has no set_margin_mode method", exchange=self.exchange_name, symbol=ccxt_sym)
             return
         try:
             result = set_margin("isolated", ccxt_sym)
             if asyncio.iscoroutine(result):
                 await result
             logger.info("margin mode set to isolated", exchange=self.exchange_name, symbol=ccxt_sym)
+            self._margin_isolated_tried.add(ccxt_sym)
         except Exception as e:
             err_str = str(e).lower()
             # Binance -4046: No need to change margin type（已是逐仓）
             if "-4046" in err_str or "no need" in err_str:
                 logger.debug("margin already isolated or unchanged", symbol=ccxt_sym)
+                self._margin_isolated_tried.add(ccxt_sym)
+            elif "-4048" in err_str or "exist" in err_str or "position" in err_str:
+                # 已有持仓无法切换 margin type — 可能持仓已是全仓，但无法改变
+                # 缓存以避免重复报错，但打 warning
+                logger.warning(
+                    "cannot switch to isolated: existing position in cross margin",
+                    exchange=self.exchange_name, symbol=ccxt_sym, error=str(e),
+                )
+                self._margin_isolated_tried.add(ccxt_sym)
             else:
-                logger.warning("set margin to isolated failed (e.g. has position), continue", symbol=ccxt_sym, error=str(e))
+                # 未知错误：不缓存，抛异常阻止以全仓模式下单
+                logger.error(
+                    "set margin to isolated FAILED, refusing to place order in cross margin",
+                    exchange=self.exchange_name, symbol=ccxt_sym, error=str(e),
+                )
+                raise RuntimeError(
+                    f"无法为 {ccxt_sym} 设置逐仓模式({self.exchange_name})，拒绝以全仓模式下单: {e}"
+                )
 
     async def create_order(
         self,
@@ -700,6 +775,57 @@ class LiveTrader(Trader):
                         retries=MARKET_ORDER_CONFIRM_RETRIES,
                     )
 
+            # ★ 手续费补偿：如果 commission 仍为 0 且已成交，通过 fetch_my_trades 获取真实手续费
+            if (
+                result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
+                and (result.filled_quantity or 0) > 0
+                and (result.commission or 0) == 0
+                and result.exchange_order_id
+            ):
+                try:
+                    await asyncio.sleep(0.3)  # 短暂等待确保成交记录可查
+                    trades = await self.exchange.fetch_order_trades(result.exchange_order_id, ccxt_sym)
+                    if trades:
+                        total_fee = 0.0
+                        fee_currency = ""
+                        for t in trades:
+                            t_fee = t.get("fee", {})
+                            if t_fee and isinstance(t_fee, dict) and t_fee.get("cost") is not None:
+                                total_fee += abs(float(t_fee["cost"]))
+                                if not fee_currency:
+                                    fee_currency = t_fee.get("currency", "")
+                            # 检查 info 中的原始手续费字段
+                            if total_fee == 0:
+                                t_info = t.get("info", {})
+                                if isinstance(t_info, dict):
+                                    raw_c = t_info.get("commission") or t_info.get("fee") or t_info.get("n")
+                                    if raw_c is not None:
+                                        try:
+                                            total_fee += abs(float(raw_c))
+                                        except (ValueError, TypeError):
+                                            pass
+                                    if not fee_currency:
+                                        fee_currency = t_info.get("commissionAsset") or t_info.get("fee_currency") or ""
+                        if total_fee > 0:
+                            result = OrderResult(
+                                order_id=result.order_id,
+                                exchange_order_id=result.exchange_order_id,
+                                symbol=result.symbol,
+                                side=result.side,
+                                order_type=result.order_type,
+                                status=result.status,
+                                requested_quantity=result.requested_quantity,
+                                requested_price=result.requested_price,
+                                filled_quantity=result.filled_quantity,
+                                filled_price=result.filled_price,
+                                commission=total_fee,
+                                commission_asset=fee_currency or result.commission_asset,
+                                raw_response=result.raw_response,
+                            )
+                            logger.info("fee fetched from trades", commission=total_fee, currency=fee_currency)
+                except Exception as e:
+                    logger.debug("fetch_order_trades for fee failed (non-critical)", error=str(e))
+
             logger.info(
                 "order created",
                 order_id=order_id,
@@ -707,6 +833,7 @@ class LiveTrader(Trader):
                 status=result.status.value,
                 filled_quantity=result.filled_quantity,
                 filled_price=result.filled_price,
+                commission=result.commission,
             )
             
             # 更新订单状态并结算（支持 settlement_service 或 order_trade_service）
@@ -742,6 +869,13 @@ class LiveTrader(Trader):
             if self._order_trade_service and db_order_id:
                 await self._fail_order_record(db_order_id, "ORDER_NOT_FOUND", str(e))
             return self._error_result(order_id, symbol, side, order_type, quantity, price, "ORDER_NOT_FOUND", str(e))
+        
+        except RuntimeError as e:
+            # ensure_isolated_margin_mode 等前置检查抛出的逐仓设置失败
+            logger.error("pre-order check failed (e.g. margin mode)", order_id=order_id, error=str(e))
+            if self._order_trade_service and db_order_id:
+                await self._fail_order_record(db_order_id, "MARGIN_MODE_ERROR", str(e))
+            return self._error_result(order_id, symbol, side, order_type, quantity, price, "MARGIN_MODE_ERROR", str(e))
         
         except ccxt.NetworkError as e:
             logger.error("network error", order_id=order_id, error=str(e))
@@ -1515,6 +1649,41 @@ class LiveTrader(Trader):
         elif filled >= quantity:
             status = OrderStatus.FILLED
         
+        # ★ 手续费提取改进：同时处理 fee(单笔) 和 fees(多笔) 两种 CCXT 返回格式
+        commission = 0.0
+        commission_asset = ""
+        # 优先 fee（单笔手续费）
+        fee_obj = response.get("fee")
+        if fee_obj and isinstance(fee_obj, dict):
+            cost = fee_obj.get("cost")
+            if cost is not None:
+                commission = abs(float(cost))
+            commission_asset = fee_obj.get("currency") or ""
+        # 若 fee 无数据，检查 fees（某些交易所返回数组）
+        if commission == 0:
+            fees_list = response.get("fees")
+            if fees_list and isinstance(fees_list, list):
+                total_fee = 0.0
+                for f in fees_list:
+                    if isinstance(f, dict) and f.get("cost") is not None:
+                        total_fee += abs(float(f["cost"]))
+                        if not commission_asset:
+                            commission_asset = f.get("currency") or ""
+                commission = total_fee
+        # 再检查 info 字段（交易所原始响应）中的手续费
+        if commission == 0:
+            info = response.get("info", {})
+            if isinstance(info, dict):
+                # Binance futures: commission 字段
+                raw_comm = info.get("commission") or info.get("totalFee") or info.get("fee")
+                if raw_comm is not None:
+                    try:
+                        commission = abs(float(raw_comm))
+                    except (ValueError, TypeError):
+                        pass
+                if not commission_asset:
+                    commission_asset = info.get("commissionAsset") or info.get("feeCurrency") or ""
+
         return OrderResult(
             order_id=order_id,
             exchange_order_id=response.get("id"),
@@ -1526,8 +1695,8 @@ class LiveTrader(Trader):
             requested_price=price,
             filled_quantity=filled,
             filled_price=response.get("average", response.get("price", 0)) or 0,
-            commission=response.get("fee", {}).get("cost", 0) if response.get("fee") else 0,
-            commission_asset=response.get("fee", {}).get("currency", "") if response.get("fee") else "",
+            commission=commission,
+            commission_asset=commission_asset,
             raw_response=response,
         )
     

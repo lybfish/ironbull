@@ -535,6 +535,9 @@ def get_status():
             pm_stats = get_monitor_stats()
         except Exception:
             pass
+    # 获取持仓监控扫描间隔
+    pm_interval = config.get_float("position_monitor_interval", 5.0)
+
     return jsonify({
         "success": True,
         "state": monitor_state,
@@ -547,6 +550,7 @@ def get_status():
             "strategy_dispatch_amount": STRATEGY_DISPATCH_AMOUNT,
             "exchange_sl_tp": EXCHANGE_SL_TP,
             "position_monitor": not EXCHANGE_SL_TP,
+            "position_monitor_interval": pm_interval,
         },
         "position_monitor_stats": pm_stats,
         "cooldowns": cooldowns,
@@ -808,16 +812,32 @@ def _write_sl_tp_to_position(
         position_side = "LONG" if order_side == _OrderSide.BUY else "SHORT"
     else:
         position_side = "LONG" if str(order_side).upper().endswith("BUY") else "SHORT"
-    # 尝试两种 symbol 格式查找持仓
+    # 尝试多种 symbol 格式 + 多种交易所名格式查找持仓
+    # exchange 可能存为 "gate"/"gateio"/"binance"/"binanceusdm"/"okx" 等
     pos = None
-    for s in [symbol, symbol.replace("/", "")]:
-        pos = pos_repo.get_by_key(
-            tenant_id=target.tenant_id,
-            account_id=target.account_id,
-            symbol=s,
-            exchange=target.exchange or "binance",
-            position_side=position_side,
-        )
+    exchange_raw = target.exchange or ""
+    exchange_variants = {exchange_raw}
+    # 添加常见别名
+    ex_lower = exchange_raw.lower().strip()
+    _ex_aliases = {
+        "gate": {"gate", "gateio"}, "gateio": {"gate", "gateio"},
+        "binance": {"binance", "binanceusdm"}, "binanceusdm": {"binance", "binanceusdm"},
+    }
+    exchange_variants.update(_ex_aliases.get(ex_lower, {ex_lower}))
+    exchange_variants.discard("")  # 移除空字符串
+
+    symbol_variants = [symbol, symbol.replace("/", "")]
+    for s in symbol_variants:
+        for ex in exchange_variants:
+            pos = pos_repo.get_by_key(
+                tenant_id=target.tenant_id,
+                account_id=target.account_id,
+                symbol=s,
+                exchange=ex,
+                position_side=position_side,
+            )
+            if pos:
+                break
         if pos:
             break
     if pos:
@@ -1464,15 +1484,31 @@ def trading_execute():
         if field not in data:
             return jsonify({"success": False, "error": f"缺少字段: {field}"})
     
+    # ★ 输入验证：防止非法值导致崩溃或错误交易
+    side_val = str(data["side"]).upper()
+    if side_val not in ("BUY", "SELL"):
+        return jsonify({"success": False, "error": f"无效 side: {data['side']}，仅支持 BUY/SELL"})
+    try:
+        entry_price = float(data["entry_price"])
+        stop_loss = float(data["stop_loss"])
+        take_profit = float(data["take_profit"])
+    except (ValueError, TypeError) as e:
+        return jsonify({"success": False, "error": f"价格字段格式错误: {e}"})
+    if entry_price <= 0:
+        return jsonify({"success": False, "error": f"entry_price 必须大于 0，当前: {entry_price}"})
+    if stop_loss < 0 or take_profit < 0:
+        return jsonify({"success": False, "error": "stop_loss 和 take_profit 不能为负数"})
+
     signal = {
-        "symbol": data["symbol"],
-        "side": data["side"],
-        "entry_price": float(data["entry_price"]),
-        "stop_loss": float(data["stop_loss"]),
-        "take_profit": float(data["take_profit"]),
-        "confidence": data.get("confidence", 80),
+        "symbol": str(data["symbol"]).strip(),
+        "side": side_val,
+        "entry_price": entry_price,
+        "stop_loss": stop_loss,
+        "take_profit": take_profit,
+        "confidence": int(data.get("confidence", 80)),
         "strategy": data.get("strategy"),
         "signal_id": data.get("signal_id"),
+        "leverage": int(data.get("leverage") or 0) or None,
     }
     
     # 按策略分发：有 strategy 且配置启用时，对绑定账户执行；无绑定时回退到单账户

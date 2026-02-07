@@ -231,6 +231,48 @@
       </el-col>
     </el-row>
 
+    <!-- 近期信号 -->
+    <el-row :gutter="15" style="margin-bottom: 15px;">
+      <el-col :span="24">
+        <el-card shadow="never">
+          <div slot="header" class="card-header-flex">
+            <span>近期信号</span>
+            <router-link to="/strategy/signal-history"><el-button type="text" size="mini">查看全部</el-button></router-link>
+          </div>
+          <el-table :data="recentSignals" stripe size="mini" style="width: 100%" :header-cell-style="{background:'#fafafa'}" v-loading="loading">
+            <el-table-column prop="signal_id" label="信号ID" width="160">
+              <template slot-scope="{row}">
+                <span style="font-family: monospace; font-size: 12px">{{ (row.signal_id || '').slice(0, 16) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="event_type" label="事件" width="100" align="center">
+              <template slot-scope="{row}">
+                <el-tag :type="signalTagType(row.event_type)" size="mini">{{ row.event_type }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="status" label="状态" width="90" align="center">
+              <template slot-scope="{row}">
+                <el-tag :type="row.status === 'SUCCESS' ? 'success' : row.status === 'FAILED' ? 'danger' : 'warning'" size="mini">
+                  {{ row.status }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="详情" min-width="200">
+              <template slot-scope="{row}">
+                <span style="font-size: 12px; color: #606266">{{ signalDetail(row) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="created_at" label="时间" width="170">
+              <template slot-scope="{row}">
+                <span style="font-size: 12px">{{ row.created_at || '-' }}</span>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-if="!loading && recentSignals.length === 0" description="暂无信号记录" :image-size="60"/>
+        </el-card>
+      </el-col>
+    </el-row>
+
     <!-- 交易概览 -->
     <el-row :gutter="15">
       <el-col :lg="8" :md="12">
@@ -305,6 +347,7 @@
 import {getDashboardSummary, getPerformance} from '@/api/analytics'
 import {getOrders, getPositions} from '@/api/trading'
 import {getMonitorStatus} from '@/api/monitor'
+import {getSignalEvents} from '@/api/admin'
 
 export default {
   name: 'Workplace',
@@ -336,7 +379,8 @@ export default {
         data_api: false,
         signal_monitor: false,
         database: false
-      }
+      },
+      recentSignals: []
     }
   },
   computed: {
@@ -344,7 +388,7 @@ export default {
       return this.$store.state.user.user || {}
     },
     systemHealthy() {
-      return this.services.data_api && this.services.database
+      return this.services.data_api && this.services.database && this.services.signal_monitor
     },
     perfItems() {
       return [
@@ -369,15 +413,31 @@ export default {
       if (val === null || val === undefined) {return '-'}
       return (val * 100).toFixed(decimals || 2) + '%'
     },
+    signalTagType(t) {
+      const m = { CREATED: '', DISPATCHED: 'warning', EXECUTED: 'success', FAILED: 'danger' }
+      return m[(t || '').toUpperCase()] || 'info'
+    },
+    signalDetail(row) {
+      try {
+        const d = typeof row.detail === 'string' ? JSON.parse(row.detail) : (row.detail || {})
+        const parts = []
+        if (d.strategy) parts.push(d.strategy)
+        if (d.symbol) parts.push(d.symbol)
+        if (d.side) parts.push(d.side)
+        if (row.source) parts.push(row.source)
+        return parts.join(' · ') || row.detail || '-'
+      } catch (e) { return row.detail || '-' }
+    },
     async fetchData() {
       this.loading = true
       try {
-        const [summaryRes, ordersRes, positionsRes, perfRes, monitorRes] = await Promise.allSettled([
+        const [summaryRes, ordersRes, positionsRes, perfRes, monitorRes, signalRes] = await Promise.allSettled([
           getDashboardSummary(),
           getOrders({limit: 1}),
           getPositions({limit: 1}),
           getPerformance().catch(() => null),
-          getMonitorStatus().catch(() => null)
+          getMonitorStatus().catch(() => null),
+          getSignalEvents({page_size: 8}).catch(() => null)
         ])
 
         if (summaryRes.status === 'fulfilled' && summaryRes.value && summaryRes.value.data) {
@@ -415,6 +475,10 @@ export default {
             signal_monitor: findSvc('signal-monitor'),
             database: !!(m.db && m.db.mysql_ok)
           }
+        }
+        if (signalRes.status === 'fulfilled' && signalRes.value && signalRes.value.data) {
+          const sd = signalRes.value.data
+          this.recentSignals = (sd.data || sd.events || []).slice(0, 8)
         }
       } catch (e) {
         // eslint-disable-next-line no-console

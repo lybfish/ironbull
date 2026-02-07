@@ -3,7 +3,7 @@
  */
 import axios from 'axios'
 
-let defaultParams = {tenant_id: 1}
+let defaultParams = {tenant_id: parseInt(localStorage.getItem('ironbull_tenant_id')) || 1}
 
 export function setDefaultTenant(tenantId) {
   defaultParams = {tenant_id: tenantId}

@@ -28,6 +28,9 @@
 
       <div class="search-bar">
         <el-form :inline="true" :model="where" size="small">
+          <el-form-item label="订单ID">
+            <el-input v-model="where.order_id" placeholder="订单ID" clearable style="width:160px" @keyup.enter.native="onSearch"/>
+          </el-form-item>
           <el-form-item label="标的">
             <el-input v-model="where.symbol" placeholder="如 BTC/USDT" clearable style="width:140px" @keyup.enter.native="onSearch"/>
           </el-form-item>
@@ -163,7 +166,7 @@ export default {
       total: 0,
       currentPage: 1,
       pageSize: 20,
-      where: { symbol: '', side: '', trade_type: '', exchange: '', dateRange: null },
+      where: { symbol: '', side: '', trade_type: '', exchange: '', dateRange: null, order_id: '' },
       accountOptions: []
     }
   },
@@ -175,12 +178,7 @@ export default {
       return Array.from(set).sort()
     },
     filteredList() {
-      return this.list.filter(r => {
-        if (this.where.exchange) {
-          if ((r.exchange || '').toLowerCase() !== this.where.exchange.toLowerCase()) return false
-        }
-        return true
-      })
+      return this.list
     },
     stats() {
       let totalFee = 0
@@ -197,6 +195,10 @@ export default {
     }
   },
   mounted() {
+    // 接收订单页跳转传来的 order_id
+    if (this.$route.query.order_id) {
+      this.where.order_id = this.$route.query.order_id
+    }
     this.fetchData()
     this.fetchAccounts()
   },
@@ -245,7 +247,7 @@ export default {
       this.fetchData()
     },
     reset() {
-      this.where = { symbol: '', side: '', trade_type: '', exchange: '', dateRange: null }
+      this.where = { symbol: '', side: '', trade_type: '', exchange: '', dateRange: null, order_id: '' }
       this.currentPage = 1
       this.fetchData()
     },
@@ -265,6 +267,8 @@ export default {
         if (this.where.symbol) params.symbol = this.where.symbol
         if (this.where.side) params.side = this.where.side
         if (this.where.trade_type) params.trade_type = this.where.trade_type
+        if (this.where.order_id) params.order_id = this.where.order_id
+        if (this.where.exchange) params.exchange = this.where.exchange
         if (this.where.dateRange && this.where.dateRange.length === 2) {
           params.start_time = this.where.dateRange[0] + 'T00:00:00'
           params.end_time = this.where.dateRange[1] + 'T23:59:59'

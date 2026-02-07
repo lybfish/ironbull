@@ -150,16 +150,37 @@ def _get_exchange_accounts_map(session, account_ids: List[int]) -> Dict[int, Exc
 
 # ─────────────────────── 价格获取（异步批量）───────────────────────
 
+def _normalize_exchange_for_ccxt(exchange_name: str) -> str:
+    """
+    将 DB 中的交易所名统一映射为 CCXT async_support 模块类名。
+    DB 可能存 "binance"/"binanceusdm"/"gate"/"gateio"/"okx" 等多种格式。
+    """
+    name = (exchange_name or "").lower().strip()
+    mapping = {
+        "binance": "binanceusdm",      # 合约用 binanceusdm
+        "binanceusdm": "binanceusdm",
+        "gate": "gateio",
+        "gateio": "gateio",
+        "okx": "okx",
+        "bybit": "bybit",
+    }
+    return mapping.get(name, name)
+
+
 async def _fetch_prices_batch(symbols_by_exchange: Dict[str, set]) -> Dict[str, float]:
     """
     异步批量获取价格。按交易所分组，每个交易所只建一个连接。
     返回 {exchange:symbol: price}
+
+    ★ 改进：对交易所名做规范化，确保 "gate" → "gateio"、"binance" → "binanceusdm"。
+    返回的 key 仍然使用原始交易所名（与 DB position.exchange 一致），避免 lookup 失配。
     """
     import ccxt.async_support as ccxt_async
 
     now = time.time()
     results: Dict[str, float] = {}
-    need_fetch: Dict[str, set] = {}  # exchange -> symbols still needed
+    need_fetch: Dict[str, set] = {}          # ccxt_name -> symbols
+    ccxt_name_to_originals: Dict[str, set] = {}  # ccxt_name -> original exchange names
 
     # 先查缓存
     for exchange_name, syms in symbols_by_exchange.items():
@@ -169,16 +190,18 @@ async def _fetch_prices_batch(symbols_by_exchange: Dict[str, set]) -> Dict[str, 
             if cached and (now - cached[1]) < _PRICE_CACHE_TTL:
                 results[key] = cached[0]
             else:
-                need_fetch.setdefault(exchange_name, set()).add(sym)
+                ccxt_name = _normalize_exchange_for_ccxt(exchange_name)
+                need_fetch.setdefault(ccxt_name, set()).add(sym)
+                ccxt_name_to_originals.setdefault(ccxt_name, set()).add(exchange_name)
 
     # 按交易所并发获取
-    async def _fetch_for_exchange(exchange_name: str, syms: set):
-        exchange_cls = getattr(ccxt_async, exchange_name, None)
+    async def _fetch_for_exchange(ccxt_exchange_name: str, syms: set):
+        exchange_cls = getattr(ccxt_async, ccxt_exchange_name, None)
         if not exchange_cls:
-            log.warning(f"unsupported exchange: {exchange_name}")
+            log.warning(f"unsupported exchange (ccxt class not found): {ccxt_exchange_name}")
             return
         opts = {"enableRateLimit": True}
-        if exchange_name in ("okx", "gate"):
+        if ccxt_exchange_name in ("okx", "gateio"):
             opts["options"] = {"defaultType": "swap"}
         else:
             opts["options"] = {"defaultType": "future"}
@@ -193,13 +216,15 @@ async def _fetch_prices_batch(symbols_by_exchange: Dict[str, set]) -> Dict[str, 
                     ticker = await ex.fetch_ticker(ccxt_sym)
                     price = float(ticker.get("last") or ticker.get("close") or 0)
                     if price > 0:
-                        key = f"{exchange_name}:{sym}"
-                        results[key] = price
-                        _price_cache[key] = (price, time.time())
+                        # 为所有映射到此 ccxt class 的原始交易所名都写入结果
+                        for orig_name in ccxt_name_to_originals.get(ccxt_exchange_name, {ccxt_exchange_name}):
+                            key = f"{orig_name}:{sym}"
+                            results[key] = price
+                            _price_cache[key] = (price, time.time())
                 except Exception as e:
-                    log.debug(f"fetch_ticker failed: {exchange_name} {sym}: {e}")
+                    log.debug(f"fetch_ticker failed: {ccxt_exchange_name} {sym}: {e}")
         except Exception as e:
-            log.warning(f"exchange init failed: {exchange_name}: {e}")
+            log.warning(f"exchange init failed: {ccxt_exchange_name}: {e}")
         finally:
             try:
                 await ex.close()

@@ -92,6 +92,8 @@ class Position(Base):
         Index("idx_position_tenant_account", "tenant_id", "account_id"),
         Index("idx_position_symbol", "symbol"),
         Index("idx_position_status", "status"),
+        Index("idx_position_tenant_account_status", "tenant_id", "account_id", "status"),  # 常用分页查询
+        Index("idx_position_tenant_updated", "tenant_id", "updated_at"),                   # 时间排序查询
         {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
     )
     

@@ -64,6 +64,14 @@
                 @click="reload">查询
               </el-button>
               <el-button @click="reset">重置</el-button>
+              <el-button
+                icon="el-icon-download"
+                type="success"
+                plain
+                :disabled="tableData.length === 0"
+                @click="exportCSV">
+                导出CSV
+              </el-button>
             </div>
           </el-col>
         </el-row>
@@ -255,7 +263,16 @@ export default {
         if (res.data.success) {
           this.tableData = Array.isArray(res.data.data) ? res.data.data : []
           this.pagination.total = res.data.total || 0
-          this.calculateSummary()
+          // 使用服务端统计
+          if (res.data.stats) {
+            this.summary = {
+              totalCount: res.data.stats.total_count || this.pagination.total,
+              totalPositive: res.data.stats.total_positive || 0,
+              totalNegative: res.data.stats.total_negative || 0
+            }
+          } else {
+            this.calculateSummary()
+          }
         } else {
           this.$message.error('获取点卡流水失败')
           this.tableData = []
@@ -287,6 +304,20 @@ export default {
       
       this.summary.totalPositive = totalPositive
       this.summary.totalNegative = totalNegative
+    },
+    exportCSV() {
+      const headers = ['ID', '租户ID', '用户邮箱', '变动类型', '金额', '卡类型', '自充前', '自充后', '赠送前', '赠送后', '备注', '创建时间']
+      const rows = this.tableData.map(r => [
+        r.id, r.tenant_id, r.user_email || '', this.getChangeTypeName(r.change_type),
+        r.amount, this.getCardTypeName(r.card_type), r.before_self, r.after_self,
+        r.before_gift, r.after_gift, r.remark || '', r.created_at || ''
+      ])
+      const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n')
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = `点卡流水_${new Date().toISOString().slice(0,10)}.csv`
+      a.click(); URL.revokeObjectURL(url)
     },
     reload() {
       this.pagination.page = 1

@@ -75,6 +75,12 @@
           </template>
         </el-table-column>
         <el-table-column prop="account_id" label="账户ID" width="90" align="center"/>
+        <el-table-column label="交易所" width="100" align="center">
+          <template slot-scope="{row}">
+            <el-tag size="mini" effect="plain" v-if="row.exchange">{{ (row.exchange || '').toUpperCase() }}</el-tag>
+            <span v-else style="color: #C0C4CC">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="currency" label="币种" width="80" align="center">
           <template slot-scope="{row}">
             <el-tag size="mini" type="info">{{ row.currency }}</el-tag>

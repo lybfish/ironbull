@@ -271,9 +271,19 @@
             {{ formatTime(row.updated_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="80" align="center" fixed="right">
+        <el-table-column label="操作" width="130" align="center" fixed="right">
           <template slot-scope="{row}">
             <el-button type="text" size="mini" @click="showDetail(row)">详情</el-button>
+            <el-button
+              v-if="row.status === 'OPEN'"
+              type="text"
+              size="mini"
+              style="color: #F56C6C"
+              :loading="closingSet.has(row.symbol + '_' + row.account_id)"
+              :disabled="closingSet.has(row.symbol + '_' + row.account_id)"
+              @click="handleClosePosition(row)">
+              {{ closingSet.has(row.symbol + '_' + row.account_id) ? '平仓中...' : '平仓' }}
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -434,7 +444,7 @@
 </template>
 
 <script>
-import { getPositions, getOrders, getFills } from '@/api/trading'
+import { getPositions, getOrders, getFills, closePosition } from '@/api/trading'
 import { getExchangeAccounts } from '@/api/admin'
 
 export default {
@@ -454,6 +464,7 @@ export default {
       autoRefresh: false,
       refreshTimer: null,
       lastUpdateTime: '',
+      closingSet: new Set(), // 正在平仓中的 symbol+account_id 集合
       accountOptions: [],
       // 详情弹窗
       detailVisible: false,
@@ -472,21 +483,9 @@ export default {
       this.accountOptions.forEach(a => { if (a.exchange) set.add(a.exchange) })
       return Array.from(set).sort()
     },
-    /** 前端二次过滤（方向 & 交易所 & 账户） */
+    /** 直接使用后端返回数据（已在请求中传递筛选参数） */
     filteredList() {
-      return this.list.filter(r => {
-        if (this.where.position_side) {
-          const side = (r.position_side || r.side || '').toLowerCase()
-          if (side !== this.where.position_side) return false
-        }
-        if (this.where.exchange) {
-          if ((r.exchange || '').toLowerCase() !== this.where.exchange.toLowerCase()) return false
-        }
-        if (this.where.account_id) {
-          if (r.account_id !== this.where.account_id) return false
-        }
-        return true
-      })
+      return this.list
     },
     /** 从关联订单中汇总止盈止损（取最新有效值） */
     detailSlTp() {
@@ -556,12 +555,15 @@ export default {
         }
         // else 'all' — no filter
         if (this.where.symbol) { params.symbol = this.where.symbol }
+        if (this.where.position_side) { params.position_side = this.where.position_side }
+        if (this.where.exchange) { params.exchange = this.where.exchange }
+        if (this.where.account_id) { params.account_id = this.where.account_id }
         const res = await getPositions(params)
         this.list = res.data.data || []
         this.total = res.data.total || this.list.length
         this.lastUpdateTime = this.nowStr()
       } catch (e) {
-        this.$message.error('获取持仓失败')
+        this.$message.error('获取持仓失败: ' + (e.response?.data?.detail || e.message || '未知错误'))
       } finally {
         this.loading = false
       }
@@ -613,6 +615,37 @@ export default {
       } finally {
         this.detailLoading = false
       }
+    },
+
+    /* ---------- 手动平仓 ---------- */
+    handleClosePosition(row) {
+      const closingKey = row.symbol + '_' + row.account_id
+      if (this.closingSet.has(closingKey)) return // 防止重复点击
+      const side = this.isLong(row) ? '多头' : '空头'
+      this.$confirm(
+        `确认市价平仓 ${row.symbol} ${side} 持仓？此操作不可撤销。`,
+        '手动平仓确认',
+        { confirmButtonText: '确认平仓', cancelButtonText: '取消', type: 'warning' }
+      ).then(async () => {
+        // 添加 loading 状态
+        this.closingSet = new Set([...this.closingSet, closingKey])
+        try {
+          const res = await closePosition({ symbol: row.symbol, account_id: row.account_id })
+          const data = res.data || {}
+          if (data.success === false) {
+            this.$message.error('平仓失败: ' + (data.error || data.message || '未知错误'))
+          } else {
+            this.$message.success(`${row.symbol} 平仓指令已发送`)
+            setTimeout(() => this.fetchData(), 3000)
+          }
+        } catch (e) {
+          this.$message.error('平仓失败: ' + (e.response?.data?.detail || e.message))
+        } finally {
+          const s = new Set(this.closingSet)
+          s.delete(closingKey)
+          this.closingSet = s
+        }
+      }).catch(() => {})
     },
 
     /* ---------- 计算字段 ---------- */

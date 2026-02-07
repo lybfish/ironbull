@@ -264,7 +264,28 @@ def list_pointcard_logs(
             "remark": log.remark or "",
             "created_at": log.created_at.isoformat() if log.created_at else None,
         })
-    return {"success": True, "data": list_data, "total": total, "page": page, "page_size": page_size}
+    # 服务端全量统计
+    from sqlalchemy import func as sa_func
+    stat_base = db.query(PointCardLog)
+    if tenant_id is not None:
+        stat_base = stat_base.filter(PointCardLog.tenant_id == tenant_id)
+    if user_id is not None:
+        stat_base = stat_base.filter(PointCardLog.user_id == user_id)
+    if change_type is not None:
+        stat_base = stat_base.filter(PointCardLog.change_type == change_type)
+    pos_sum = stat_base.filter(PointCardLog.amount > 0).with_entities(
+        sa_func.coalesce(sa_func.sum(PointCardLog.amount), 0)
+    ).scalar()
+    neg_sum = stat_base.filter(PointCardLog.amount < 0).with_entities(
+        sa_func.coalesce(sa_func.sum(sa_func.abs(PointCardLog.amount)), 0)
+    ).scalar()
+    stats = {
+        "total_count": total,
+        "total_positive": float(pos_sum),
+        "total_negative": float(neg_sum),
+    }
+
+    return {"success": True, "data": list_data, "total": total, "page": page, "page_size": page_size, "stats": stats}
 
 
 # ---- 平台级奖励记录（由 main 显式注册 /api/rewards，此处仅定义实现） ----
@@ -318,4 +339,25 @@ def list_rewards(
             "remark": r.remark or "",
             "created_at": r.created_at.isoformat() if r.created_at else None,
         })
-    return {"success": True, "data": list_data, "total": total, "page": page, "page_size": page_size}
+
+    # 服务端全量统计
+    from sqlalchemy import func as sa_func
+    stat_q = db.query(
+        sa_func.count(UserReward.id).label("cnt"),
+        sa_func.coalesce(sa_func.sum(UserReward.amount), 0).label("total_amount"),
+        sa_func.coalesce(sa_func.avg(UserReward.rate), 0).label("avg_rate"),
+    )
+    if tenant_id is not None:
+        stat_q = stat_q.join(User, UserReward.user_id == User.id).filter(User.tenant_id == tenant_id)
+    if user_id is not None:
+        stat_q = stat_q.filter(UserReward.user_id == user_id)
+    if reward_type:
+        stat_q = stat_q.filter(UserReward.reward_type == reward_type)
+    stat_row = stat_q.first()
+    stats = {
+        "total_records": stat_row.cnt if stat_row else total,
+        "total_amount": float(stat_row.total_amount) if stat_row else 0,
+        "avg_rate": float(stat_row.avg_rate) if stat_row else 0,
+    }
+
+    return {"success": True, "data": list_data, "total": total, "page": page, "page_size": page_size, "stats": stats}

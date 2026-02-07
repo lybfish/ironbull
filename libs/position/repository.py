@@ -160,7 +160,7 @@ class PositionRepository:
         return query.all()
     
     def count_positions(self, filter: PositionFilter) -> int:
-        """统计持仓数量"""
+        """统计持仓数量（★ 过滤条件与 list_positions 完全一致，避免分页总数不准）"""
         query = self.session.query(Position).filter(
             Position.tenant_id == filter.tenant_id
         )
@@ -171,6 +171,15 @@ class PositionRepository:
         if filter.symbol:
             query = query.filter(Position.symbol == filter.symbol)
         
+        if filter.exchange:
+            query = query.filter(Position.exchange == filter.exchange)
+        
+        if filter.market_type:
+            query = query.filter(Position.market_type == filter.market_type)
+        
+        if filter.position_side:
+            query = query.filter(Position.position_side == filter.position_side)
+        
         if filter.status:
             query = query.filter(Position.status == filter.status)
         
@@ -179,6 +188,8 @@ class PositionRepository:
         
         if filter.has_position is True:
             query = query.filter(Position.quantity > 0)
+        elif filter.has_position is False:
+            query = query.filter(Position.quantity == 0)
         
         return query.count()
     

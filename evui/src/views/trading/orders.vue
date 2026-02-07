@@ -86,8 +86,8 @@
         :header-cell-style="{background:'#fafafa'}">
         <el-table-column prop="order_id" label="订单ID" width="140">
           <template slot-scope="{row}">
-            <el-tooltip :content="row.order_id" placement="top">
-              <span class="id-text copyable" @click="copyId(row.order_id)">{{ truncateId(row.order_id) }}</span>
+            <el-tooltip content="点击查看关联成交" placement="top">
+              <span class="id-text copyable" @click="goToFills(row.order_id)">{{ truncateId(row.order_id) }}</span>
             </el-tooltip>
           </template>
         </el-table-column>
@@ -226,12 +226,7 @@ export default {
       return Array.from(set).sort()
     },
     filteredList() {
-      return this.list.filter(r => {
-        if (this.where.exchange) {
-          if ((r.exchange || '').toLowerCase() !== this.where.exchange.toLowerCase()) return false
-        }
-        return true
-      })
+      return this.list
     },
     stats() {
       const s = { filled: 0, cancelled: 0, pending: 0 }
@@ -311,6 +306,9 @@ export default {
       const m = { SL: '止损', TP: '止盈', SIGNAL: '信号平仓', MANUAL: '手动平仓', LIQUIDATION: '强平' }
       return m[(r || '').toUpperCase()] || r
     },
+    goToFills(orderId) {
+      this.$router.push({ path: '/trading/fills', query: { order_id: orderId } })
+    },
     onSearch() {
       this.currentPage = 1
       this.fetchData()
@@ -337,6 +335,7 @@ export default {
         if (this.where.status) params.status = this.where.status
         if (this.where.side) params.side = this.where.side
         if (this.where.trade_type) params.trade_type = this.where.trade_type
+        if (this.where.exchange) params.exchange = this.where.exchange
         if (this.where.dateRange && this.where.dateRange.length === 2) {
           params.start_time = this.where.dateRange[0] + 'T00:00:00'
           params.end_time = this.where.dateRange[1] + 'T23:59:59'

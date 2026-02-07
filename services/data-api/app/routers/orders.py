@@ -3,7 +3,8 @@ Data API - 订单与成交查询
 
 GET /api/orders
 GET /api/fills
-POST /api/manual-order -> 占位（返回 501，实际下单需 execution-node 等接入）
+POST /api/manual-order   -> 手动下单（代理到 signal-monitor）
+POST /api/close-position -> 手动平仓（代理到 signal-monitor）
 """
 
 import logging
@@ -17,7 +18,7 @@ from pydantic import BaseModel
 from libs.order_trade import OrderTradeService
 from libs.order_trade.contracts import OrderFilter, FillFilter
 
-from ..deps import get_db, get_tenant_id, get_account_id_optional
+from ..deps import get_db, get_tenant_id, get_account_id_optional, get_current_admin
 from ..serializers import dto_to_dict
 from ..utils import parse_datetime
 
@@ -104,7 +105,7 @@ def list_fills(
 
 
 class ManualOrderBody(BaseModel):
-    """手动下单请求体（占位，实际由 execution-node 等实现）"""
+    """手动下单请求体"""
     exchange: Optional[str] = None
     market_type: Optional[str] = None
     symbol: str = ""
@@ -112,14 +113,69 @@ class ManualOrderBody(BaseModel):
     order_type: str = "market"
     amount: Optional[float] = None
     price: Optional[float] = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    strategy: Optional[str] = None
+
+
+class ClosePositionBody(BaseModel):
+    """手动平仓请求体"""
+    symbol: str
+    account_id: Optional[int] = None
 
 
 @router.post("/manual-order")
-def manual_order_placeholder(
-    _body: ManualOrderBody,
-) -> None:
-    """占位：手动下单接口尚未在 data-api 实现，请通过 execution-node 或后续接入。返回 501 避免前端 404。"""
-    raise HTTPException(
-        status_code=501,
-        detail="手动下单接口尚未实现，请通过 execution-node 或运维配置接入后再使用。",
-    )
+def manual_order(
+    body: ManualOrderBody,
+    _admin: dict = Depends(get_current_admin),
+):
+    """手动下单 — 代理到 signal-monitor /api/trading/execute"""
+    import httpx
+    from libs.core import get_config
+    cfg = get_config()
+    sm_url = cfg.get_str("signal_monitor_url", "http://127.0.0.1:8020").rstrip("/")
+
+    payload = {
+        "symbol": body.symbol,
+        "side": body.side.upper(),
+        "entry_price": body.price or 0,
+        "stop_loss": body.stop_loss or 0,
+        "take_profit": body.take_profit or 0,
+        "confidence": 100,
+    }
+    if body.strategy:
+        payload["strategy"] = body.strategy
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            r = client.post(f"{sm_url}/api/trading/execute", json=payload)
+            r.raise_for_status()
+            return r.json()
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="无法连接 signal-monitor 服务，请确认已启动")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"下单失败: {str(e)}")
+
+
+@router.post("/close-position")
+def close_position(
+    body: ClosePositionBody,
+    _admin: dict = Depends(get_current_admin),
+):
+    """手动平仓 — 代理到 signal-monitor /api/trading/close"""
+    import httpx
+    from libs.core import get_config
+    cfg = get_config()
+    sm_url = cfg.get_str("signal_monitor_url", "http://127.0.0.1:8020").rstrip("/")
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            r = client.post(f"{sm_url}/api/trading/close", json={"symbol": body.symbol})
+            r.raise_for_status()
+            return r.json()
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="无法连接 signal-monitor 服务")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"平仓失败: {str(e)}")

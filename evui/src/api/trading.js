@@ -3,8 +3,8 @@
  */
 import axios from 'axios'
 
-// 默认租户和账户（后续可通过全局设置更改）
-let defaultParams = {tenant_id: 1}
+// 默认租户（从 localStorage 获取，fallback 为 1）
+let defaultParams = {tenant_id: parseInt(localStorage.getItem('ironbull_tenant_id')) || 1}
 
 export function setDefaultTenant(tenantId, accountId) {
   defaultParams = {tenant_id: tenantId}
@@ -33,4 +33,12 @@ export function getAccounts(params = {}) {
 
 export function getTransactions(params = {}) {
   return axios.get('/transactions', {params: withDefaults({limit: 50, ...params})})
+}
+
+export function submitManualOrder(data) {
+  return axios.post('/manual-order', data)
+}
+
+export function closePosition(data) {
+  return axios.post('/close-position', data)
 }

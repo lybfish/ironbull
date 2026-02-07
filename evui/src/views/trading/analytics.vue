@@ -60,6 +60,25 @@
         </el-col>
       </el-row>
 
+      <!-- 权益曲线图表 -->
+      <el-card shadow="never" style="margin-top: 16px" v-loading="curveLoading">
+        <div slot="header">
+          <span>权益曲线</span>
+          <el-date-picker
+            v-model="curveDateRange"
+            type="daterange"
+            range-separator="至"
+            start-placeholder="开始"
+            end-placeholder="结束"
+            value-format="yyyy-MM-dd"
+            size="mini"
+            style="margin-left: 16px; width: 260px"
+            @change="fetchEquityCurve"/>
+        </div>
+        <div ref="equityChart" style="width: 100%; height: 320px"></div>
+        <el-empty v-if="!curveLoading && equityCurve.length === 0" description="暂无净值数据，请确认日期范围"/>
+      </el-card>
+
       <!-- 绩效汇总卡片 -->
       <el-card shadow="never" style="margin-top: 16px" v-loading="loading">
         <div slot="header">绩效汇总</div>
@@ -153,6 +172,12 @@
 </template>
 
 <script>
+import * as echarts from 'echarts/lib/echarts'
+import 'echarts/lib/chart/line'
+import 'echarts/lib/component/tooltip'
+import 'echarts/lib/component/grid'
+import 'echarts/lib/component/dataZoom'
+
 import {getPerformance, getRisk, getStatistics} from '@/api/analytics'
 import {getExchangeAccounts} from '@/api/node'
 
@@ -166,12 +191,29 @@ export default {
       loading: false,
       riskLoading: false,
       statsLoading: false,
+      curveLoading: false,
       performanceData: {},
       riskData: {},
-      statsList: []
+      statsList: [],
+      equityCurve: [],
+      curveDateRange: null,
+      chartInstance: null
+    }
+  },
+  beforeDestroy() {
+    // 移除窗口 resize 监听
+    window.removeEventListener('resize', this._handleResize)
+    if (this.chartInstance) {
+      this.chartInstance.dispose()
+      this.chartInstance = null
     }
   },
   mounted() {
+    // 监听窗口 resize，自动调整图表尺寸
+    this._handleResize = () => {
+      if (this.chartInstance) this.chartInstance.resize()
+    }
+    window.addEventListener('resize', this._handleResize)
     this.fetchAccounts()
   },
   methods: {
@@ -218,6 +260,7 @@ export default {
       this.fetchPerformance()
       this.fetchRisk()
       this.fetchStatistics()
+      this.fetchEquityCurve()
     },
     async fetchPerformance() {
       if (!this.accountId) return
@@ -228,6 +271,7 @@ export default {
           this.performanceData = res.data.data.summary || {}
         }
       } catch (e) {
+        this.$message.error('获取绩效数据失败')
         console.error('获取绩效数据失败:', e)
       } finally {
         this.loading = false
@@ -242,6 +286,7 @@ export default {
           this.riskData = res.data.data || {}
         }
       } catch (e) {
+        this.$message.error('获取风险数据失败')
         console.error('获取风险数据失败:', e)
       } finally {
         this.riskLoading = false
@@ -256,10 +301,71 @@ export default {
           this.statsList = res.data.data || []
         }
       } catch (e) {
+        this.$message.error('获取统计数据失败')
         console.error('获取统计数据失败:', e)
       } finally {
         this.statsLoading = false
       }
+    },
+    async fetchEquityCurve() {
+      if (!this.accountId) return
+      this.curveLoading = true
+      try {
+        const params = {account_id: this.accountId}
+        if (this.curveDateRange && this.curveDateRange.length === 2) {
+          params.start_date = this.curveDateRange[0]
+          params.end_date = this.curveDateRange[1]
+        } else {
+          // 默认最近30天
+          const end = new Date()
+          const start = new Date(end.getTime() - 30 * 86400000)
+          const fmt = d => d.toISOString().slice(0, 10)
+          params.start_date = fmt(start)
+          params.end_date = fmt(end)
+        }
+        const res = await getPerformance(params)
+        if (res.data.success && res.data.data && res.data.data.equity_curve) {
+          const curve = res.data.data.equity_curve
+          this.equityCurve = Array.isArray(curve) ? curve : []
+        } else {
+          this.equityCurve = []
+        }
+        this.$nextTick(() => this.renderChart())
+      } catch (e) {
+        this.equityCurve = []
+      } finally {
+        this.curveLoading = false
+      }
+    },
+    renderChart() {
+      if (!this.$refs.equityChart) return
+      if (this.equityCurve.length === 0) {
+        if (this.chartInstance) { this.chartInstance.clear() }
+        return
+      }
+      if (!this.chartInstance) {
+        this.chartInstance = echarts.init(this.$refs.equityChart)
+      }
+      const dates = this.equityCurve.map(p => p.date || p.snapshot_date || '')
+      const equities = this.equityCurve.map(p => Number(p.equity || p.nav || p.value || 0))
+      this.chartInstance.setOption({
+        tooltip: { trigger: 'axis', formatter: params => {
+          const p = params[0]
+          return `${p.axisValue}<br/>权益: <b>${Number(p.value).toFixed(2)}</b> USDT`
+        }},
+        grid: { left: 60, right: 20, top: 20, bottom: 60 },
+        xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 11 } },
+        yAxis: { type: 'value', axisLabel: { formatter: v => v.toFixed(0) } },
+        dataZoom: [{ type: 'inside', start: 0, end: 100 }, { type: 'slider', start: 0, end: 100, height: 20, bottom: 5 }],
+        series: [{
+          type: 'line', data: equities, smooth: true, symbol: 'none',
+          lineStyle: { width: 2, color: '#409EFF' },
+          areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(64,158,255,0.3)' },
+            { offset: 1, color: 'rgba(64,158,255,0.02)' }
+          ])}
+        }]
+      })
     }
   }
 }

@@ -71,12 +71,26 @@
             </el-form-item>
           </el-col>
           <el-col :lg="6" :md="12">
-            <el-form-item label="结算批次:">
+            <el-form-item label="租户ID:">
               <el-input
-                v-model="query.settle_batch"
-                placeholder="请输入结算批次"
+                v-model="query.tenant_id"
+                placeholder="请输入租户ID"
                 clearable
                 size="small" />
+            </el-form-item>
+          </el-col>
+          <el-col :lg="12" :md="12">
+            <el-form-item label="日期范围:">
+              <el-date-picker
+                v-model="dateRange"
+                type="daterange"
+                range-separator="至"
+                start-placeholder="开始日期"
+                end-placeholder="结束日期"
+                value-format="yyyy-MM-dd"
+                size="small"
+                style="width: 100%"
+                @change="handleSearch" />
             </el-form-item>
           </el-col>
           <el-col :lg="6" :md="12">
@@ -94,6 +108,15 @@
                 size="small"
                 @click="handleReset">
                 重置
+              </el-button>
+              <el-button
+                icon="el-icon-download"
+                size="small"
+                type="success"
+                plain
+                :disabled="list.length === 0"
+                @click="exportCSV">
+                导出CSV
               </el-button>
             </div>
           </el-col>
@@ -198,37 +221,16 @@ export default {
       query: {
         user_id: '',
         reward_type: '',
-        settle_batch: '',
+        tenant_id: '',
         page: 1,
         page_size: 20
-      }
+      },
+      dateRange: null,
+      summary: { totalRecords: 0, totalAmount: 0, averageRate: 0 }
     }
   },
   computed: {
-    summary() {
-      const totalRecords = this.total || this.list.length
-      let totalAmount = 0
-      let totalRate = 0
-      let rateCount = 0
-
-      this.list.forEach(item => {
-        const amount = Number(item.amount) || 0
-        const rate = Number(item.rate) || 0
-        totalAmount += amount
-        if (rate > 0) {
-          totalRate += rate
-          rateCount++
-        }
-      })
-
-      const averageRate = rateCount > 0 ? totalRate / rateCount : 0
-
-      return {
-        totalRecords,
-        totalAmount,
-        averageRate
-      }
-    }
+    // summary 从服务端获取
   },
   mounted() {
     this.fetchData()
@@ -287,6 +289,20 @@ export default {
       }
       return val
     },
+    /** 导出CSV */
+    exportCSV() {
+      const headers = ['ID', '获奖用户', '来源用户', '奖励类型', '金额', '比例', '结算批次', '备注', '创建时间']
+      const rows = this.list.map(r => [
+        r.id, r.user_email || r.user_id, r.source_email || r.source_user_id || '',
+        this.getRewardTypeName(r.reward_type), r.amount, r.rate, r.settle_batch || '', r.remark || '', r.created_at || ''
+      ])
+      const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n')
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = `奖励记录_${new Date().toISOString().slice(0,10)}.csv`
+      a.click(); URL.revokeObjectURL(url)
+    },
     /** 搜索 */
     handleSearch() {
       this.query.page = 1
@@ -297,10 +313,11 @@ export default {
       this.query = {
         user_id: '',
         reward_type: '',
-        settle_batch: '',
+        tenant_id: '',
         page: 1,
         page_size: 20
       }
+      this.dateRange = null
       this.fetchData()
     },
     /** 获取列表数据 */
@@ -317,8 +334,8 @@ export default {
         if (this.query.reward_type) {
           params.reward_type = this.query.reward_type
         }
-        if (this.query.settle_batch) {
-          params.settle_batch = this.query.settle_batch
+        if (this.query.tenant_id) {
+          params.tenant_id = this.query.tenant_id
         }
 
         const res = await getRewards(params)
@@ -327,8 +344,15 @@ export default {
         if (resData && resData.success && Array.isArray(resData.data)) {
           this.list = resData.data
           this.total = resData.total || resData.data.length
+          // 使用服务端统计
+          if (resData.stats) {
+            this.summary = {
+              totalRecords: resData.stats.total_records || this.total,
+              totalAmount: resData.stats.total_amount || 0,
+              averageRate: resData.stats.avg_rate || 0
+            }
+          }
         } else if (Array.isArray(resData)) {
-          // 兼容旧格式
           this.list = resData
           this.total = resData.length
         } else {

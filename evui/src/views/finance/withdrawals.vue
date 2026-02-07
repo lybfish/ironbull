@@ -68,6 +68,13 @@
           <el-option label="已拒绝" :value="2" />
           <el-option label="已完成" :value="3" />
         </el-select>
+        <el-input
+          v-model="query.user_id"
+          placeholder="用户ID"
+          clearable
+          size="small"
+          style="width: 100px; margin-left: 8px"
+          @clear="handleSearch" />
         <el-date-picker
           v-model="dateRange"
           type="daterange"
@@ -92,6 +99,15 @@
           @click="handleReset">
           重置
         </el-button>
+        <el-button
+          size="small"
+          icon="el-icon-download"
+          type="success"
+          plain
+          :disabled="list.length === 0"
+          @click="exportCSV">
+          导出CSV
+        </el-button>
       </div>
 
       <el-table
@@ -103,7 +119,13 @@
         size="small"
         row-key="id">
         <el-table-column prop="id" label="ID" width="70" align="center" />
-        <el-table-column prop="user_id" label="用户ID" width="90" align="center" />
+        <el-table-column prop="user_id" label="用户ID" width="80" align="center" />
+        <el-table-column label="用户邮箱" width="180">
+          <template slot-scope="{ row }">
+            <span v-if="row.user_email" style="font-size: 12px">{{ row.user_email }}</span>
+            <span v-else style="color: #C0C4CC">-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="提现金额" width="120" align="right">
           <template slot-scope="{ row }">
             <span style="font-weight: 600">${{ formatMoney(row.amount) }}</span>
@@ -302,7 +324,8 @@
         border
         size="small">
         <el-descriptions-item label="提现ID">{{ detailDialog.row.id }}</el-descriptions-item>
-        <el-descriptions-item label="用户ID">{{ detailDialog.row.user_id }}</el-descriptions-item>
+          <el-descriptions-item label="用户ID">{{ detailDialog.row.user_id }}</el-descriptions-item>
+          <el-descriptions-item label="用户邮箱" :span="2">{{ detailDialog.row.user_email || '-' }}</el-descriptions-item>
         <el-descriptions-item label="提现金额">${{ formatMoney(detailDialog.row.amount) }}</el-descriptions-item>
         <el-descriptions-item label="服务费">${{ formatMoney(detailDialog.row.fee) }}</el-descriptions-item>
         <el-descriptions-item label="实际到账">${{ formatMoney(detailDialog.row.actual_amount) }}</el-descriptions-item>
@@ -354,7 +377,8 @@ export default {
       query: {
         page: 1,
         page_size: 20,
-        status: ''
+        status: '',
+        user_id: ''
       },
       dateRange: null,
       // 审核通过弹窗
@@ -381,23 +405,18 @@ export default {
       detailDialog: {
         visible: false,
         row: null
+      },
+      // 服务端统计
+      stats: {
+        pendingCount: 0,
+        approvedCount: 0,
+        totalAmount: 0,
+        totalFee: 0
       }
     }
   },
   computed: {
-    stats() {
-      let pendingCount = 0
-      let approvedCount = 0
-      let totalAmount = 0
-      let totalFee = 0
-      this.list.forEach(item => {
-        if (item.status === 0) pendingCount++
-        if (item.status === 1) approvedCount++
-        totalAmount += Number(item.amount) || 0
-        totalFee += Number(item.fee) || 0
-      })
-      return { pendingCount, approvedCount, totalAmount, totalFee }
-    }
+    // stats 从服务端获取，不依赖当前页数据
   },
   mounted() {
     this.fetchData()
@@ -434,7 +453,7 @@ export default {
     },
     /** 重置 */
     handleReset() {
-      this.query = { page: 1, page_size: 20, status: '' }
+      this.query = { page: 1, page_size: 20, status: '', user_id: '' }
       this.dateRange = null
       this.fetchData()
     },
@@ -449,6 +468,9 @@ export default {
         if (this.query.status !== '' && this.query.status !== null) {
           params.status = this.query.status
         }
+        if (this.query.user_id) {
+          params.user_id = this.query.user_id
+        }
         if (this.dateRange && this.dateRange.length === 2) {
           params.start_date = this.dateRange[0]
           params.end_date = this.dateRange[1]
@@ -461,6 +483,16 @@ export default {
         } else {
           this.list = []
           this.total = 0
+        }
+        // 使用服务端统计
+        const serverStats = res.data.stats
+        if (serverStats) {
+          this.stats = {
+            pendingCount: serverStats.pending || 0,
+            approvedCount: serverStats.approved || 0,
+            totalAmount: serverStats.total_amount || 0,
+            totalFee: serverStats.total_fee || 0
+          }
         }
       } catch (e) {
         this.$message.error('获取提现记录失败')
@@ -527,6 +559,20 @@ export default {
       } finally {
         this.completeDialog.loading = false
       }
+    },
+    /** 导出CSV */
+    exportCSV() {
+      const headers = ['ID', '用户ID', '用户邮箱', '金额', '服务费', '实际到账', '钱包地址', '网络', '状态', '申请时间']
+      const rows = this.list.map(r => [
+        r.id, r.user_id, r.user_email || '', r.amount, r.fee, r.actual_amount,
+        r.wallet_address, r.wallet_network, this.statusLabel(r.status), r.created_at || ''
+      ])
+      const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n')
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = `提现记录_${new Date().toISOString().slice(0,10)}.csv`
+      a.click(); URL.revokeObjectURL(url)
     },
     /** 打开详情弹窗 */
     openDetailDialog(row) {

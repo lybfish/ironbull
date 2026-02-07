@@ -96,6 +96,8 @@ class Order(Base):
         Index("idx_order_tenant_status", "tenant_id", "status"),
         Index("idx_order_symbol_time", "symbol", "created_at"),
         Index("idx_order_signal", "signal_id"),
+        Index("idx_order_tenant_account_status", "tenant_id", "account_id", "status"),  # 常用复合查询
+        Index("idx_order_tenant_time", "tenant_id", "created_at"),                      # 时间范围查询
         {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
     )
     
