@@ -404,10 +404,16 @@ export default {
         }
         if (monitorRes.status === 'fulfilled' && monitorRes.value && monitorRes.value.data) {
           const m = monitorRes.value.data.data || monitorRes.value.data
+          // services 是数组 [{name, healthy, ...}]，按 name 查找
+          const svcList = m.services || []
+          const findSvc = (name) => {
+            const s = svcList.find(x => x.name === name)
+            return s ? !!s.healthy : false
+          }
           this.services = {
-            data_api: !!m.data_api,
-            signal_monitor: !!m.signal_monitor,
-            database: !!m.database
+            data_api: findSvc('data-api'),
+            signal_monitor: findSvc('signal-monitor'),
+            database: !!(m.db && m.db.mysql_ok)
           }
         }
       } catch (e) {
