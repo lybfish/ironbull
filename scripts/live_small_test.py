@@ -173,13 +173,14 @@ async def _run(
                 # 平多：SELL + positionSide=LONG；平空：BUY + positionSide=SHORT
                 pos_side = "LONG" if side_pos == "long" else "SHORT"
                 print("[close] 市价平仓 %s 数量=%.6f (原 %s, positionSide=%s)" % (symbol, qty, side_pos, pos_side))
+                # 平仓：传 position_side，reduceOnly 由 create_order 按交易所规则处理（Binance 双向不传）
                 res = await trader.create_order(
                     symbol=symbol,
                     side=close_side,
                     order_type=OrderType.MARKET,
                     quantity=qty,
                     position_side=pos_side,
-                    reduceOnly=True,
+                    trade_type="CLOSE",
                 )
                 print("    结果: status=%s filled_qty=%s exchange_order_id=%s" % (res.status.value, res.filled_quantity, res.exchange_order_id))
                 if res.error_message:

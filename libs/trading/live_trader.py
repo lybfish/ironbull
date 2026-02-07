@@ -683,10 +683,10 @@ class LiveTrader(Trader):
                 if leverage and leverage > 0:
                     await self.ensure_leverage(symbol, leverage)
             
-            # 如果启用 OrderTradeService，先创建订单记录
+            # 如果启用结算/订单服务，先创建订单记录（订单列表、成交记录依赖此）
             # 注意：quantity 可能是合约张数（Gate/OKX），DB 应存币数量
             coin_quantity = self._contracts_to_coins(quantity, symbol)
-            if self._order_trade_service and self._tenant_id and self._account_id:
+            if (self._settlement_service or self._order_trade_service) and self._tenant_id and self._account_id:
                 db_order_id = await self._create_order_record(
                     symbol=symbol,
                     side=side,
@@ -717,7 +717,7 @@ class LiveTrader(Trader):
             if self.market_type == "future" and (trade_type or "OPEN") == "CLOSE":
                 if self.exchange_name == "binanceusdm" and pos_side:
                     # Binance Hedge Mode: API 禁止传 reduceOnly，用 positionSide + side 已能标识平仓
-                    pass
+                    params.pop("reduceOnly", None)  # 调用方可能从 kwargs 带入，必须移除
                 else:
                     params["reduceOnly"] = True
             # Binance 非平仓时若误带了 reduceOnly 则移除
@@ -896,44 +896,44 @@ class LiveTrader(Trader):
             
         except ccxt.InsufficientFunds as e:
             logger.error("insufficient funds", order_id=order_id, error=str(e))
-            if self._order_trade_service and db_order_id:
+            if (self._settlement_service or self._order_trade_service) and db_order_id:
                 await self._fail_order_record(db_order_id, "INSUFFICIENT_FUNDS", str(e))
             return self._error_result(order_id, symbol, side, order_type, quantity, price, "INSUFFICIENT_FUNDS", str(e))
         
         except ccxt.InvalidOrder as e:
             logger.error("invalid order", order_id=order_id, error=str(e))
-            if self._order_trade_service and db_order_id:
+            if (self._settlement_service or self._order_trade_service) and db_order_id:
                 await self._fail_order_record(db_order_id, "INVALID_ORDER", str(e))
             return self._error_result(order_id, symbol, side, order_type, quantity, price, "INVALID_ORDER", str(e))
         
         except ccxt.OrderNotFound as e:
             logger.error("order not found", order_id=order_id, error=str(e))
-            if self._order_trade_service and db_order_id:
+            if (self._settlement_service or self._order_trade_service) and db_order_id:
                 await self._fail_order_record(db_order_id, "ORDER_NOT_FOUND", str(e))
             return self._error_result(order_id, symbol, side, order_type, quantity, price, "ORDER_NOT_FOUND", str(e))
         
         except RuntimeError as e:
             # ensure_isolated_margin_mode 等前置检查抛出的逐仓设置失败
             logger.error("pre-order check failed (e.g. margin mode)", order_id=order_id, error=str(e))
-            if self._order_trade_service and db_order_id:
+            if (self._settlement_service or self._order_trade_service) and db_order_id:
                 await self._fail_order_record(db_order_id, "MARGIN_MODE_ERROR", str(e))
             return self._error_result(order_id, symbol, side, order_type, quantity, price, "MARGIN_MODE_ERROR", str(e))
         
         except ccxt.NetworkError as e:
             logger.error("network error", order_id=order_id, error=str(e))
-            if self._order_trade_service and db_order_id:
+            if (self._settlement_service or self._order_trade_service) and db_order_id:
                 await self._fail_order_record(db_order_id, "NETWORK_ERROR", str(e))
             return self._error_result(order_id, symbol, side, order_type, quantity, price, "NETWORK_ERROR", str(e))
         
         except ccxt.ExchangeError as e:
             logger.error("exchange error", order_id=order_id, error=str(e))
-            if self._order_trade_service and db_order_id:
+            if (self._settlement_service or self._order_trade_service) and db_order_id:
                 await self._fail_order_record(db_order_id, "EXCHANGE_ERROR", str(e))
             return self._error_result(order_id, symbol, side, order_type, quantity, price, "EXCHANGE_ERROR", str(e))
         
         except Exception as e:
             logger.error("unexpected error", order_id=order_id, error=str(e))
-            if self._order_trade_service and db_order_id:
+            if (self._settlement_service or self._order_trade_service) and db_order_id:
                 await self._fail_order_record(db_order_id, "UNKNOWN_ERROR", str(e))
             return self._error_result(order_id, symbol, side, order_type, quantity, price, "UNKNOWN_ERROR", str(e))
     
