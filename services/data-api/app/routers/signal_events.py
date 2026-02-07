@@ -1,13 +1,14 @@
 """
 Data API - 信号事件历史查询（仅管理员可访问）
 
-GET /api/signal-events -> 信号事件列表
+GET /api/signal-events -> 信号事件列表（含服务端统计）
 """
 
 import json
 from typing import Dict, Any, Optional
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from libs.facts.models import SignalEvent
@@ -53,7 +54,7 @@ def list_signal_events(
     _admin: Dict[str, Any] = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    """信号事件列表"""
+    """信号事件列表（含全局统计）"""
     query = db.query(SignalEvent).order_by(SignalEvent.id.desc())
 
     if signal_id:
@@ -72,10 +73,28 @@ def list_signal_events(
     total = query.count()
     items = query.offset((page - 1) * page_size).limit(page_size).all()
 
+    # 服务端统计（全局，不受筛选影响）
+    stats_rows = db.query(
+        SignalEvent.status,
+        func.count(SignalEvent.id),
+    ).group_by(SignalEvent.status).all()
+
+    stats_map = {s: c for s, c in stats_rows}
+    global_total = sum(stats_map.values())
+    executed = stats_map.get("executed", 0)
+    failed = stats_map.get("failed", 0) + stats_map.get("rejected", 0)
+    pending = global_total - executed - failed
+
     return {
         "success": True,
         "data": [_event_dict(e) for e in items],
         "total": total,
         "page": page,
         "page_size": page_size,
+        "stats": {
+            "total": global_total,
+            "executed": executed,
+            "failed": failed,
+            "pending": pending,
+        },
     }

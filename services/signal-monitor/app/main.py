@@ -460,6 +460,9 @@ def monitor_loop():
                                                 "action": dispatch_result.get("action"),
                                                 "targets": _dispatch_targets,
                                                 "success_count": _dispatch_ok,
+                                                "strategy": code,
+                                                "symbol": symbol,
+                                                "side": sig.get("side"),
                                             },
                                             error_message=dispatch_result.get("message") if not _dispatch_success else None,
                                         )
@@ -469,6 +472,11 @@ def monitor_loop():
                                             signal_id=sig["signal_id"],
                                             event_type="FAILED",
                                             status="failed",
+                                            detail={
+                                                "strategy": code,
+                                                "symbol": symbol,
+                                                "side": sig.get("side"),
+                                            },
                                             error_message=str(e),
                                         )
 
@@ -1220,6 +1228,7 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
                     source_service="signal-monitor",
                     account_id=r.get("account_id"),
                     detail={
+                        "strategy": signal.get("strategy"),
                         "order_id": r.get("order_id"),
                         "filled_quantity": r.get("filled_quantity"),
                         "filled_price": r.get("filled_price"),

@@ -3,16 +3,16 @@
     <!-- 统计卡片 -->
     <el-row :gutter="15" style="margin-bottom: 15px">
       <el-col :span="6">
-        <stat-card title="信号总数" :value="total" icon="el-icon-s-opportunity" color="primary" :loading="loading"/>
+        <stat-card title="信号总数" :value="serverStats.total" icon="el-icon-s-opportunity" color="primary" :loading="loading"/>
       </el-col>
       <el-col :span="6">
-        <stat-card title="已执行" :value="stats.executed" icon="el-icon-circle-check" color="success" :loading="loading"/>
+        <stat-card title="已执行" :value="serverStats.executed" icon="el-icon-circle-check" color="success" :loading="loading"/>
       </el-col>
       <el-col :span="6">
-        <stat-card title="已拒绝" :value="stats.rejected" icon="el-icon-circle-close" color="danger" :loading="loading"/>
+        <stat-card title="失败/拒绝" :value="serverStats.failed" icon="el-icon-circle-close" color="danger" :loading="loading"/>
       </el-col>
       <el-col :span="6">
-        <stat-card title="待处理/其他" :value="stats.pending" icon="el-icon-time" color="warning" :loading="loading"/>
+        <stat-card title="待处理/其他" :value="serverStats.pending" icon="el-icon-time" color="warning" :loading="loading"/>
       </el-col>
     </el-row>
 
@@ -80,54 +80,101 @@
         border
         style="width:100%; margin-top:12px"
         size="small"
-        :header-cell-style="{background:'#fafafa'}">
-        <el-table-column prop="signal_id" label="信号ID" width="150" show-overflow-tooltip>
+        :header-cell-style="{background:'#fafafa'}"
+        :row-class-name="tableRowClassName"
+        @row-click="onRowClick">
+
+        <el-table-column prop="signal_id" label="信号ID" width="165" show-overflow-tooltip>
           <template slot-scope="{row}">
             <span class="id-text">{{ row.signal_id }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="event_type" label="事件类型" width="130" align="center">
+
+        <el-table-column label="策略" width="150" show-overflow-tooltip>
+          <template slot-scope="{row}">
+            <span v-if="getDetail(row, 'strategy')" style="font-weight:500">{{ getDetail(row, 'strategy') }}</span>
+            <span v-else-if="getDetail(row, 'strategy_code')" style="font-weight:500">{{ getDetail(row, 'strategy_code') }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="币对" width="110" align="center">
+          <template slot-scope="{row}">
+            <span v-if="getDetail(row, 'symbol')" style="font-weight:600;color:#303133">{{ getDetail(row, 'symbol') }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="方向" width="70" align="center">
+          <template slot-scope="{row}">
+            <el-tag v-if="getDetail(row, 'side')" :type="getDetail(row, 'side') === 'BUY' ? 'success' : 'danger'" size="mini" effect="dark">{{ getDetail(row, 'side') }}</el-tag>
+            <el-tag v-else-if="getDetail(row, 'action')" :type="getDetail(row, 'action') === 'BUY' ? 'success' : 'danger'" size="mini" effect="dark">{{ getDetail(row, 'action') }}</el-tag>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="event_type" label="事件" width="90" align="center">
           <template slot-scope="{row}">
             <el-tag :type="eventTypeTag(row.event_type)" size="mini">{{ eventTypeLabel(row.event_type) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="90" align="center">
+
+        <el-table-column prop="status" label="状态" width="80" align="center">
           <template slot-scope="{row}">
             <el-tag :type="statusTag(row.status)" size="mini" effect="dark">{{ statusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="source_service" label="来源服务" width="140" align="center">
+
+        <el-table-column label="价格信息" width="200">
           <template slot-scope="{row}">
-            <span class="text-muted">{{ row.source_service }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="账户" width="70" align="center">
-          <template slot-scope="{row}">
-            <span v-if="row.account_id">#{{ row.account_id }}</span>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="详情" min-width="200" show-overflow-tooltip>
-          <template slot-scope="{row}">
-            <div v-if="row.detail && typeof row.detail === 'object'">
-              <span v-if="row.detail.symbol" style="font-weight:600;margin-right:6px">{{ row.detail.symbol }}</span>
-              <span v-if="row.detail.action">
-                <el-tag :type="row.detail.action === 'BUY' ? 'success' : 'danger'" size="mini">{{ row.detail.action }}</el-tag>
-              </span>
-              <span v-if="row.detail.price" style="margin-left:6px">@ {{ row.detail.price }}</span>
-              <span v-if="row.detail.strategy_code" style="margin-left:6px;color:#909399">[{{ row.detail.strategy_code }}]</span>
+            <div v-if="row.event_type === 'CREATED'" class="price-info">
+              <span v-if="getDetail(row, 'entry_price')">入场: <b>{{ formatNum(getDetail(row, 'entry_price')) }}</b></span>
+              <span v-if="getDetail(row, 'stop_loss')" style="color:#F56C6C;margin-left:6px">SL: {{ formatNum(getDetail(row, 'stop_loss')) }}</span>
+              <span v-if="getDetail(row, 'take_profit')" style="color:#67C23A;margin-left:6px">TP: {{ formatNum(getDetail(row, 'take_profit')) }}</span>
             </div>
-            <span v-else-if="row.detail" class="text-muted">{{ typeof row.detail === 'string' ? row.detail : JSON.stringify(row.detail) }}</span>
+            <div v-else-if="row.event_type === 'EXECUTED'" class="price-info">
+              <span v-if="getDetail(row, 'filled_price')">成交: <b>{{ formatNum(getDetail(row, 'filled_price')) }}</b></span>
+              <span v-if="getDetail(row, 'filled_quantity')" style="margin-left:6px;color:#909399">数量: {{ formatNum(getDetail(row, 'filled_quantity')) }}</span>
+            </div>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="错误信息" width="150" show-overflow-tooltip>
+
+        <el-table-column label="目标/成功" width="90" align="center">
           <template slot-scope="{row}">
-            <span v-if="row.error_message" style="color:#F56C6C">{{ row.error_message }}</span>
+            <span v-if="getDetail(row, 'targets') != null">
+              <span :style="getDetail(row, 'success_count') > 0 ? 'color:#67C23A;font-weight:600' : 'color:#F56C6C;font-weight:600'">{{ getDetail(row, 'success_count') || 0 }}</span>
+              <span style="color:#C0C4CC"> / </span>
+              <span>{{ getDetail(row, 'targets') }}</span>
+            </span>
+            <span v-else-if="row.account_id">#{{ row.account_id }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="时间" width="170">
+
+        <el-table-column label="附加信息" min-width="180" show-overflow-tooltip>
+          <template slot-scope="{row}">
+            <!-- CREATED: 信号类型 + 置信度 + 周期 -->
+            <div v-if="row.event_type === 'CREATED'">
+              <el-tag v-if="getDetail(row, 'signal_type')" type="info" size="mini" style="margin-right:4px">{{ signalTypeLabel(getDetail(row, 'signal_type')) }}</el-tag>
+              <span v-if="getDetail(row, 'confidence')" style="color:#909399">置信度: {{ getDetail(row, 'confidence') }}%</span>
+              <span v-if="getDetail(row, 'timeframe')" style="color:#909399;margin-left:6px">{{ getDetail(row, 'timeframe') }}</span>
+            </div>
+            <!-- DISPATCHED: 动作描述 -->
+            <div v-else-if="row.event_type === 'DISPATCHED' || (row.event_type === 'FAILED' && getDetail(row, 'action'))">
+              <el-tag v-if="getDetail(row, 'action')" :type="actionTagType(getDetail(row, 'action'))" size="mini">{{ actionLabel(getDetail(row, 'action')) }}</el-tag>
+            </div>
+            <!-- EXECUTED: 订单号 -->
+            <div v-else-if="row.event_type === 'EXECUTED'">
+              <span v-if="getDetail(row, 'order_id')" class="id-text">订单: {{ getDetail(row, 'order_id') }}</span>
+            </div>
+            <!-- 错误信息 -->
+            <span v-if="row.error_message" style="color:#F56C6C;margin-left:4px">[{{ row.error_message }}]</span>
+            <span v-else-if="!row.event_type" class="text-muted">-</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="created_at" label="时间" width="160">
           <template slot-scope="{row}">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
       </el-table>
@@ -147,6 +194,58 @@
           @current-change="fetchData"/>
       </div>
     </el-card>
+
+    <!-- 详情弹窗 -->
+    <el-dialog :title="'信号详情 - ' + (detailRow.signal_id || '')" :visible.sync="detailVisible" width="680px" append-to-body>
+      <div v-if="detailRow.signal_id">
+        <el-descriptions :column="2" border size="small">
+          <el-descriptions-item label="信号ID" :span="2">
+            <span class="id-text">{{ detailRow.signal_id }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="事件类型">
+            <el-tag :type="eventTypeTag(detailRow.event_type)" size="mini">{{ eventTypeLabel(detailRow.event_type) }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <el-tag :type="statusTag(detailRow.status)" size="mini" effect="dark">{{ statusLabel(detailRow.status) }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="来源服务">{{ detailRow.source_service }}</el-descriptions-item>
+          <el-descriptions-item label="账户ID">{{ detailRow.account_id || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="时间" :span="2">{{ formatTime(detailRow.created_at) }}</el-descriptions-item>
+          <el-descriptions-item v-if="detailRow.error_message" label="错误信息" :span="2">
+            <span style="color:#F56C6C">{{ detailRow.error_message }}</span>
+          </el-descriptions-item>
+        </el-descriptions>
+        <div v-if="detailRow.detail && typeof detailRow.detail === 'object'" style="margin-top:16px">
+          <h4 style="margin-bottom:8px;color:#303133">事件详情</h4>
+          <el-descriptions :column="2" border size="small">
+            <el-descriptions-item v-for="(val, key) in detailRow.detail" :key="key" :label="detailKeyLabel(key)">
+              <span v-if="key === 'side' || key === 'action'">
+                <el-tag :type="val === 'BUY' ? 'success' : 'danger'" size="mini" effect="dark">{{ val }}</el-tag>
+              </span>
+              <span v-else-if="key === 'signal_type'">{{ signalTypeLabel(val) }}</span>
+              <span v-else-if="typeof val === 'number'">{{ formatNum(val) }}</span>
+              <span v-else>{{ val }}</span>
+            </el-descriptions-item>
+          </el-descriptions>
+        </div>
+        <!-- 同信号的事件时间线 -->
+        <div v-if="signalTimeline.length > 1" style="margin-top:16px">
+          <h4 style="margin-bottom:8px;color:#303133">信号生命周期</h4>
+          <el-timeline>
+            <el-timeline-item
+              v-for="(ev, idx) in signalTimeline" :key="idx"
+              :type="timelineType(ev.status)"
+              :timestamp="formatTime(ev.created_at)"
+              placement="top">
+              <span style="font-weight:500">{{ eventTypeLabel(ev.event_type) }}</span>
+              <span style="margin-left:6px;color:#909399">{{ statusLabel(ev.status) }}</span>
+              <span v-if="ev.account_id" style="margin-left:6px;color:#606266">#{{ ev.account_id }}</span>
+              <span v-if="ev.error_message" style="margin-left:6px;color:#F56C6C">{{ ev.error_message }}</span>
+            </el-timeline-item>
+          </el-timeline>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -168,31 +267,29 @@ export default {
         status: '',
         source_service: '',
         dateRange: null
-      }
-    }
-  },
-  computed: {
-    stats() {
-      const s = { executed: 0, rejected: 0, pending: 0 }
-      this.list.forEach(row => {
-        const st = (row.status || '').toLowerCase()
-        if (st === 'executed') s.executed++
-        else if (st === 'rejected' || st === 'failed') s.rejected++
-        else s.pending++
-      })
-      return s
+      },
+      serverStats: {
+        total: 0,
+        executed: 0,
+        failed: 0,
+        pending: 0
+      },
+      detailVisible: false,
+      detailRow: {},
+      signalTimeline: []
     }
   },
   mounted() {
     this.fetchData()
   },
   methods: {
+    // ── 标签/映射 ──
     eventTypeLabel(t) {
-      const m = { CREATED: '创建', RISK_CHECK: '风控检查', RISK_PASSED: '风控通过', RISK_REJECTED: '风控拒绝', DISPATCHED: '已分发', EXECUTED: '已执行', FAILED: '失败' }
+      const m = { CREATED: '信号创建', RISK_CHECK: '风控检查', RISK_PASSED: '风控通过', RISK_REJECTED: '风控拒绝', DISPATCHED: '已分发', EXECUTED: '已执行', FAILED: '失败' }
       return m[t] || t
     },
     eventTypeTag(t) {
-      const m = { CREATED: '', RISK_CHECK: 'info', RISK_PASSED: 'success', RISK_REJECTED: 'danger', DISPATCHED: 'warning', EXECUTED: 'success', FAILED: 'danger' }
+      const m = { CREATED: 'info', RISK_CHECK: 'info', RISK_PASSED: 'success', RISK_REJECTED: 'danger', DISPATCHED: 'warning', EXECUTED: 'success', FAILED: 'danger' }
       return m[t] || 'info'
     },
     statusLabel(s) {
@@ -203,6 +300,45 @@ export default {
       const m = { pending: 'warning', passed: 'success', rejected: 'danger', executing: 'warning', executed: 'success', failed: 'danger' }
       return m[s] || 'info'
     },
+    signalTypeLabel(t) {
+      const m = { OPEN: '开仓', CLOSE: '平仓', HEDGE: '对冲', REVERSE: '反转' }
+      return m[t] || t
+    },
+    actionLabel(a) {
+      const m = { no_bindings: '无绑定', no_strategy: '无策略', executed: '已执行', error: '执行错误' }
+      return m[a] || a
+    },
+    actionTagType(a) {
+      const m = { no_bindings: 'warning', no_strategy: 'danger', executed: 'success', error: 'danger' }
+      return m[a] || 'info'
+    },
+    timelineType(s) {
+      const m = { pending: 'warning', passed: 'success', rejected: 'danger', executing: 'warning', executed: 'success', failed: 'danger' }
+      return m[s] || 'info'
+    },
+    detailKeyLabel(key) {
+      const m = {
+        strategy: '策略', strategy_code: '策略代码', symbol: '币对', side: '方向', action: '动作',
+        signal_type: '信号类型', entry_price: '入场价格', stop_loss: '止损价', take_profit: '止盈价',
+        confidence: '置信度', timeframe: '时间周期', targets: '目标账户数', success_count: '成功数',
+        order_id: '订单号', filled_quantity: '成交数量', filled_price: '成交价格',
+      }
+      return m[key] || key
+    },
+
+    // ── 工具方法 ──
+    getDetail(row, key) {
+      if (!row.detail || typeof row.detail !== 'object') return null
+      return row.detail[key]
+    },
+    formatNum(v) {
+      if (v == null) return '-'
+      const n = Number(v)
+      if (isNaN(n)) return String(v)
+      if (n > 100) return n.toFixed(2)
+      if (n > 1) return n.toFixed(4)
+      return n.toFixed(6)
+    },
     formatTime(t) {
       if (!t) return '-'
       const d = new Date(t)
@@ -210,6 +346,29 @@ export default {
       const pad = n => String(n).padStart(2, '0')
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
     },
+    tableRowClassName({ row }) {
+      if (row.status === 'failed') return 'row-failed'
+      if (row.event_type === 'CREATED') return 'row-created'
+      return ''
+    },
+
+    // ── 行点击 → 显示详情 ──
+    async onRowClick(row) {
+      this.detailRow = row
+      this.signalTimeline = []
+      this.detailVisible = true
+      // 获取同 signal_id 的所有事件，展示生命周期
+      if (row.signal_id) {
+        try {
+          const res = await getSignalEvents({ signal_id: row.signal_id, page_size: 50 })
+          this.signalTimeline = (res.data.data || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+        } catch (e) {
+          // ignore
+        }
+      }
+    },
+
+    // ── 搜索/重置 ──
     onSearch() {
       this.currentPage = 1
       this.fetchData()
@@ -219,6 +378,8 @@ export default {
       this.currentPage = 1
       this.fetchData()
     },
+
+    // ── 数据获取 ──
     async fetchData() {
       this.loading = true
       try {
@@ -238,6 +399,21 @@ export default {
         const data = res.data
         this.list = data.data || []
         this.total = data.total != null ? data.total : this.list.length
+
+        // 服务端统计
+        if (data.stats) {
+          this.serverStats = data.stats
+        } else {
+          // 降级：从当前页数据计算
+          let executed = 0, failed = 0, pending = 0
+          this.list.forEach(row => {
+            const st = (row.status || '').toLowerCase()
+            if (st === 'executed') executed++
+            else if (st === 'rejected' || st === 'failed') failed++
+            else pending++
+          })
+          this.serverStats = { total: this.total, executed, failed, pending }
+        }
       } catch (e) {
         this.$message.error(e.response?.data?.detail || '获取信号事件失败')
         this.list = []
@@ -258,4 +434,10 @@ export default {
 .total-tip { color: #909399; font-size: 12px; }
 .id-text { font-family: 'Courier New', monospace; font-size: 12px; color: #606266; }
 .text-muted { color: #C0C4CC; }
+.price-info { font-size: 12px; line-height: 1.6; }
+.price-info b { color: #303133; }
+</style>
+<style>
+.el-table .row-failed { background-color: #FEF0F0 !important; }
+.el-table .row-created { background-color: #F0F9EB !important; }
 </style>
