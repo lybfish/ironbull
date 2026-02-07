@@ -76,7 +76,18 @@ else
 fi
 
 echo "[4/4] 重启服务..."
-run make restart
+# 若当前是 root 且项目目录属主非 root，则以属主用户执行 restart（避免 root 下无 uvicorn 等依赖）
+REPO_OWNER=""
+if command -v stat >/dev/null 2>&1; then
+    REPO_OWNER=$(stat -c '%U' "$ROOT" 2>/dev/null) || true
+fi
+if [ "$(id -u)" = "0" ] && [ -n "$REPO_OWNER" ] && [ "$REPO_OWNER" != "root" ]; then
+    [ -d "$ROOT/tmp" ] && run chown -R "$REPO_OWNER:$REPO_OWNER" "$ROOT/tmp" 2>/dev/null || true
+    echo "  以用户 $REPO_OWNER 执行 restart（当前为 root，依赖在该用户下）"
+    run sudo -u "$REPO_OWNER" make -C "$ROOT" restart
+else
+    run make restart
+fi
 echo ""
 
 echo "=== 发布完成 ==="
