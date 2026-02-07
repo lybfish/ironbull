@@ -200,7 +200,8 @@ def sync_positions_from_nodes(
                                 account_id=r.get("account_id"), symbol=sym, error=str(e))
                     total_fail += 1
 
-            # 关闭交易所已无持仓但数据库仍 OPEN 的记录
+            # 关闭交易所已无持仓但数据库仍 OPEN 的记录，并记录需要清理条件单的 symbol
+            closed_symbols = set()
             try:
                 from libs.position.repository import PositionRepository
                 pos_repo = PositionRepository(session)
@@ -227,9 +228,40 @@ def sync_positions_from_nodes(
                             quantity=Decimal("0"),
                             avg_cost=Decimal("0"),
                         )
+                        closed_symbols.add(db_pos.symbol)
             except Exception as e:
                 log.warning("close stale positions failed",
                             account_id=r.get("account_id"), error=str(e))
+
+            # 持仓被关闭后，自动取消该 symbol 的残留条件委托单（止损/止盈触发后另一侧仍在）
+            if closed_symbols:
+                try:
+                    acc = acc_by_id.get(r["account_id"])
+                    if acc:
+                        cancel_payload = {
+                            "tasks": [_tasks_for_node([acc])[0]],
+                            "sandbox": sandbox,
+                            "symbols": list(closed_symbols),
+                        }
+                        with httpx.Client(timeout=30) as cancel_client:
+                            cancel_resp = cancel_client.post(
+                                f"{base_url}/api/cancel-conditionals",
+                                json=cancel_payload,
+                                headers=node_headers or None,
+                            )
+                            if cancel_resp.status_code == 200:
+                                cancel_data = cancel_resp.json()
+                                for cr in cancel_data.get("results", []):
+                                    if cr.get("cancelled", 0) > 0:
+                                        log.info("自动取消残留条件单",
+                                                 account_id=r["account_id"],
+                                                 symbols=list(closed_symbols),
+                                                 cancelled=cr.get("cancelled"))
+                            else:
+                                log.warning("取消条件单请求失败", status=cancel_resp.status_code)
+                except Exception as e:
+                    log.warning("cancel conditionals failed",
+                                account_id=r.get("account_id"), error=str(e))
 
     return {"ok": total_ok, "fail": total_fail, "errors": errors}
 

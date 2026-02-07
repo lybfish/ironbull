@@ -502,6 +502,75 @@ def api_sync_positions(req: SyncTasksRequest, _: None = Depends(verify_center_to
     return {"success": True, "results": results}
 
 
+# ═══════════════════════════════════════════════════════════════
+# 取消残留条件单（止损/止盈触发后清理另一侧）
+# ═══════════════════════════════════════════════════════════════
+
+class CancelConditionalsRequest(BaseModel):
+    """取消指定 symbol 的残留条件单"""
+    tasks: List[TaskItem]
+    sandbox: bool = True
+    symbols: List[str]  # 需要清理的交易对列表（canonical 格式: BTC/USDT）
+
+
+async def _cancel_conditionals_one(
+    task: TaskItem, sandbox: bool, symbols: List[str],
+) -> Dict[str, Any]:
+    """对单个账户，取消指定 symbol 的所有残留条件委托单"""
+    trader = LiveTrader(
+        exchange=task.exchange or "binance",
+        api_key=task.api_key,
+        api_secret=task.api_secret,
+        passphrase=task.passphrase,
+        sandbox=sandbox,
+        market_type=task.market_type or "future",
+        settlement_service=None,
+    )
+    try:
+        await trader.exchange.load_markets()
+        total_cancelled = 0
+        total_errors = 0
+        results_by_symbol = {}
+        for sym in symbols:
+            r = await trader.cancel_all_open_orders(sym)
+            results_by_symbol[sym] = r
+            total_cancelled += r.get("cancelled", 0)
+            total_errors += r.get("errors", 0)
+        await trader.close()
+        return {
+            "account_id": task.account_id,
+            "success": True,
+            "cancelled": total_cancelled,
+            "errors": total_errors,
+            "by_symbol": results_by_symbol,
+        }
+    except Exception as e:
+        try:
+            await trader.close()
+        except Exception:
+            pass
+        log.error("cancel_conditionals error", account_id=task.account_id, error=str(e))
+        return {
+            "account_id": task.account_id,
+            "success": False,
+            "cancelled": 0,
+            "errors": 1,
+            "error": str(e),
+        }
+
+
+@app.post("/api/cancel-conditionals")
+def api_cancel_conditionals(req: CancelConditionalsRequest, _: None = Depends(verify_center_token)):
+    """取消指定交易对的残留条件委托单（止损/止盈）"""
+    if not req.tasks or not req.symbols:
+        return {"success": True, "results": []}
+    results = []
+    for task in req.tasks:
+        r = asyncio.run(_cancel_conditionals_one(task=task, sandbox=req.sandbox, symbols=req.symbols))
+        results.append(r)
+    return {"success": True, "results": results}
+
+
 @app.get("/health")
 def health():
     heartbeat_info = {}

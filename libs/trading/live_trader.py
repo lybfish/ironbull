@@ -1272,6 +1272,73 @@ class LiveTrader(Trader):
                 error_message=str(e),
             )
     
+    async def cancel_all_open_orders(self, symbol: str) -> Dict[str, Any]:
+        """
+        取消指定交易对的所有未成交条件委托单（STOP_MARKET / TAKE_PROFIT_MARKET 等）。
+
+        应用场景：持仓已被止损/止盈/手动平仓，但另一侧条件单仍在。
+        - Binance: fetch_open_orders → 逐个 cancel（包括 STOP_MARKET, TAKE_PROFIT_MARKET）
+        - Gate / OKX: 仓位级 SL/TP 随仓位关闭自动撤销，一般无需手动处理，
+          但以防万一也做一次 fetch + cancel。
+
+        Returns:
+            {"cancelled": int, "errors": int, "details": [...]}
+        """
+        ccxt_sym = self._ccxt_symbol(symbol)
+        cancelled = 0
+        errors = 0
+        details = []
+
+        try:
+            # 查询所有未成交的委托单（包括条件单）
+            open_orders = await self.exchange.fetch_open_orders(ccxt_sym)
+
+            for order in open_orders or []:
+                order_id = order.get("id")
+                order_type = (order.get("type") or "").upper()
+                # 只取消条件/止盈止损类委托单，不取消普通限价单
+                conditional_types = {
+                    "STOP_MARKET", "TAKE_PROFIT_MARKET",
+                    "STOP", "TAKE_PROFIT",
+                    "STOP_LOSS", "STOP_LOSS_LIMIT",
+                }
+                if order_type not in conditional_types:
+                    # 如果有 stopPrice 也算条件单
+                    if not order.get("stopPrice"):
+                        continue
+
+                try:
+                    await self.exchange.cancel_order(order_id, ccxt_sym)
+                    cancelled += 1
+                    details.append({
+                        "order_id": order_id,
+                        "type": order_type,
+                        "side": order.get("side"),
+                        "status": "cancelled",
+                    })
+                    logger.info("cancelled conditional order",
+                                symbol=symbol, order_id=order_id, type=order_type)
+                except Exception as e:
+                    errors += 1
+                    details.append({
+                        "order_id": order_id,
+                        "type": order_type,
+                        "status": "error",
+                        "error": str(e),
+                    })
+                    logger.warning("cancel conditional order failed",
+                                   symbol=symbol, order_id=order_id, error=str(e))
+
+        except Exception as e:
+            logger.error("fetch open orders failed", symbol=symbol, error=str(e))
+            return {"cancelled": 0, "errors": 1, "details": [{"error": str(e)}]}
+
+        if cancelled > 0:
+            logger.info("conditional orders cleanup done",
+                        symbol=symbol, cancelled=cancelled, errors=errors)
+
+        return {"cancelled": cancelled, "errors": errors, "details": details}
+
     async def get_order(self, order_id: str, symbol: str) -> OrderResult:
         """查询订单。symbol 可为规范形式，合约时会转为 CCXT 格式。"""
         try:
