@@ -925,22 +925,45 @@ async def _execute_signal_for_target(
         return {"account_id": target.account_id, "user_id": target.user_id, "success": False, "error": str(e)}
 
 
+RISK_MODE_PCT = {1: 0.01, 2: 0.015, 3: 0.02}
+
+
 def _resolve_amount_leverage_for_tenant(repo, strategy, tenant_id: int):
     """
-    按租户解析下单金额与杠杆：优先用 dim_tenant_strategy 实例覆盖，无则用主策略。
+    按租户解析下单金额与杠杆：
+    优先级：dim_tenant_strategy 覆盖 > dim_strategy 默认
+    如果设置了 capital + risk_mode，则自动计算 amount_usdt = capital × risk_pct × leverage。
     返回 (amount_usdt, leverage)。
     """
     if not strategy:
         return STRATEGY_DISPATCH_AMOUNT, 0
-    base_amount = float(strategy.amount_usdt or 0) if strategy else 0
-    base_leverage = int(strategy.leverage or 0) if strategy else 0
+
+    # 主策略默认值
+    base_capital = float(getattr(strategy, "capital", 0) or 0)
+    base_leverage = int(strategy.leverage or 0)
+    base_risk_mode = int(getattr(strategy, "risk_mode", 1) or 1)
+    base_amount = float(strategy.amount_usdt or 0)
+
+    # 租户覆盖
     ts = repo.get_tenant_strategy(tenant_id, strategy.id)
     if ts:
-        amount = float(ts.amount_usdt) if ts.amount_usdt is not None else base_amount
+        capital = float(ts.capital) if getattr(ts, "capital", None) is not None else base_capital
         leverage = int(ts.leverage) if ts.leverage is not None else base_leverage
+        risk_mode = int(getattr(ts, "risk_mode", None) or 0) if getattr(ts, "risk_mode", None) is not None else base_risk_mode
+        amount_fallback = float(ts.amount_usdt) if ts.amount_usdt is not None else base_amount
     else:
-        amount = base_amount
+        capital = base_capital
         leverage = base_leverage
+        risk_mode = base_risk_mode
+        amount_fallback = base_amount
+
+    # 如果设了 capital，自动计算
+    if capital > 0 and leverage > 0:
+        pct = RISK_MODE_PCT.get(risk_mode, 0.01)
+        amount = round(capital * pct * leverage, 2)
+    else:
+        amount = amount_fallback
+
     amount = amount if amount > 0 else STRATEGY_DISPATCH_AMOUNT
     return amount, leverage
 

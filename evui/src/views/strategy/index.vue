@@ -47,14 +47,24 @@
           <template slot-scope="{row}">{{ row.min_capital != null ? row.min_capital : '-' }}</template>
         </el-table-column>
         <el-table-column prop="risk_level" label="风险等级" width="80" align="center"/>
-        <el-table-column prop="amount_usdt" label="单笔金额(U)" width="100" align="right">
-          <template slot-scope="{row}">{{ row.amount_usdt != null ? row.amount_usdt : '-' }}</template>
+        <el-table-column label="本金(U)" width="90" align="right">
+          <template slot-scope="{row}">{{ row.capital > 0 ? row.capital : '-' }}</template>
         </el-table-column>
         <el-table-column prop="leverage" label="杠杆" width="65" align="center">
           <template slot-scope="{row}">
             <el-tag size="mini" type="warning" v-if="row.leverage">{{ row.leverage }}x</el-tag>
             <span v-else>-</span>
           </template>
+        </el-table-column>
+        <el-table-column label="风险档位" width="80" align="center">
+          <template slot-scope="{row}">
+            <el-tag size="mini" :type="row.risk_mode === 3 ? 'danger' : row.risk_mode === 2 ? 'warning' : 'success'">
+              {{ {1:'稳健',2:'均衡',3:'激进'}[row.risk_mode] || '稳健' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="下单金额(U)" width="100" align="right">
+          <template slot-scope="{row}">{{ row.amount_usdt > 0 ? row.amount_usdt : '-' }}</template>
         </el-table-column>
         <el-table-column prop="min_confidence" label="置信度" width="75" align="center"/>
         <el-table-column prop="cooldown_minutes" label="冷却(分)" width="85" align="center"/>
@@ -98,8 +108,16 @@
           <el-descriptions-item label="市场类型">{{ detailData.market_type === 'future' ? '合约' : detailData.market_type || '-' }}</el-descriptions-item>
           <el-descriptions-item label="最小资金">{{ detailData.min_capital != null ? detailData.min_capital : '-' }} USDT</el-descriptions-item>
           <el-descriptions-item label="风险等级">{{ detailData.risk_level != null ? detailData.risk_level : '-' }}</el-descriptions-item>
-          <el-descriptions-item label="单笔金额">{{ detailData.amount_usdt != null ? detailData.amount_usdt : '-' }} USDT</el-descriptions-item>
+          <el-descriptions-item label="本金">{{ detailData.capital > 0 ? detailData.capital + ' USDT' : '-' }}</el-descriptions-item>
           <el-descriptions-item label="杠杆">{{ detailData.leverage ? detailData.leverage + 'x' : '-' }}</el-descriptions-item>
+          <el-descriptions-item label="风险档位">
+            <el-tag size="small" :type="detailData.risk_mode === 3 ? 'danger' : detailData.risk_mode === 2 ? 'warning' : 'success'">
+              {{ {1:'稳健(1%)',2:'均衡(1.5%)',3:'激进(2%)'}[detailData.risk_mode] || '稳健(1%)' }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="下单金额">{{ detailData.amount_usdt > 0 ? detailData.amount_usdt + ' USDT' : '-' }}
+            <span v-if="detailData.capital > 0" style="color:#909399;font-size:12px"> (自动计算)</span>
+          </el-descriptions-item>
           <el-descriptions-item label="最低置信度">{{ detailData.min_confidence != null ? detailData.min_confidence : '-' }}</el-descriptions-item>
           <el-descriptions-item label="冷却(分钟)">{{ detailData.cooldown_minutes != null ? detailData.cooldown_minutes : '-' }}</el-descriptions-item>
           <el-descriptions-item label="状态">
@@ -179,13 +197,40 @@
         </el-row>
         <el-row :gutter="16">
           <el-col :span="12">
-            <el-form-item label="单笔金额(USDT)" prop="amount_usdt">
-              <el-input-number v-model="editForm.amount_usdt" :min="0" :precision="2" style="width:100%"/>
+            <el-form-item label="本金(USDT)" prop="capital">
+              <el-input-number v-model="editForm.capital" :min="0" :precision="2" style="width:100%"/>
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="杠杆" prop="leverage">
-              <el-input-number v-model="editForm.leverage" :min="0" style="width:100%"/>
+              <el-select v-model="editForm.leverage" placeholder="杠杆倍数" style="width:100%">
+                <el-option :label="'5x'" :value="5"/>
+                <el-option :label="'10x'" :value="10"/>
+                <el-option :label="'20x'" :value="20"/>
+                <el-option :label="'50x'" :value="50"/>
+                <el-option :label="'75x'" :value="75"/>
+                <el-option :label="'100x'" :value="100"/>
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="风险档位" prop="risk_mode">
+              <el-radio-group v-model="editForm.risk_mode">
+                <el-radio-button :label="1">稳健(1%)</el-radio-button>
+                <el-radio-button :label="2">均衡(1.5%)</el-radio-button>
+                <el-radio-button :label="3">激进(2%)</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="下单金额(U)">
+              <div style="line-height:32px;">
+                <span style="font-size:16px;font-weight:600;color:#409EFF">{{ calcAmountUsdt }}</span>
+                <span style="color:#909399;font-size:12px;margin-left:4px">USDT (自动计算)</span>
+              </div>
+              <div style="color:#909399;font-size:12px;">= 本金 × {{ {1:'1%',2:'1.5%',3:'2%'}[editForm.risk_mode] || '1%' }} × {{ editForm.leverage || 0 }}x</div>
             </el-form-item>
           </el-col>
         </el-row>
@@ -239,7 +284,15 @@ export default {
   },
   computed: {
     activeCount() { return this.list.filter(s => s.status === 1).length },
-    exchangeCount() { return new Set(this.list.map(s => s.exchange).filter(Boolean)).size }
+    exchangeCount() { return new Set(this.list.map(s => s.exchange).filter(Boolean)).size },
+    calcAmountUsdt() {
+      const cap = Number(this.editForm.capital) || 0
+      const lev = Number(this.editForm.leverage) || 20
+      const mode = Number(this.editForm.risk_mode) || 1
+      const pct = {1: 0.01, 2: 0.015, 3: 0.02}[mode] || 0.01
+      if (cap <= 0) return 0
+      return (cap * pct * lev).toFixed(2)
+    }
   },
   mounted() { this.fetchData() },
   methods: {
@@ -260,8 +313,9 @@ export default {
         market_type: row.market_type || 'future',
         min_capital: row.min_capital != null ? Number(row.min_capital) : 200,
         risk_level: row.risk_level != null ? Number(row.risk_level) : 1,
-        amount_usdt: row.amount_usdt != null ? Number(row.amount_usdt) : 100,
-        leverage: row.leverage != null ? Number(row.leverage) : 0,
+        capital: row.capital != null ? Number(row.capital) : 0,
+        leverage: row.leverage != null ? Number(row.leverage) : 20,
+        risk_mode: row.risk_mode != null ? Number(row.risk_mode) : 1,
         min_confidence: row.min_confidence != null ? Number(row.min_confidence) : 50,
         cooldown_minutes: row.cooldown_minutes != null ? Number(row.cooldown_minutes) : 60,
         status: row.status != null ? Number(row.status) : 1
@@ -281,8 +335,9 @@ export default {
         market_type: this.editForm.market_type || null,
         min_capital: this.editForm.min_capital,
         risk_level: this.editForm.risk_level,
-        amount_usdt: this.editForm.amount_usdt,
-        leverage: this.editForm.leverage,
+        capital: this.editForm.capital || 0,
+        leverage: this.editForm.leverage || 20,
+        risk_mode: this.editForm.risk_mode || 1,
         min_confidence: this.editForm.min_confidence,
         cooldown_minutes: this.editForm.cooldown_minutes,
         status: this.editForm.status

@@ -38,14 +38,27 @@
           <el-table-column prop="strategy_name" label="主策略名称" width="120" show-overflow-tooltip/>
           <el-table-column prop="display_name" label="展示名称" width="120" show-overflow-tooltip/>
           <el-table-column prop="display_description" label="展示描述" min-width="140" show-overflow-tooltip/>
-          <el-table-column prop="leverage" label="杠杆" width="75" align="center">
+          <el-table-column label="本金(U)" width="90" align="right">
+            <template slot-scope="{row}">{{ row.capital > 0 ? row.capital : '继承' }}</template>
+          </el-table-column>
+          <el-table-column label="杠杆" width="75" align="center">
             <template slot-scope="{row}">
               <el-tag size="mini" type="warning" v-if="row.leverage != null">{{ row.leverage }}x</el-tag>
               <span v-else class="text-placeholder">继承</span>
             </template>
           </el-table-column>
-          <el-table-column prop="amount_usdt" label="单笔(U)" width="90" align="right">
-            <template slot-scope="{row}">{{ row.amount_usdt != null ? row.amount_usdt : '继承' }}</template>
+          <el-table-column label="风险档位" width="80" align="center">
+            <template slot-scope="{row}">
+              <template v-if="row.risk_mode != null">
+                <el-tag size="mini" :type="row.risk_mode === 3 ? 'danger' : row.risk_mode === 2 ? 'warning' : 'success'">
+                  {{ {1:'稳健',2:'均衡',3:'激进'}[row.risk_mode] || '继承' }}
+                </el-tag>
+              </template>
+              <span v-else class="text-placeholder">继承</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="下单金额(U)" width="100" align="right">
+            <template slot-scope="{row}">{{ row.amount_usdt > 0 ? row.amount_usdt : '继承' }}</template>
           </el-table-column>
           <el-table-column prop="min_capital" label="最低资金" width="90" align="right">
             <template slot-scope="{row}">{{ row.min_capital != null ? row.min_capital : '继承' }}</template>
@@ -90,7 +103,7 @@
         </el-form-item>
         <el-form-item label=" " class="copy-option-item">
           <el-checkbox v-model="addForm.copy_from_master" @change="onCopyFromMasterChange">一键复制主策略参数</el-checkbox>
-          <div class="form-item-hint">勾选后将自动带入：杠杆、单笔金额、最低资金、展示名与描述</div>
+          <div class="form-item-hint">勾选后将自动带入：本金、杠杆、风险档位、最低资金、展示名与描述</div>
         </el-form-item>
         <el-form-item label="展示名称">
           <el-input v-model="addForm.display_name" placeholder="留空则用主策略名称"/>
@@ -98,11 +111,31 @@
         <el-form-item label="展示描述">
           <el-input v-model="addForm.display_description" type="textarea" :rows="2" placeholder="留空则用主策略描述"/>
         </el-form-item>
-        <el-form-item label="杠杆">
-          <el-input-number v-model="addForm.leverage" :min="0" :max="125" style="width:100%" placeholder="留空继承主策略"/>
+        <el-form-item label="本金(USDT)">
+          <el-input-number v-model="addForm.capital" :min="0" :precision="2" style="width:100%" placeholder="留空继承主策略"/>
         </el-form-item>
-        <el-form-item label="单笔金额(USDT)">
-          <el-input-number v-model="addForm.amount_usdt" :min="0" :precision="2" style="width:100%" placeholder="留空继承"/>
+        <el-form-item label="杠杆">
+          <el-select v-model="addForm.leverage" placeholder="留空继承主策略" clearable style="width:100%">
+            <el-option :label="'5x'" :value="5"/>
+            <el-option :label="'10x'" :value="10"/>
+            <el-option :label="'20x'" :value="20"/>
+            <el-option :label="'50x'" :value="50"/>
+            <el-option :label="'75x'" :value="75"/>
+            <el-option :label="'100x'" :value="100"/>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="风险档位">
+          <el-radio-group v-model="addForm.risk_mode">
+            <el-radio-button :label="1">稳健(1%)</el-radio-button>
+            <el-radio-button :label="2">均衡(1.5%)</el-radio-button>
+            <el-radio-button :label="3">激进(2%)</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="下单金额(U)" v-if="addForm.capital > 0">
+          <div style="line-height:32px;">
+            <span style="font-size:16px;font-weight:600;color:#409EFF">{{ calcAddAmountUsdt }}</span>
+            <span style="color:#909399;font-size:12px;margin-left:4px">USDT (自动计算)</span>
+          </div>
         </el-form-item>
         <el-form-item label="最低资金(USDT)">
           <el-input-number v-model="addForm.min_capital" :min="0" :precision="2" style="width:100%" placeholder="留空继承"/>
@@ -135,11 +168,31 @@
         <el-form-item label="展示描述">
           <el-input v-model="editForm.display_description" type="textarea" :rows="2" placeholder="留空则用主策略描述"/>
         </el-form-item>
-        <el-form-item label="杠杆">
-          <el-input-number v-model="editForm.leverage" :min="0" :max="125" style="width:100%"/>
+        <el-form-item label="本金(USDT)">
+          <el-input-number v-model="editForm.capital" :min="0" :precision="2" style="width:100%"/>
         </el-form-item>
-        <el-form-item label="单笔金额(USDT)">
-          <el-input-number v-model="editForm.amount_usdt" :min="0" :precision="2" style="width:100%"/>
+        <el-form-item label="杠杆">
+          <el-select v-model="editForm.leverage" placeholder="留空继承" clearable style="width:100%">
+            <el-option :label="'5x'" :value="5"/>
+            <el-option :label="'10x'" :value="10"/>
+            <el-option :label="'20x'" :value="20"/>
+            <el-option :label="'50x'" :value="50"/>
+            <el-option :label="'75x'" :value="75"/>
+            <el-option :label="'100x'" :value="100"/>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="风险档位">
+          <el-radio-group v-model="editForm.risk_mode">
+            <el-radio-button :label="1">稳健(1%)</el-radio-button>
+            <el-radio-button :label="2">均衡(1.5%)</el-radio-button>
+            <el-radio-button :label="3">激进(2%)</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="下单金额(U)" v-if="editForm.capital > 0">
+          <div style="line-height:32px;">
+            <span style="font-size:16px;font-weight:600;color:#409EFF">{{ calcEditAmountUsdt }}</span>
+            <span style="color:#909399;font-size:12px;margin-left:4px">USDT (自动计算)</span>
+          </div>
         </el-form-item>
         <el-form-item label="最低资金(USDT)">
           <el-input-number v-model="editForm.min_capital" :min="0" :precision="2" style="width:100%"/>
@@ -190,8 +243,9 @@ export default {
         copy_from_master: true,
         display_name: '',
         display_description: '',
+        capital: null,
         leverage: null,
-        amount_usdt: null,
+        risk_mode: 1,
         min_capital: null,
         status: 1,
         sort_order: 0
@@ -203,6 +257,22 @@ export default {
       editVisible: false,
       editForm: {},
       editSaving: false
+    }
+  },
+  computed: {
+    calcAddAmountUsdt() {
+      const cap = Number(this.addForm.capital) || 0
+      const lev = Number(this.addForm.leverage) || 20
+      const mode = Number(this.addForm.risk_mode) || 1
+      const pct = {1: 0.01, 2: 0.015, 3: 0.02}[mode] || 0.01
+      return cap > 0 ? (cap * pct * lev).toFixed(2) : '0.00'
+    },
+    calcEditAmountUsdt() {
+      const cap = Number(this.editForm.capital) || 0
+      const lev = Number(this.editForm.leverage) || 20
+      const mode = Number(this.editForm.risk_mode) || 1
+      const pct = {1: 0.01, 2: 0.015, 3: 0.02}[mode] || 0.01
+      return cap > 0 ? (cap * pct * lev).toFixed(2) : '0.00'
     }
   },
   mounted() {
@@ -257,8 +327,9 @@ export default {
         copy_from_master: true,
         display_name: '',
         display_description: '',
+        capital: null,
         leverage: null,
-        amount_usdt: null,
+        risk_mode: 1,
         min_capital: null,
         status: 1,
         sort_order: 0
@@ -274,8 +345,9 @@ export default {
         if (!s) return
         this.addForm.display_name = (s.user_display_name || s.name || '').toString().trim() || ''
         this.addForm.display_description = (s.user_description || s.description || '').toString().trim() || ''
+        this.addForm.capital = s.capital != null ? Number(s.capital) : null
         this.addForm.leverage = s.leverage != null ? Number(s.leverage) : null
-        this.addForm.amount_usdt = s.amount_usdt != null ? Number(s.amount_usdt) : null
+        this.addForm.risk_mode = s.risk_mode != null ? Number(s.risk_mode) : 1
         this.addForm.min_capital = s.min_capital != null ? Number(s.min_capital) : null
       } catch (e) {
         this.$message.warning('获取主策略参数失败，可手动填写或提交时由后端复制')
@@ -301,8 +373,9 @@ export default {
       }
       if (this.addForm.display_name !== undefined && this.addForm.display_name !== '') payload.display_name = this.addForm.display_name
       if (this.addForm.display_description !== undefined && this.addForm.display_description !== '') payload.display_description = this.addForm.display_description
+      if (this.addForm.capital != null && this.addForm.capital !== '') payload.capital = Number(this.addForm.capital)
       if (this.addForm.leverage != null && this.addForm.leverage !== '') payload.leverage = Number(this.addForm.leverage)
-      if (this.addForm.amount_usdt != null && this.addForm.amount_usdt !== '') payload.amount_usdt = Number(this.addForm.amount_usdt)
+      if (this.addForm.risk_mode != null) payload.risk_mode = Number(this.addForm.risk_mode)
       if (this.addForm.min_capital != null && this.addForm.min_capital !== '') payload.min_capital = Number(this.addForm.min_capital)
       this.addSaving = true
       try {
@@ -324,8 +397,9 @@ export default {
         strategy_name: row.strategy_name,
         display_name: row.display_name || '',
         display_description: row.display_description || '',
+        capital: row.capital != null ? Number(row.capital) : null,
         leverage: row.leverage != null ? Number(row.leverage) : null,
-        amount_usdt: row.amount_usdt != null ? Number(row.amount_usdt) : null,
+        risk_mode: row.risk_mode != null ? Number(row.risk_mode) : 1,
         min_capital: row.min_capital != null ? Number(row.min_capital) : null,
         status: row.status != null ? Number(row.status) : 1,
         sort_order: row.sort_order != null ? Number(row.sort_order) : 0
@@ -340,8 +414,9 @@ export default {
       const payload = {
         display_name: this.editForm.display_name || null,
         display_description: this.editForm.display_description || null,
+        capital: this.editForm.capital,
         leverage: this.editForm.leverage,
-        amount_usdt: this.editForm.amount_usdt,
+        risk_mode: this.editForm.risk_mode,
         min_capital: this.editForm.min_capital,
         status: this.editForm.status,
         sort_order: this.editForm.sort_order

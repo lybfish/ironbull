@@ -35,8 +35,10 @@ class Strategy(Base):
     # ---- 仓位 & 风控 ----
     min_capital = Column(DECIMAL(20, 2), nullable=False, default=200)
     risk_level = Column(Integer, nullable=False, default=1)
-    amount_usdt = Column(DECIMAL(20, 2), nullable=False, default=100, comment="单仓下单金额(USDT)，执行时按此金额下单")
+    amount_usdt = Column(DECIMAL(20, 2), nullable=False, default=100, comment="单仓下单金额(USDT)，由 capital×risk_pct×leverage 自动计算")
     leverage = Column(Integer, nullable=False, default=20, comment="杠杆倍数，下单前自动设置到交易所")
+    capital = Column(DECIMAL(20, 2), nullable=True, comment="默认本金(USDT)，用于计算 amount_usdt")
+    risk_mode = Column(Integer, nullable=True, default=1, comment="风险档位: 1=稳健(1%) 2=均衡(1.5%) 3=激进(2%)")
 
     # ---- 信号过滤 ----
     min_confidence = Column(Integer, nullable=False, default=50, comment="最低置信度（0-100），低于此值不执行")
@@ -51,6 +53,23 @@ class Strategy(Base):
     user_description = Column(Text, nullable=True, comment="对用户展示的描述，空则用 description")
     created_at = Column(DateTime, nullable=False, default=datetime.now)
     updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+    # 风险模式 → risk_pct 映射（与 StrategyBinding 一致）
+    RISK_MODE_MAP = {1: 0.01, 2: 0.015, 3: 0.02}
+    RISK_MODE_LABELS = {1: "稳健", 2: "均衡", 3: "激进"}
+
+    @property
+    def risk_pct(self) -> float:
+        """当前风险比例"""
+        return self.RISK_MODE_MAP.get(self.risk_mode or 1, 0.01)
+
+    def compute_amount_usdt(self) -> float:
+        """根据 capital × risk_pct × leverage 计算下单金额"""
+        cap = float(self.capital or 0)
+        lev = int(self.leverage or 20)
+        if cap <= 0:
+            return float(self.amount_usdt or 0)
+        return round(cap * self.risk_pct * lev, 2)
 
     # ---- 便捷方法 ----
     def get_symbols(self):
@@ -145,7 +164,9 @@ class TenantStrategy(Base):
     display_name = Column(String(100), nullable=True, comment="租户侧展示名称，空则用主策略 name")
     display_description = Column(Text, nullable=True, comment="租户侧展示描述，空则用主策略 description")
     leverage = Column(Integer, nullable=True, comment="杠杆倍数覆盖，空则用主策略")
-    amount_usdt = Column(DECIMAL(20, 2), nullable=True, comment="单笔金额(USDT)覆盖，空则用主策略")
+    capital = Column(DECIMAL(20, 2), nullable=True, comment="本金覆盖(USDT)，空则用主策略")
+    risk_mode = Column(Integer, nullable=True, comment="风险档位覆盖: 1=稳健 2=均衡 3=激进，空则用主策略")
+    amount_usdt = Column(DECIMAL(20, 2), nullable=True, comment="单笔金额(USDT)，由 capital×risk_pct×leverage 自动计算")
     min_capital = Column(DECIMAL(20, 2), nullable=True, comment="最低资金覆盖，空则用主策略")
     status = Column(Integer, nullable=False, default=1, comment="1=对租户用户展示 0=不展示")
     sort_order = Column(Integer, nullable=False, default=0)

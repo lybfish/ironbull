@@ -19,13 +19,16 @@ from ..deps import get_db, get_current_admin
 
 router = APIRouter(prefix="/api", tags=["tenant-strategies"])
 
+RISK_MODE_PCT = {1: 0.01, 2: 0.015, 3: 0.02}
+
 
 class TenantStrategyCreate(BaseModel):
     strategy_id: int
     display_name: Optional[str] = None
     display_description: Optional[str] = None
+    capital: Optional[float] = None
     leverage: Optional[int] = None
-    amount_usdt: Optional[float] = None
+    risk_mode: Optional[int] = None
     min_capital: Optional[float] = None
     status: int = 1
     sort_order: int = 0
@@ -35,8 +38,9 @@ class TenantStrategyCreate(BaseModel):
 class TenantStrategyUpdate(BaseModel):
     display_name: Optional[str] = None
     display_description: Optional[str] = None
+    capital: Optional[float] = None
     leverage: Optional[int] = None
-    amount_usdt: Optional[float] = None
+    risk_mode: Optional[int] = None
     min_capital: Optional[float] = None
     status: Optional[int] = None
     sort_order: Optional[int] = None
@@ -44,6 +48,14 @@ class TenantStrategyUpdate(BaseModel):
 
 def _instance_to_dict(ts: TenantStrategy, strategy: Optional[Strategy] = None) -> dict:
     s = strategy
+    # 各字段优先取实例覆盖值，否则继承主策略
+    capital = float(ts.capital) if getattr(ts, "capital", None) is not None else (float(getattr(s, "capital", 0) or 0) if s else 0)
+    leverage = ts.leverage if ts.leverage is not None else (int(getattr(s, "leverage", 0) or 0) if s else None)
+    risk_mode = int(getattr(ts, "risk_mode", None) or 0) if getattr(ts, "risk_mode", None) is not None else (int(getattr(s, "risk_mode", 1) or 1) if s else 1)
+    # 自动计算 amount_usdt
+    lev = int(leverage or 0)
+    pct = RISK_MODE_PCT.get(risk_mode, 0.01)
+    amount_usdt = round(capital * pct * lev, 2) if capital > 0 and lev > 0 else (float(ts.amount_usdt) if ts.amount_usdt is not None else (float(getattr(s, "amount_usdt", 0) or 0) if s else 0))
     return {
         "id": ts.id,
         "tenant_id": ts.tenant_id,
@@ -52,8 +64,11 @@ def _instance_to_dict(ts: TenantStrategy, strategy: Optional[Strategy] = None) -
         "strategy_name": s.name if s else "",
         "display_name": ts.display_name or (s.name if s else ""),
         "display_description": ts.display_description or (s.description or "" if s else ""),
-        "leverage": ts.leverage if ts.leverage is not None else (int(getattr(s, "leverage", 0) or 0) if s else None),
-        "amount_usdt": float(ts.amount_usdt) if ts.amount_usdt is not None else (float(getattr(s, "amount_usdt", 0) or 0) if s else None),
+        "capital": capital,
+        "leverage": leverage,
+        "risk_mode": risk_mode,
+        "risk_mode_label": {1: "稳健", 2: "均衡", 3: "激进"}.get(risk_mode, "稳健"),
+        "amount_usdt": amount_usdt,
         "min_capital": float(ts.min_capital) if ts.min_capital is not None else (float(getattr(s, "min_capital", 200) or 200) if s else None),
         "status": int(ts.status or 0),
         "sort_order": int(ts.sort_order or 0),
@@ -106,20 +121,29 @@ def create_tenant_strategy(
         strategy_id=body.strategy_id,
         display_name=body.display_name,
         display_description=body.display_description,
-        leverage=body.leverage if not body.copy_from_master else int(getattr(strategy, "leverage", 0) or 0),
-        amount_usdt=body.amount_usdt if not body.copy_from_master else (float(getattr(strategy, "amount_usdt", 0) or 0)),
-        min_capital=body.min_capital if not body.copy_from_master else (float(getattr(strategy, "min_capital", 200) or 200)),
+        capital=body.capital,
+        leverage=body.leverage,
+        risk_mode=body.risk_mode,
+        min_capital=body.min_capital,
         status=body.status,
         sort_order=body.sort_order,
     )
     if body.copy_from_master:
+        ts.capital = float(getattr(strategy, "capital", 0) or 0) or None
         ts.leverage = int(getattr(strategy, "leverage", 0) or 0)
-        ts.amount_usdt = float(getattr(strategy, "amount_usdt", 0) or 0)
+        ts.risk_mode = int(getattr(strategy, "risk_mode", 1) or 1)
         ts.min_capital = float(getattr(strategy, "min_capital", 200) or 200)
         if not ts.display_name:
             ts.display_name = strategy.name
         if not ts.display_description and strategy.description:
             ts.display_description = (strategy.description or "").strip()
+    # 自动计算 amount_usdt
+    cap = float(ts.capital or 0)
+    lev = int(ts.leverage or 0)
+    rm = int(ts.risk_mode or 1)
+    if cap > 0 and lev > 0:
+        pct = RISK_MODE_PCT.get(rm, 0.01)
+        ts.amount_usdt = round(cap * pct * lev, 2)
     repo.create_tenant_strategy(ts)
     db.commit()
     return {"success": True, "data": _instance_to_dict(ts, strategy)}
@@ -142,6 +166,13 @@ def update_tenant_strategy(
     for k, v in d.items():
         if hasattr(ts, k):
             setattr(ts, k, v)
+    # 自动计算 amount_usdt
+    cap = float(ts.capital or 0)
+    lev = int(ts.leverage or 0)
+    rm = int(getattr(ts, "risk_mode", 1) or 1)
+    if cap > 0 and lev > 0:
+        pct = RISK_MODE_PCT.get(rm, 0.01)
+        ts.amount_usdt = round(cap * pct * lev, 2)
     repo.update_tenant_strategy(ts)
     db.commit()
     strategy = repo.get_strategy_by_id(ts.strategy_id)
@@ -163,9 +194,17 @@ def copy_from_master(
     strategy = repo.get_strategy_by_id(ts.strategy_id)
     if not strategy:
         raise HTTPException(status_code=404, detail="主策略不存在")
+    ts.capital = float(getattr(strategy, "capital", 0) or 0) or None
     ts.leverage = int(getattr(strategy, "leverage", 0) or 0)
-    ts.amount_usdt = float(getattr(strategy, "amount_usdt", 0) or 0)
+    ts.risk_mode = int(getattr(strategy, "risk_mode", 1) or 1)
     ts.min_capital = float(getattr(strategy, "min_capital", 200) or 200)
+    # 自动计算 amount_usdt
+    cap = float(ts.capital or 0)
+    lev = int(ts.leverage or 0)
+    rm = int(ts.risk_mode or 1)
+    if cap > 0 and lev > 0:
+        pct = RISK_MODE_PCT.get(rm, 0.01)
+        ts.amount_usdt = round(cap * pct * lev, 2)
     if not ts.display_name:
         ts.display_name = strategy.name
     if not ts.display_description and strategy.description:
