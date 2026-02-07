@@ -82,6 +82,8 @@ start_service() {
         echo "  [skip] $name already running (pid=$(cat "$pid_file"))"
         return
     fi
+    # 进程已死或 pid 文件陈旧：删除以便本用户能写入新 pid（避免 root 部署留下的 pid 文件导致权限错误）
+    rm -f "$pid_file" 2>/dev/null || true
 
     echo "  [start] $name ..."
     cd "$dir"
