@@ -121,6 +121,11 @@ class MemberRepository:
         self.db.flush()
         return acc
 
+    def delete_account(self, acc: ExchangeAccount) -> None:
+        """物理删除交易所账户"""
+        self.db.delete(acc)
+        self.db.flush()
+
     def list_accounts_by_execution_node(
         self, execution_node_id: int
     ) -> List[ExchangeAccount]:

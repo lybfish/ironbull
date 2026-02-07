@@ -164,12 +164,11 @@ class MemberService:
         return acc, ""
 
     def unbind_api_key(self, user_id: int, account_id: int, tenant_id: int) -> bool:
-        """解绑：软删除或直接删除。这里采用将 status 置 0。若表无 status 可改为删除。"""
+        """解绑：物理删除交易所账户记录。"""
         acc = self.repo.get_account_by_id(account_id, user_id=user_id)
         if not acc or acc.tenant_id != tenant_id:
             return False
-        acc.status = 0
-        self.repo.update_account(acc)
+        self.repo.delete_account(acc)
         return True
 
     def open_strategy(
