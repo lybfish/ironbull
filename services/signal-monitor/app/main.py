@@ -89,6 +89,7 @@ monitor_state = {
 # 全局监控参数（仅保留与策略无关的配置）
 MONITOR_INTERVAL = config.get_int("monitor_interval_seconds", 300)
 NOTIFY_ON_SIGNAL = config.get_bool("notify_on_signal", True)
+SYNC_INTERVAL = config.get_int("sync_interval_seconds", 300)  # 提前定义，供 /api/status 等使用
 
 # 向后兼容：当数据库中没有 status=1 的策略时，使用此 fallback（仅用于冷启动）
 _FALLBACK_STRATEGY = {
@@ -105,6 +106,7 @@ _FALLBACK_STRATEGY = {
 
 # 信号冷却记录（内存缓存 + 数据库持久化双重保障）
 signal_cooldown: Dict[str, datetime] = {}
+_state_lock = threading.Lock()  # 保护 monitor_state、signal_cooldown 等全局状态
 
 # 监控线程
 monitor_thread: Optional[threading.Thread] = None
@@ -121,10 +123,11 @@ def _load_cooldowns_from_db():
             "SELECT strategy_code, symbol, cooldown_until FROM dim_signal_cooldown "
             "WHERE cooldown_until > NOW()"
         )).fetchall()
-        for row in rows:
-            key = f"{row[0]}:{row[1]}"
-            signal_cooldown[key] = row[2]
-            log.debug("恢复冷却", key=key, until=str(row[2]))
+        with _state_lock:
+            for row in rows:
+                key = f"{row[0]}:{row[1]}"
+                signal_cooldown[key] = row[2]
+                log.debug("恢复冷却", key=key, until=str(row[2]))
         session.close()
         log.info("冷却记录已恢复", count=len(rows))
     except Exception as e:
@@ -199,10 +202,10 @@ def _timeframe_to_minutes(tf: str) -> int:
 def is_in_cooldown(symbol: str, strategy: str, cooldown_minutes: int = 60) -> bool:
     """检查是否在冷却期（cooldown_minutes 来自策略配置）"""
     key = f"{strategy}:{symbol}"
-    if key not in signal_cooldown:
-        return False
-
-    cooldown_until = signal_cooldown[key]
+    with _state_lock:
+        if key not in signal_cooldown:
+            return False
+        cooldown_until = signal_cooldown[key]
     # 支持两种格式：datetime 表示冷却到期时间（新），或 datetime 表示设定时间（旧）
     now = datetime.now()
     if cooldown_until > now:
@@ -216,18 +219,15 @@ def is_in_cooldown(symbol: str, strategy: str, cooldown_minutes: int = 60) -> bo
 def set_cooldown(symbol: str, strategy: str, timeframe: str = "1h"):
     """
     设置冷却 — 冷却时间 = max(策略配置的 cooldown, 当前 K 线剩余时间 × 2)
-    这样确保同一根 K 线内不会重复开仓（即使止损后），至少等下一根 K 线。
+    ★ 先持久化到数据库，成功后再更新内存，避免 DB 失败时内存与库不一致。
     """
     key = f"{strategy}:{symbol}"
     tf_minutes = _timeframe_to_minutes(timeframe)
-    # 计算当前周期剩余时间：至少等到当前 K 线结束 + 半个周期（避免边界重入）
     now = datetime.now()
     minutes_into_period = (now.hour * 60 + now.minute) % tf_minutes
     remaining = tf_minutes - minutes_into_period + (tf_minutes // 2)
     cooldown_until = now + timedelta(minutes=max(remaining, tf_minutes))
-    signal_cooldown[key] = cooldown_until
-    log.info("设置冷却", key=key, until=cooldown_until.isoformat(), remaining_min=remaining)
-    # 持久化到数据库（防止重启丢失）
+    # 先写库
     try:
         from libs.core.database import get_session
         from sqlalchemy import text
@@ -240,7 +240,12 @@ def set_cooldown(symbol: str, strategy: str, timeframe: str = "1h"):
         db.commit()
         db.close()
     except Exception as e:
-        log.warning("冷却持久化失败", error=str(e))
+        log.warning("冷却持久化失败，不更新内存", error=str(e))
+        return
+    # 再更新内存（加锁）
+    with _state_lock:
+        signal_cooldown[key] = cooldown_until
+    log.info("设置冷却", key=key, until=cooldown_until.isoformat(), remaining_min=remaining)
 
 
 def _split_hedge_signal(signal: Dict) -> List[Dict]:
@@ -366,8 +371,9 @@ def monitor_loop():
 
     while not stop_event.is_set():
         try:
-            monitor_state["last_check"] = datetime.now().isoformat()
-            monitor_state["total_checks"] += 1
+            with _state_lock:
+                monitor_state["last_check"] = datetime.now().isoformat()
+                monitor_state["total_checks"] += 1
 
             # ── 关键：信号检测前先同步持仓，确保 DB 是最新状态 ──
             _quick_sync_positions()
@@ -418,8 +424,9 @@ def monitor_loop():
                                 if strat_cfg.get("leverage"):
                                     sig["leverage"] = strat_cfg["leverage"]
 
-                                monitor_state["last_signal"] = sig
-                                monitor_state["total_signals"] += 1
+                                with _state_lock:
+                                    monitor_state["last_signal"] = sig
+                                    monitor_state["total_signals"] += 1
 
                                 # ── 写入信号事件: CREATED ──
                                 _write_signal_event(
@@ -496,11 +503,14 @@ def monitor_loop():
 
         except Exception as e:
             log.error(f"监控循环异常: {e}", traceback=traceback.format_exc())
-            monitor_state["errors"] += 1
+            with _state_lock:
+                monitor_state["errors"] += 1
 
         # 等待下次检测
         stop_event.wait(MONITOR_INTERVAL)
 
+    with _state_lock:
+        monitor_state["running"] = False
     log.info("信号监控已停止")
 
 
@@ -515,10 +525,12 @@ def health():
 def get_status():
     """获取监控状态"""
     strategies = _load_strategies_from_db()
-    # 构建冷却状态列表
+    # 构建冷却状态列表（加锁复制后遍历）
     now = datetime.now()
     cooldowns = []
-    for key, until in signal_cooldown.items():
+    with _state_lock:
+        items = list(signal_cooldown.items())
+    for key, until in items:
         if until > now:
             parts = key.split(":", 1)
             cooldowns.append({
@@ -538,9 +550,11 @@ def get_status():
     # 获取持仓监控扫描间隔
     pm_interval = config.get_float("position_monitor_interval", 5.0)
 
+    with _state_lock:
+        state_snapshot = dict(monitor_state)
     return jsonify({
         "success": True,
-        "state": monitor_state,
+        "state": state_snapshot,
         "config": {
             "interval_seconds": MONITOR_INTERVAL,
             "sync_interval_seconds": SYNC_INTERVAL,
@@ -610,11 +624,12 @@ def start_monitor():
     """启动监控"""
     global monitor_thread, monitor_state
     
-    if monitor_state["running"]:
-        return jsonify({"success": False, "error": "监控已在运行中"})
+    with _state_lock:
+        if monitor_state["running"]:
+            return jsonify({"success": False, "error": "监控已在运行中"})
+        monitor_state["running"] = True
     
     stop_event.clear()
-    monitor_state["running"] = True
     
     monitor_thread = threading.Thread(target=monitor_loop, daemon=True)
     monitor_thread.start()
@@ -637,11 +652,11 @@ def stop_monitor():
     """停止监控"""
     global monitor_state
     
-    if not monitor_state["running"]:
-        return jsonify({"success": False, "error": "监控未运行"})
-    
+    with _state_lock:
+        if not monitor_state["running"]:
+            return jsonify({"success": False, "error": "监控未运行"})
+        monitor_state["running"] = False
     stop_event.set()
-    monitor_state["running"] = False
     
     log.info("监控已停止")
     
@@ -1557,27 +1572,139 @@ def trading_positions():
     })
 
 
+async def _close_position_by_account(session, account_id: int, symbol: str, position_side: Optional[str] = None) -> Dict[str, Any]:
+    """
+    按账户手动平仓：用该账户的 API 平掉该账户下该标的的持仓。
+    不依赖全局 auto_trader，解决「交易所 API 未配置」问题。
+    """
+    from libs.member.models import ExchangeAccount
+    from libs.position.models import Position
+    from libs.position.monitor import _fetch_prices_batch, _normalize_exchange_for_ccxt
+    from libs.position.repository import PositionRepository
+
+    account = session.query(ExchangeAccount).filter(ExchangeAccount.id == account_id, ExchangeAccount.status == 1).first()
+    if not account:
+        return {"success": False, "error": "账户不存在或已禁用"}
+
+    q = session.query(Position).filter(
+        Position.account_id == account_id,
+        Position.symbol == symbol,
+        Position.status == "OPEN",
+        Position.quantity > 0,
+    )
+    if position_side:
+        q = q.filter(Position.position_side == position_side)
+    positions = q.all()
+    if not positions:
+        return {"success": False, "error": "未找到该账户下该标的的持仓"}
+
+    position = positions[0]
+    exchange_name = account.exchange or "binance"
+    sym = position.symbol
+    prices = await _fetch_prices_batch({exchange_name: {sym}})
+    key_orig = f"{exchange_name}:{sym}"
+    key_ccxt = f"{_normalize_exchange_for_ccxt(exchange_name)}:{sym}"
+    current_price = prices.get(key_orig) or prices.get(key_ccxt)
+    if not current_price or current_price <= 0:
+        return {"success": False, "error": "无法获取该标的当前价格"}
+
+    settlement_svc = TradeSettlementService(
+        session=session,
+        tenant_id=account.tenant_id,
+        account_id=account.id,
+        currency="USDT",
+    )
+    sandbox = config.get_bool("exchange_sandbox", True)
+    trader = LiveTrader(
+        exchange=account.exchange,
+        api_key=account.api_key,
+        api_secret=account.api_secret,
+        passphrase=account.passphrase or "",
+        sandbox=sandbox,
+        market_type=position.market_type or "future",
+        settlement_service=settlement_svc,
+        tenant_id=account.tenant_id,
+        account_id=account.id,
+    )
+    try:
+        side = (position.position_side or "LONG").upper()
+        close_side = OrderSide.SELL if side == "LONG" else OrderSide.BUY
+        amount_usdt = float(position.quantity) * current_price
+        pm_signal_id = gen_id("MC")
+        result = await trader.create_order(
+            symbol=position.symbol,
+            side=close_side,
+            order_type=OrderType.MARKET,
+            amount_usdt=amount_usdt,
+            price=current_price,
+            signal_id=pm_signal_id,
+            trade_type="CLOSE",
+            close_reason="MANUAL",
+        )
+        ok = result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
+        if ok:
+            pos_repo = PositionRepository(session)
+            position.close_reason = "MANUAL"
+            position.stop_loss = None
+            position.take_profit = None
+            position.updated_at = datetime.now()
+            pos_repo.update(position)
+            log.info("手动平仓成功", account_id=account_id, symbol=symbol, filled_qty=result.filled_quantity)
+        else:
+            log.warning("手动平仓未成交", account_id=account_id, symbol=symbol, status=result.status.value)
+        return {
+            "success": ok,
+            "message": "平仓成功" if ok else (result.error_message or "平仓未成交"),
+            "filled_quantity": getattr(result, "filled_quantity", 0),
+            "filled_price": getattr(result, "filled_price", 0),
+        }
+    finally:
+        try:
+            await trader.close()
+        except Exception:
+            pass
+
+
 @app.route("/api/trading/close", methods=["POST"])
 def trading_close_position():
-    """平仓"""
-    trader = get_auto_trader()
-    
-    if trader is None:
-        return jsonify({"success": False, "error": "交易所 API 未配置"})
-    
+    """平仓。若请求带 account_id 则按该账户 API 平仓（多账户场景）；否则用全局 auto_trader。"""
     data = request.get_json() or {}
     symbol = data.get("symbol")
-    
+    account_id = data.get("account_id")
+    position_side = data.get("position_side")
+
     if not symbol:
         return jsonify({"success": False, "error": "缺少 symbol"})
-    
-    # 异步执行
+
+    # 按账户平仓：使用该账户的 API，不依赖全局配置
+    if account_id is not None:
+        try:
+            session = get_session()
+            try:
+                result = run_async(_close_position_by_account(session, int(account_id), symbol.strip(), position_side))
+                session.commit()
+            except Exception as e:
+                session.rollback()
+                log.error("按账户平仓失败", account_id=account_id, symbol=symbol, error=str(e))
+                result = {"success": False, "error": str(e)}
+            finally:
+                session.close()
+            return jsonify(result)
+        except Exception as e:
+            log.error("按账户平仓异常", error=str(e))
+            return jsonify({"success": False, "error": str(e)})
+
+    # 兼容：无 account_id 时使用全局 auto_trader（单账户）
+    trader = get_auto_trader()
+    if trader is None:
+        return jsonify({"success": False, "error": "交易所 API 未配置（请传 account_id 按持仓账户平仓，或在 signal-monitor 配置 exchange_api_key）"})
+
     try:
         result = run_async(trader.close_position(symbol, "manual"))
     except Exception as e:
         log.error(f"平仓失败: {e}")
         result = {"success": False, "message": str(e)}
-    
+
     return jsonify({
         "success": result.get("success", False),
         **result,
@@ -1603,7 +1730,6 @@ def trading_history():
 
 # ========== 自动同步后台线程 ==========
 
-SYNC_INTERVAL = config.get_int("sync_interval_seconds", 300)  # 默认 5 分钟
 _sync_stop_event = threading.Event()
 
 
@@ -1678,15 +1804,18 @@ def _auto_start_monitor():
     无需手动 POST /api/start。同时启动自动同步线程。
     """
     global monitor_thread, monitor_state
-    if monitor_state["running"]:
-        return
+    with _state_lock:
+        if monitor_state["running"]:
+            return
+        monitor_state["running"] = True
     auto_enabled = config.get_bool("auto_trade_enabled", False)
     if not auto_enabled:
+        with _state_lock:
+            monitor_state["running"] = False
         log.info("auto_trade_enabled=false，监控不自动启动（可手动 POST /api/start）")
         return
     # 启动信号监控
     stop_event.clear()
-    monitor_state["running"] = True
     monitor_thread = threading.Thread(target=monitor_loop, daemon=True)
     monitor_thread.start()
     log.info("监控已自动启动 (auto_trade_enabled=true)")

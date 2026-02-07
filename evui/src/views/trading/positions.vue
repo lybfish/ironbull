@@ -630,7 +630,11 @@ export default {
         // 添加 loading 状态
         this.closingSet = new Set([...this.closingSet, closingKey])
         try {
-          const res = await closePosition({ symbol: row.symbol, account_id: row.account_id })
+          const res = await closePosition({
+            symbol: row.symbol,
+            account_id: row.account_id,
+            position_side: row.position_side || null
+          })
           const data = res.data || {}
           if (data.success === false) {
             this.$message.error('平仓失败: ' + (data.error || data.message || '未知错误'))

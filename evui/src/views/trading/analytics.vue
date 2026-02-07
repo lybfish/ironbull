@@ -325,8 +325,14 @@ export default {
         }
         const res = await getPerformance(params)
         if (res.data.success && res.data.data && res.data.data.equity_curve) {
-          const curve = res.data.data.equity_curve
-          this.equityCurve = Array.isArray(curve) ? curve : []
+          const raw = res.data.data.equity_curve
+          const curve = Array.isArray(raw) ? raw : []
+          // 过滤无效点：日期非空且权益为有效数字（避免 NaN/空导致图表异常）
+          this.equityCurve = curve.filter(p => {
+            const date = p.date || p.snapshot_date || ''
+            const val = Number(p.equity ?? p.nav ?? p.value ?? 0)
+            return date && !Number.isNaN(val) && val >= 0
+          })
         } else {
           this.equityCurve = []
         }
@@ -347,7 +353,10 @@ export default {
         this.chartInstance = echarts.init(this.$refs.equityChart)
       }
       const dates = this.equityCurve.map(p => p.date || p.snapshot_date || '')
-      const equities = this.equityCurve.map(p => Number(p.equity || p.nav || p.value || 0))
+      const equities = this.equityCurve.map(p => {
+        const v = Number(p.equity ?? p.nav ?? p.value ?? 0)
+        return Number.isNaN(v) ? 0 : v
+      })
       this.chartInstance.setOption({
         tooltip: { trigger: 'axis', formatter: params => {
           const p = params[0]

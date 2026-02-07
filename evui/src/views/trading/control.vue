@@ -190,7 +190,9 @@ export default {
           { required: true, message: '请选择市场类型', trigger: 'change' }
         ],
         symbol: [
-          {required: true, message: '请输入交易对', trigger: 'blur'}
+          { required: true, message: '请输入交易对', trigger: 'blur' },
+          { pattern: /^[A-Za-z0-9/]+$/, message: '交易对仅允许字母、数字和斜杠，如 BTC/USDT 或 BTCUSDT', trigger: 'blur' },
+          { min: 2, max: 32, message: '长度 2～32 字符', trigger: 'blur' }
         ],
         side: [
           {required: true, message: '请选择方向', trigger: 'change'}

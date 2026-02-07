@@ -122,6 +122,7 @@ class ClosePositionBody(BaseModel):
     """手动平仓请求体"""
     symbol: str
     account_id: Optional[int] = None
+    position_side: Optional[str] = None  # LONG/SHORT，多空同时存在时必传
 
 
 @router.post("/manual-order")
@@ -171,8 +172,13 @@ def close_position(
     sm_url = cfg.get_str("signal_monitor_url", "http://127.0.0.1:8020").rstrip("/")
 
     try:
+        payload = {"symbol": body.symbol}
+        if body.account_id is not None:
+            payload["account_id"] = body.account_id
+        if body.position_side:
+            payload["position_side"] = body.position_side
         with httpx.Client(timeout=30.0) as client:
-            r = client.post(f"{sm_url}/api/trading/close", json={"symbol": body.symbol})
+            r = client.post(f"{sm_url}/api/trading/close", json=payload)
             r.raise_for_status()
             return r.json()
     except httpx.ConnectError:

@@ -40,6 +40,9 @@ DEFAULT_SETTLE = "usdt"
 # 市价单异步确认：重试次数 / 间隔(秒)
 MARKET_ORDER_CONFIRM_RETRIES = 3
 MARKET_ORDER_CONFIRM_INTERVAL = 0.5
+# 网络瞬时错误重试（仅对 create_order）
+NETWORK_RETRIES = 2
+NETWORK_RETRY_DELAY = 1.0
 
 # OKX 全仓 closeFraction
 OKX_CLOSE_FULL_FRACTION = "1"
@@ -725,26 +728,41 @@ class LiveTrader(Trader):
                 params=params,
             )
             
-            # 调用 ccxt 下单（使用 CCXT 格式 symbol 与精度后的 amount/price）
-            if order_type == OrderType.MARKET:
-                response = await self.exchange.create_order(
-                    symbol=ccxt_sym,
-                    type=ccxt_type,
-                    side=ccxt_side,
-                    amount=amount,
-                    params=params,
-                )
-            else:
-                if price is None:
-                    raise ValueError("Price is required for limit orders")
-                response = await self.exchange.create_order(
-                    symbol=ccxt_sym,
-                    type=ccxt_type,
-                    side=ccxt_side,
-                    amount=amount,
-                    price=price,
-                    params=params,
-                )
+            # 调用 ccxt 下单（网络瞬时错误时有限重试）
+            response = None
+            for attempt in range(NETWORK_RETRIES + 1):
+                try:
+                    if order_type == OrderType.MARKET:
+                        response = await self.exchange.create_order(
+                            symbol=ccxt_sym,
+                            type=ccxt_type,
+                            side=ccxt_side,
+                            amount=amount,
+                            params=params,
+                        )
+                    else:
+                        if price is None:
+                            raise ValueError("Price is required for limit orders")
+                        response = await self.exchange.create_order(
+                            symbol=ccxt_sym,
+                            type=ccxt_type,
+                            side=ccxt_side,
+                            amount=amount,
+                            price=price,
+                            params=params,
+                        )
+                    break
+                except ccxt.NetworkError as e:
+                    if attempt < NETWORK_RETRIES:
+                        logger.warning(
+                            "create_order network error, retrying",
+                            attempt=attempt + 1,
+                            max_retries=NETWORK_RETRIES,
+                            error=str(e),
+                        )
+                        await asyncio.sleep(NETWORK_RETRY_DELAY)
+                    else:
+                        raise
             
             # 解析响应（对外仍用原始 symbol）
             result = self._parse_order_response(order_id, symbol, side, order_type, amount, price, response)
@@ -766,13 +784,30 @@ class LiveTrader(Trader):
                     except Exception as e:
                         logger.debug("market order confirm retry failed", retry=_retry + 1, error=str(e))
                 else:
-                    # 所有重试都没确认成交
+                    # 所有重试都没确认成交，避免“假成功”：置为未确认并带提示
                     logger.warning(
                         "market order not confirmed after retries",
                         order_id=order_id,
                         exchange_order_id=result.exchange_order_id,
                         status=result.status.value,
                         retries=MARKET_ORDER_CONFIRM_RETRIES,
+                    )
+                    result = OrderResult(
+                        order_id=result.order_id,
+                        exchange_order_id=result.exchange_order_id,
+                        symbol=result.symbol,
+                        side=result.side,
+                        order_type=result.order_type,
+                        status=OrderStatus.OPEN,
+                        requested_quantity=result.requested_quantity,
+                        requested_price=result.requested_price,
+                        filled_quantity=0.0,
+                        filled_price=result.filled_price or 0.0,
+                        commission=result.commission,
+                        commission_asset=result.commission_asset,
+                        error_code="UNCONFIRMED",
+                        error_message="订单未在重试期内确认成交，请稍后在交易所查询",
+                        raw_response=result.raw_response,
                     )
 
             # ★ 手续费补偿：如果 commission 仍为 0 且已成交，通过 fetch_my_trades 获取真实手续费

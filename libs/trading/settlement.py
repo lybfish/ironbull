@@ -239,6 +239,10 @@ class TradeSettlementService:
             
         except Exception as e:
             logger.error("settlement failed", error=str(e), order_id=order_id)
+            try:
+                self.session.rollback()
+            except Exception as rb:
+                logger.warning("settlement rollback failed", error=str(rb))
             return SettlementResult(
                 success=False,
                 order_id=order_id,
