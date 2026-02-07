@@ -52,3 +52,9 @@ export function getPositionMonitorStatus() {
 export function getMonitoredPositions() {
   return axios.get('/sync/monitored-positions')
 }
+export function triggerPositionMonitorScan() {
+  return axios.post('/signal-monitor/trigger-scan')
+}
+export function getRealtimePrices(symbols) {
+  return axios.get('/signal-monitor/realtime-prices', { params: { symbols } })
+}

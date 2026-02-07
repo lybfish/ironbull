@@ -655,3 +655,25 @@ def stop_position_monitor():
 def get_monitor_stats() -> dict:
     """获取监控统计信息"""
     return dict(_stats)
+
+
+def run_scan_once() -> dict:
+    """
+    手动触发一次监控扫描（同步接口，供 API 调用）。
+    在新的 event loop 中运行一次 _monitor_cycle()。
+    返回扫描结果摘要。
+    """
+    import asyncio as _asyncio
+    loop = _asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_monitor_cycle())
+        return {
+            "scanned": True,
+            "positions_monitored": _stats.get("positions_monitored", 0),
+            "triggers_total": _stats.get("triggers_total", 0),
+            "last_scan_at": _stats.get("last_scan_at"),
+        }
+    except Exception as e:
+        return {"scanned": False, "error": str(e)}
+    finally:
+        loop.close()

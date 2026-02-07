@@ -708,6 +708,22 @@ def check_now():
         })
 
 
+@app.route("/api/position-monitor/scan", methods=["POST"])
+def trigger_pm_scan():
+    """手动触发一次持仓监控扫描（检查 SL/TP）"""
+    if EXCHANGE_SL_TP:
+        return jsonify({"success": False, "message": "当前使用交易所SL/TP模式，自管监控未启用"})
+    try:
+        from libs.position.monitor import run_scan_once
+        result = run_scan_once()
+        return jsonify({"success": True, "data": result})
+    except ImportError:
+        return jsonify({"success": False, "message": "position_monitor 模块未加载"})
+    except Exception as e:
+        log.error("manual pm scan error", error=str(e))
+        return jsonify({"success": False, "message": str(e)})
+
+
 @app.route("/api/strategies", methods=["GET"])
 def get_strategies():
     """获取可用策略列表（优先从数据库读取，回退到内置策略）"""
