@@ -306,10 +306,9 @@ def monitor_loop():
                                     try:
                                         dispatch_result = execute_signal_by_strategy(sig)
                                         log.info(
-                                            "strategy dispatch [%s]: targets=%s success_count=%s",
-                                            sig.get("side"),
-                                            dispatch_result.get("targets", 0),
-                                            dispatch_result.get("success_count", 0),
+                                            f"strategy dispatch [{sig.get('side')}]",
+                                            targets=dispatch_result.get("targets", 0),
+                                            success_count=dispatch_result.get("success_count", 0),
                                         )
                                     except Exception as e:
                                         log.error(f"strategy dispatch error [{sig.get('side')}]", error=str(e))
