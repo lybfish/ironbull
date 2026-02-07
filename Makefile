@@ -13,7 +13,7 @@ SERVICES := $(ROOT)services
 # 可选：只操作指定服务，多个用空格分隔。例: make start SVC="data-api merchant-api"
 SVC      ?=
 
-.PHONY: help start stop restart status health test admin-install admin-build admin-dev node-bundle migrate migrate-013 migrate-014 migrate-015 migrate-016 clean deploy deploy-pull deploy-build deploy-setup deploy-init push-deploy deploy-child-setup deploy-child deploy-child-restart deploy-child-batch-setup deploy-child-batch deploy-child-batch-restart
+.PHONY: help start stop restart status health test admin-install admin-build admin-dev node-bundle migrate migrate-013 migrate-014 migrate-015 migrate-016 migrate-017 migrate-018 migrate-019 clean deploy deploy-pull deploy-build deploy-setup deploy-init push-deploy deploy-child-setup deploy-child deploy-child-restart deploy-child-batch-setup deploy-child-batch deploy-child-batch-restart
 
 # ---------------------------------------------------------------------------
 # 默认目标
@@ -47,7 +47,8 @@ help:
 	@echo "    make deploy-child-batch SKIP_BUILD=1  仅同步+逐台重启"
 	@echo "    make deploy-child-batch-restart 仅批量重启所有子机节点"
 	@echo "  数据库："
-	@echo "    make migrate-013                执行迁移 013（幂等）"
+	@echo "    make migrate                    执行所有迁移（013-019，幂等）"
+	@echo "    make migrate-019                执行指定迁移（trade_type/close_reason）"
 	@echo "  线上发布："
 	@echo "    make deploy-setup [NAME=prod]   首次配置（服务器、路径、分支）"
 	@echo "    make deploy-init [NAME=xxx]     线上首次：创建目录并 clone 仓库"
@@ -139,7 +140,16 @@ migrate-015:
 migrate-016:
 	cd $(ROOT) && PYTHONPATH=$(ROOT) python3 scripts/run_migration_016.py
 
-migrate: migrate-013 migrate-014 migrate-015 migrate-016
+migrate-017:
+	cd $(ROOT) && PYTHONPATH=$(ROOT) python3 scripts/run_migration_017.py
+
+migrate-018:
+	cd $(ROOT) && PYTHONPATH=$(ROOT) python3 scripts/run_migration_018.py
+
+migrate-019:
+	cd $(ROOT) && PYTHONPATH=$(ROOT) python3 scripts/run_migration_019.py
+
+migrate: migrate-013 migrate-014 migrate-015 migrate-016 migrate-017 migrate-018 migrate-019
 
 # ---------------------------------------------------------------------------
 # 线上发布

@@ -110,6 +110,28 @@ def user_detail(
     return {"success": True, "data": _user_detail(u, db)}
 
 
+class ToggleStatusBody(BaseModel):
+    status: int = 1  # 1=正常, 0=禁用
+
+
+@router.post("/users/{user_id}/toggle-status")
+def toggle_user_status(
+    user_id: int,
+    body: ToggleStatusBody,
+    _admin: Dict[str, Any] = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """启用/禁用用户"""
+    u = db.query(User).filter(User.id == user_id).first()
+    if not u:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    u.status = body.status
+    db.merge(u)
+    db.commit()
+    status_label = "启用" if body.status == 1 else "禁用"
+    return {"success": True, "message": f"用户已{status_label}"}
+
+
 class RechargeUserBody(BaseModel):
     amount: float
     card_type: str = "self"  # self=充值, gift=赠送

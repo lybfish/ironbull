@@ -493,6 +493,7 @@ import {
   rechargeUser,
   getUserTeam,
   setMarketNode,
+  toggleUserStatus,
   getTenants
 } from '@/api/admin'
 import { getRewards } from '@/api/finance'
@@ -732,8 +733,13 @@ export default {
 
     // ===================== 状态切换 =====================
     async handleStatusChange(row) {
-      // 目前后端无独立的 status toggle 接口，直接乐观更新
-      this.$message.info(`用户 ${row.id} 状态已切换为 ${row.status === 1 ? '正常' : '禁用'}`)
+      try {
+        await toggleUserStatus(row.id, row.status)
+        this.$message.success(`用户 ${row.id} 已${row.status === 1 ? '启用' : '禁用'}`)
+      } catch (e) {
+        this.$message.error('状态切换失败')
+        row.status = row.status === 1 ? 0 : 1  // 回滚
+      }
     },
 
     // ===================== 市场节点 =====================

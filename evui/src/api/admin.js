@@ -56,6 +56,9 @@ export function getUserTeam(id, params = {}) {
 export function setMarketNode(id, data) {
   return axios.post(`/users/${id}/set-market-node`, data)
 }
+export function toggleUserStatus(id, status) {
+  return axios.post(`/users/${id}/toggle-status`, { status })
+}
 
 // ---- 管理员 ----
 export function getAdmins(params = {}) {

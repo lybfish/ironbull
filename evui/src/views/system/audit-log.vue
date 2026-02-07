@@ -84,7 +84,7 @@ export default {
       try {
         const params = {
           page: this.pagination.page,
-          size: this.pagination.size
+          page_size: this.pagination.size
         }
         if (this.filters.admin_name) {
           params.admin_name = this.filters.admin_name
