@@ -87,7 +87,12 @@
 
     <el-card shadow="never">
       <div class="toolbar">
-        <span class="toolbar-title">当前持仓</span>
+        <span class="toolbar-title">持仓管理</span>
+        <el-radio-group v-model="viewMode" size="small" @change="onViewModeChange">
+          <el-radio-button label="open">当前持仓</el-radio-button>
+          <el-radio-button label="closed">已平仓</el-radio-button>
+          <el-radio-button label="all">全部</el-radio-button>
+        </el-radio-group>
       </div>
       <!-- 搜索栏 -->
       <div class="search-bar">
@@ -225,12 +230,33 @@
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="开仓时间" width="170">
+        <el-table-column label="已实现盈亏" width="120" align="right">
+          <template slot-scope="{row}">
+            <span v-if="row.realized_pnl != null && row.realized_pnl != 0"
+              :class="Number(row.realized_pnl) >= 0 ? 'text-success' : 'text-danger'">
+              {{ formatPnl(row.realized_pnl) }}
+            </span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="80" align="center">
+          <template slot-scope="{row}">
+            <el-tag :type="row.status === 'OPEN' ? 'success' : 'info'" size="mini" effect="dark">
+              {{ row.status === 'OPEN' ? '持仓' : row.status === 'CLOSED' ? '已平' : (row.status || '-') }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="开仓时间" width="160">
           <template slot-scope="{row}">
             {{ formatTime(row.opened_at) }}
           </template>
         </el-table-column>
-        <el-table-column prop="updated_at" label="更新时间" min-width="170">
+        <el-table-column v-if="viewMode !== 'open'" label="平仓时间" width="160">
+          <template slot-scope="{row}">
+            {{ formatTime(row.closed_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="updated_at" label="更新时间" min-width="160">
           <template slot-scope="{row}">
             {{ formatTime(row.updated_at) }}
           </template>
@@ -253,6 +279,7 @@ export default {
       loading: false,
       list: [],
       total: 0,
+      viewMode: 'open',
       where: {
         symbol: '',
         position_side: '',
@@ -326,10 +353,19 @@ export default {
   },
   methods: {
     /* ---------- 数据获取 ---------- */
+    onViewModeChange() {
+      this.fetchData()
+    },
     async fetchData() {
       this.loading = true
       try {
-        const params = { has_position: true }
+        const params = {}
+        if (this.viewMode === 'open') {
+          params.has_position = true
+        } else if (this.viewMode === 'closed') {
+          params.status = 'CLOSED'
+        }
+        // else 'all' — no filter
         if (this.where.symbol) { params.symbol = this.where.symbol }
         const res = await getPositions(params)
         this.list = res.data.data || []

@@ -79,43 +79,61 @@
         style="width:100%; margin-top:12px"
         size="small"
         :header-cell-style="{background:'#fafafa'}">
-        <el-table-column prop="tx_id" label="流水ID" width="120">
+        <el-table-column prop="transaction_id" label="流水ID" width="120">
           <template slot-scope="{row}">
-            <span class="id-text">{{ row.tx_id }}</span>
+            <span class="id-text">{{ row.transaction_id || row.tx_id }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="account_id" label="账户" width="80" align="center">
+        <el-table-column prop="account_id" label="账户" width="60" align="center">
           <template slot-scope="{row}">
             <span>#{{ row.account_id }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="tx_type" label="类型" width="100">
+        <el-table-column label="类型" width="90">
           <template slot-scope="{row}">
-            <el-tag :type="getTxTypeTagType(row.tx_type)" size="small">{{ getTxTypeLabel(row.tx_type) }}</el-tag>
+            <el-tag :type="getTxTypeTagType(row.transaction_type || row.tx_type)" size="small">{{ getTxTypeLabel(row.transaction_type || row.tx_type) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="currency" label="币种" width="80"/>
-        <el-table-column prop="amount" label="金额" width="130" align="right">
+        <el-table-column label="标的" width="100">
+          <template slot-scope="{row}">
+            <span v-if="row.symbol" style="font-weight:600">{{ row.symbol }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="currency" label="币种" width="70"/>
+        <el-table-column prop="amount" label="金额" width="120" align="right">
           <template slot-scope="{row}">
             <span :style="{ color: parseFloat(row.amount) >= 0 ? '#67C23A' : '#F56C6C', fontWeight: 600 }">
               {{ parseFloat(row.amount) >= 0 ? '+' : '' }}{{ formatCurrency(row.amount) }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="balance_after" label="变动后余额" width="130" align="right">
-          <template slot-scope="{row}">{{ formatCurrency(row.balance_after) }}</template>
-        </el-table-column>
-        <el-table-column prop="description" label="备注" min-width="150" show-overflow-tooltip>
-          <template slot-scope="{row}">{{ row.description || '-' }}</template>
-        </el-table-column>
-        <el-table-column prop="reference_id" label="参考ID" width="140" show-overflow-tooltip>
+        <el-table-column label="手续费" width="90" align="right">
           <template slot-scope="{row}">
-            <span v-if="row.reference_id" class="id-text">{{ row.reference_id }}</span>
+            <span v-if="row.fee && parseFloat(row.fee) !== 0" style="color:#F56C6C">{{ formatCurrency(row.fee) }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="170">
-          <template slot-scope="{row}">{{ formatTime(row.created_at) }}</template>
+        <el-table-column prop="balance_after" label="变动后余额" width="120" align="right">
+          <template slot-scope="{row}">{{ formatCurrency(row.balance_after) }}</template>
+        </el-table-column>
+        <el-table-column label="来源" width="90" align="center">
+          <template slot-scope="{row}">
+            <el-tag v-if="row.source_type" size="mini" type="info" effect="plain">{{ getSourceLabel(row.source_type) }}</el-tag>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="remark" label="备注" min-width="130" show-overflow-tooltip>
+          <template slot-scope="{row}">{{ row.remark || row.description || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="参考ID" width="120" show-overflow-tooltip>
+          <template slot-scope="{row}">
+            <span v-if="row.source_id || row.reference_id" class="id-text">{{ row.source_id || row.reference_id }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="时间" width="160">
+          <template slot-scope="{row}">{{ formatTime(row.transaction_at || row.created_at) }}</template>
         </el-table-column>
       </el-table>
 
@@ -201,12 +219,16 @@ export default {
       this.fetchData()
     },
     getTxTypeLabel(type) {
-      const labels = { DEPOSIT: '充值', WITHDRAW: '提现', FEE: '手续费', PNL: '盈亏', TRANSFER: '转账', FUNDING: '资金费' }
+      const labels = { DEPOSIT: '充值', WITHDRAW: '提现', FEE: '手续费', PNL: '盈亏', TRANSFER: '转账', FUNDING: '资金费', REALIZED_PNL: '已实现盈亏', FUNDING_FEE: '资金费率', TRADE_BUY: '买入', TRADE_SELL: '卖出', FREEZE: '冻结', UNFREEZE: '解冻', ADJUSTMENT: '调账', TRANSFER_IN: '划入', TRANSFER_OUT: '划出' }
       return labels[type] || type
     },
     getTxTypeTagType(type) {
-      const types = { DEPOSIT: 'success', WITHDRAW: 'warning', FEE: 'info', PNL: 'success', TRANSFER: '', FUNDING: 'info' }
+      const types = { DEPOSIT: 'success', WITHDRAW: 'warning', FEE: 'info', PNL: 'success', TRANSFER: '', FUNDING: 'info', REALIZED_PNL: 'success', FUNDING_FEE: 'info', TRADE_BUY: 'primary', TRADE_SELL: 'danger' }
       return types[type] || ''
+    },
+    getSourceLabel(source) {
+      const labels = { FILL: '成交', ORDER: '委托', SIGNAL: '信号', MANUAL: '手动', SYNC: '同步', SYSTEM: '系统' }
+      return labels[source] || source
     },
     async fetchAccounts() {
       try {

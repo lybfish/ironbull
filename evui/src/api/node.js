@@ -38,3 +38,9 @@ export function syncBalance(data = {}) {
 export function syncPositions(data = {}) {
   return axios.post('/sync/positions', data)
 }
+export function syncTrades(data = {}) {
+  return axios.post('/sync/trades', data)
+}
+export function syncMarkets(data = {}) {
+  return axios.post('/sync/markets', data)
+}

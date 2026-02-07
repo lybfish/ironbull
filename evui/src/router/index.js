@@ -44,7 +44,8 @@ const menuRoutes = [
     children: [
       {path: '/strategy/list', component: () => import('@/views/strategy/index'), meta: {title: '策略目录'}},
       {path: '/strategy/bindings', component: () => import('@/views/strategy/bindings'), meta: {title: '策略绑定'}},
-      {path: '/strategy/signal-control', component: () => import('@/views/strategy/signal-control'), meta: {title: '信号监控控制台'}}
+      {path: '/strategy/signal-control', component: () => import('@/views/strategy/signal-control'), meta: {title: '信号监控控制台'}},
+      {path: '/strategy/signal-history', component: () => import('@/views/strategy/signal-history'), meta: {title: '信号历史'}}
     ]
   },
   // ---- 节点管理 ----

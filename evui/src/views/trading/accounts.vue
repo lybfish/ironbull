@@ -23,6 +23,30 @@
         </stat-card>
       </el-col>
     </el-row>
+    <el-row :gutter="15" style="margin-bottom: 15px">
+      <el-col :xs="24" :sm="12" :md="6">
+        <stat-card title="已实现盈亏" icon="el-icon-s-finance" :color="totalRealizedPnl >= 0 ? 'success' : 'danger'" :loading="loading">
+          <template slot="value">
+            <span :style="{ color: totalRealizedPnl >= 0 ? '#67C23A' : '#F56C6C' }">{{ formatCurrency(totalRealizedPnl) }}</span>
+          </template>
+        </stat-card>
+      </el-col>
+      <el-col :xs="24" :sm="12" :md="6">
+        <stat-card title="累计入金" icon="el-icon-upload2" color="success" :loading="loading">
+          <template slot="value">{{ formatCurrency(totalDeposit) }}</template>
+        </stat-card>
+      </el-col>
+      <el-col :xs="24" :sm="12" :md="6">
+        <stat-card title="累计出金" icon="el-icon-download" color="warning" :loading="loading">
+          <template slot="value">{{ formatCurrency(totalWithdraw) }}</template>
+        </stat-card>
+      </el-col>
+      <el-col :xs="24" :sm="12" :md="6">
+        <stat-card title="累计手续费" icon="el-icon-price-tag" color="info" :loading="loading">
+          <template slot="value">{{ formatCurrency(totalFee) }}</template>
+        </stat-card>
+      </el-col>
+    </el-row>
 
     <el-card shadow="never">
       <div class="toolbar">
@@ -73,19 +97,50 @@
         <el-table-column prop="margin_ratio" label="保证金率" width="100" align="right">
           <template slot-scope="{row}">{{ formatPercentage(row.margin_ratio) }}</template>
         </el-table-column>
-        <el-table-column prop="unrealized_pnl" label="未实现盈亏" width="120" align="right">
+        <el-table-column label="占用保证金" width="110" align="right">
+          <template slot-scope="{row}">
+            <span v-if="row.margin_used">{{ formatCurrency(row.margin_used) }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="unrealized_pnl" label="未实现盈亏" width="110" align="right">
           <template slot-scope="{row}">
             <span :style="{ color: (row.unrealized_pnl || 0) >= 0 ? '#67C23A' : '#F56C6C' }">
               {{ formatCurrency(row.unrealized_pnl) }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="80" align="center">
+        <el-table-column label="已实现盈亏" width="110" align="right">
+          <template slot-scope="{row}">
+            <span :style="{ color: (row.realized_pnl || 0) >= 0 ? '#67C23A' : '#F56C6C' }">
+              {{ formatCurrency(row.realized_pnl) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="累计入金" width="100" align="right">
+          <template slot-scope="{row}">
+            <span v-if="row.total_deposit" style="color:#67C23A">{{ formatCurrency(row.total_deposit) }}</span>
+            <span v-else class="text-muted">0.00</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="累计出金" width="100" align="right">
+          <template slot-scope="{row}">
+            <span v-if="row.total_withdraw" style="color:#F56C6C">{{ formatCurrency(row.total_withdraw) }}</span>
+            <span v-else class="text-muted">0.00</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="累计手续费" width="100" align="right">
+          <template slot-scope="{row}">
+            <span v-if="row.total_fee" style="color:#E6A23C">{{ formatCurrency(row.total_fee) }}</span>
+            <span v-else class="text-muted">0.00</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="status" label="状态" width="70" align="center">
           <template slot-scope="{row}">
             <el-tag :type="row.status === 'ACTIVE' ? 'success' : 'info'" size="mini">{{ row.status || 'ACTIVE' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="updated_at" label="更新时间" width="170">
+        <el-table-column prop="updated_at" label="更新时间" width="160">
           <template slot-scope="{row}">{{ formatTime(row.updated_at) }}</template>
         </el-table-column>
       </el-table>
@@ -122,6 +177,18 @@ export default {
     },
     totalUnrealizedPnl() {
       return this.list.reduce((sum, item) => sum + (parseFloat(item.unrealized_pnl) || 0), 0)
+    },
+    totalRealizedPnl() {
+      return this.list.reduce((sum, item) => sum + (parseFloat(item.realized_pnl) || 0), 0)
+    },
+    totalDeposit() {
+      return this.list.reduce((sum, item) => sum + (parseFloat(item.total_deposit) || 0), 0)
+    },
+    totalWithdraw() {
+      return this.list.reduce((sum, item) => sum + (parseFloat(item.total_withdraw) || 0), 0)
+    },
+    totalFee() {
+      return this.list.reduce((sum, item) => sum + (parseFloat(item.total_fee) || 0), 0)
     }
   },
   mounted() {
@@ -172,4 +239,5 @@ export default {
 .toolbar-title { font-size: 16px; font-weight: 500; color: #303133; }
 .mono { font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; }
 .footer-tip { margin-top: 12px; color: #909399; font-size: 12px; }
+.text-muted { color: #C0C4CC; }
 </style>

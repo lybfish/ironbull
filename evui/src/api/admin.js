@@ -104,3 +104,8 @@ export function assignNode(accountId, data) {
 export function batchAssignNode(data) {
   return axios.post('/exchange-accounts/batch-assign-node', data)
 }
+
+// ---- 信号事件历史 ----
+export function getSignalEvents(params = {}) {
+  return axios.get('/signal-events', {params})
+}

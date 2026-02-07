@@ -433,6 +433,18 @@ def health():
 def get_status():
     """获取监控状态"""
     strategies = _load_strategies_from_db()
+    # 构建冷却状态列表
+    now = datetime.now()
+    cooldowns = []
+    for key, until in signal_cooldown.items():
+        if until > now:
+            parts = key.split(":", 1)
+            cooldowns.append({
+                "strategy": parts[0] if len(parts) > 0 else key,
+                "symbol": parts[1] if len(parts) > 1 else "",
+                "cooldown_until": until.isoformat(),
+                "remaining_minutes": round((until - now).total_seconds() / 60, 1),
+            })
     return jsonify({
         "success": True,
         "state": monitor_state,
@@ -444,6 +456,7 @@ def get_status():
             "dispatch_by_strategy": DISPATCH_BY_STRATEGY,
             "strategy_dispatch_amount": STRATEGY_DISPATCH_AMOUNT,
         },
+        "cooldowns": cooldowns,
     })
 
 

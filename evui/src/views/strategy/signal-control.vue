@@ -138,6 +138,30 @@
       </el-descriptions>
     </el-card>
 
+    <!-- 冷却状态 -->
+    <el-card v-if="cooldowns.length > 0" shadow="never" style="margin-top: 16px">
+      <div slot="header" class="card-header">
+        <span>信号冷却状态</span>
+        <el-tag size="small" type="warning">{{ cooldowns.length }} 个冷却中</el-tag>
+      </div>
+      <el-table :data="cooldowns" stripe border size="small" :header-cell-style="{ background: '#fafafa' }">
+        <el-table-column prop="strategy" label="策略" width="140"/>
+        <el-table-column prop="symbol" label="交易对" width="140">
+          <template slot-scope="{row}">
+            <span style="font-weight:600">{{ row.symbol }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="remaining_minutes" label="剩余冷却" width="120" align="center">
+          <template slot-scope="{row}">
+            <span style="color:#E6A23C;font-weight:600">{{ row.remaining_minutes }} 分钟</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="cooldown_until" label="冷却到期" min-width="180">
+          <template slot-scope="{row}">{{ formatTime(row.cooldown_until) }}</template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
     <!-- 策略列表 -->
     <el-card shadow="never" style="margin-top: 16px" v-loading="strategiesLoading">
       <div slot="header" class="card-header">
@@ -190,7 +214,8 @@ export default {
       state: {},
       statusConfig: {},
       config: { interval_seconds: 300, sync_interval_seconds: 300, notify_on_signal: true },
-      strategies: []
+      strategies: [],
+      cooldowns: []
     }
   },
   computed: {
@@ -243,10 +268,12 @@ export default {
         const data = res.data
         this.state = data.state || data || {}
         this.statusConfig = data.config || {}
+        this.cooldowns = data.cooldowns || []
       } catch (e) {
         this.connectionError = e.message || (e.response && e.response.data && (e.response.data.error || e.response.data.detail)) || '请确认 signal-monitor 已启动（端口 8020）'
         this.state = {}
         this.statusConfig = {}
+        this.cooldowns = []
       } finally {
         this.statusLoading = false
       }

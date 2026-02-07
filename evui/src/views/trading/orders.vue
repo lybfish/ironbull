@@ -76,7 +76,7 @@
         style="width:100%; margin-top:12px"
         size="small"
         :header-cell-style="{background:'#fafafa'}">
-        <el-table-column prop="order_id" label="订单ID" width="160">
+        <el-table-column prop="order_id" label="订单ID" width="140">
           <template slot-scope="{row}">
             <el-tooltip :content="row.order_id" placement="top">
               <span class="id-text copyable" @click="copyId(row.order_id)">{{ truncateId(row.order_id) }}</span>
@@ -88,24 +88,36 @@
             <span style="font-weight: 600;">{{ row.symbol }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="exchange" label="交易所" width="100" align="center">
+        <el-table-column prop="exchange" label="交易所" width="90" align="center">
           <template slot-scope="{row}">
             <el-tag size="mini" effect="plain">{{ (row.exchange || '').toUpperCase() }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="side" label="方向" width="80" align="center">
+        <el-table-column label="账户" width="60" align="center">
+          <template slot-scope="{row}">
+            <span class="text-muted">#{{ row.account_id }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="side" label="方向" width="90" align="center">
           <template slot-scope="{row}">
             <el-tag :type="isBuy(row) ? 'success' : 'danger'" size="mini" effect="dark">
               {{ isBuy(row) ? '买入' : '卖出' }}
             </el-tag>
+            <div v-if="row.position_side" style="font-size:11px;color:#909399;margin-top:2px">{{ row.position_side }}</div>
           </template>
         </el-table-column>
-        <el-table-column prop="order_type" label="类型" width="90" align="center">
+        <el-table-column prop="order_type" label="类型" width="80" align="center">
           <template slot-scope="{row}">
             <span>{{ row.order_type }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="成交进度" width="140" align="center">
+        <el-table-column label="杠杆" width="60" align="center">
+          <template slot-scope="{row}">
+            <span v-if="row.leverage">{{ row.leverage }}x</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="成交进度" width="130" align="center">
           <template slot-scope="{row}">
             <div class="progress-cell">
               <el-progress
@@ -118,18 +130,36 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="price" label="价格" width="110" align="right">
+        <el-table-column prop="price" label="委托价" width="100" align="right">
           <template slot-scope="{row}">{{ formatPrice(row.price) }}</template>
         </el-table-column>
-        <el-table-column prop="avg_price" label="成交均价" width="110" align="right">
+        <el-table-column prop="avg_price" label="成交均价" width="100" align="right">
           <template slot-scope="{row}">{{ formatPrice(row.avg_price) }}</template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100" align="center">
+        <el-table-column label="止损/止盈" width="110" align="right">
           <template slot-scope="{row}">
-            <el-tag :type="statusType(row.status)" size="mini">{{ statusLabel(row.status) }}</el-tag>
+            <div v-if="row.stop_loss || row.take_profit" style="line-height:1.4">
+              <div v-if="row.stop_loss" style="color:#F56C6C;font-size:12px">SL {{ formatPrice(row.stop_loss) }}</div>
+              <div v-if="row.take_profit" style="color:#67C23A;font-size:12px">TP {{ formatPrice(row.take_profit) }}</div>
+            </div>
+            <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" min-width="170">
+        <el-table-column label="手续费" width="80" align="right">
+          <template slot-scope="{row}">
+            <span v-if="row.total_fee">{{ formatNum(row.total_fee) }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="status" label="状态" width="90" align="center">
+          <template slot-scope="{row}">
+            <el-tag :type="statusType(row.status)" size="mini">{{ statusLabel(row.status) }}</el-tag>
+            <el-tooltip v-if="row.error_message" :content="row.error_message" placement="top">
+              <i class="el-icon-warning" style="color:#F56C6C;margin-left:4px;cursor:pointer"></i>
+            </el-tooltip>
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="创建时间" min-width="160">
           <template slot-scope="{row}">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
       </el-table>
@@ -305,4 +335,5 @@ export default {
 .copyable:hover { color: #409eff; text-decoration: underline; }
 .progress-cell { display: flex; flex-direction: column; gap: 2px; }
 .progress-text { font-size: 11px; color: #909399; text-align: center; }
+.text-muted { color: #C0C4CC; }
 </style>

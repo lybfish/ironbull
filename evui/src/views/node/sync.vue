@@ -54,6 +54,68 @@
       </el-col>
     </el-row>
 
+    <el-row :gutter="16" style="margin-top: 16px;">
+      <!-- 成交同步卡片 -->
+      <el-col :span="12">
+        <el-card shadow="never">
+          <div slot="header">
+            <span>成交同步</span>
+          </div>
+          <el-form label-width="100px">
+            <el-form-item label="目标节点">
+              <el-select v-model="tradesNodeId" placeholder="选择节点（不选=全部）" clearable style="width:100%">
+                <el-option v-for="n in nodes" :key="n.id" :label="n.name + ' (' + n.node_code + ')'" :value="n.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="warning" :loading="syncingTrades" @click="handleSyncTrades">同步成交</el-button>
+            </el-form-item>
+          </el-form>
+          <div v-if="tradesResult" class="result">
+            <el-alert
+              :title="tradesResult.message"
+              :type="tradesResult.success ? 'success' : 'error'"
+              :closable="false"
+              show-icon />
+          </div>
+        </el-card>
+      </el-col>
+
+      <!-- 市场信息同步卡片 -->
+      <el-col :span="12">
+        <el-card shadow="never">
+          <div slot="header">
+            <span>市场信息同步</span>
+          </div>
+          <el-form label-width="100px">
+            <el-form-item label="交易所">
+              <el-select v-model="marketExchange" placeholder="全部交易所" clearable style="width:100%">
+                <el-option label="Binance" value="binance"/>
+                <el-option label="Gate" value="gate"/>
+                <el-option label="OKX" value="okx"/>
+              </el-select>
+            </el-form-item>
+            <el-form-item label="市场类型">
+              <el-radio-group v-model="marketType">
+                <el-radio label="swap">永续合约</el-radio>
+                <el-radio label="spot">现货</el-radio>
+              </el-radio-group>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="success" :loading="syncingMarkets" @click="handleSyncMarkets">同步市场信息</el-button>
+            </el-form-item>
+          </el-form>
+          <div v-if="marketsResult" class="result">
+            <el-alert
+              :title="marketsResult.message"
+              :type="marketsResult.success ? 'success' : 'error'"
+              :closable="false"
+              show-icon />
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
     <!-- 同步历史 -->
     <el-card shadow="never" style="margin-top: 16px;">
       <div slot="header">
@@ -63,8 +125,8 @@
       <el-table :data="syncHistory" stripe border size="small" max-height="400">
         <el-table-column prop="type" label="类型" width="100">
           <template slot-scope="{row}">
-            <el-tag :type="row.type === 'balance' ? 'primary' : 'success'" size="mini">
-              {{ row.type === 'balance' ? '余额同步' : '持仓同步' }}
+            <el-tag :type="syncTypeTag(row.type)" size="mini">
+              {{ syncTypeLabel(row.type) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -89,7 +151,7 @@
 </template>
 
 <script>
-import {getNodes, syncBalance, syncPositions} from '@/api/node'
+import {getNodes, syncBalance, syncPositions, syncTrades, syncMarkets} from '@/api/node'
 
 export default {
   name: 'SyncManage',
@@ -100,8 +162,15 @@ export default {
       positionNodeId: null,
       syncingBalance: false,
       syncingPositions: false,
+      syncingTrades: false,
+      syncingMarkets: false,
       balanceResult: null,
       positionResult: null,
+      tradesResult: null,
+      marketsResult: null,
+      tradesNodeId: null,
+      marketExchange: null,
+      marketType: 'swap',
       syncHistory: []
     }
   },
@@ -111,6 +180,14 @@ export default {
     this.loadHistory()
   },
   methods: {
+    syncTypeLabel(t) {
+      const m = { balance: '余额同步', position: '持仓同步', trades: '成交同步', markets: '市场同步' }
+      return m[t] || t
+    },
+    syncTypeTag(t) {
+      const m = { balance: 'primary', position: 'success', trades: 'warning', markets: '' }
+      return m[t] || 'info'
+    },
     async fetchNodes() {
       try {
         const res = await getNodes()
@@ -183,6 +260,53 @@ export default {
         this.$message.error('持仓同步失败')
       } finally {
         this.syncingPositions = false
+      }
+    },
+    async handleSyncTrades() {
+      this.syncingTrades = true
+      this.tradesResult = null
+      const node = this.tradesNodeId ? this.nodes.find(n => n.id === this.tradesNodeId) : null
+      const nodeName = node ? `${node.name} (${node.node_code})` : '全部节点'
+      const startTime = new Date()
+      try {
+        const params = {}
+        if (this.tradesNodeId) params.node_id = this.tradesNodeId
+        await syncTrades(params)
+        const result = { success: true, message: '成交同步完成' }
+        this.tradesResult = result
+        this.addHistory('trades', nodeName, result.message, true, startTime)
+        this.$message.success('成交同步完成')
+      } catch (e) {
+        const errorMsg = e.response?.data?.detail || e.message || '同步失败'
+        const result = { success: false, message: '同步失败: ' + errorMsg }
+        this.tradesResult = result
+        this.addHistory('trades', nodeName, result.message, false, startTime)
+        this.$message.error('成交同步失败')
+      } finally {
+        this.syncingTrades = false
+      }
+    },
+    async handleSyncMarkets() {
+      this.syncingMarkets = true
+      this.marketsResult = null
+      const startTime = new Date()
+      const exName = this.marketExchange ? this.marketExchange.toUpperCase() : '全部'
+      try {
+        const params = { market_type: this.marketType }
+        if (this.marketExchange) params.exchange = this.marketExchange
+        await syncMarkets(params)
+        const result = { success: true, message: `市场信息同步完成 (${exName} - ${this.marketType})` }
+        this.marketsResult = result
+        this.addHistory('markets', exName, result.message, true, startTime)
+        this.$message.success('市场信息同步完成')
+      } catch (e) {
+        const errorMsg = e.response?.data?.detail || e.message || '同步失败'
+        const result = { success: false, message: '同步失败: ' + errorMsg }
+        this.marketsResult = result
+        this.addHistory('markets', exName, result.message, false, startTime)
+        this.$message.error('市场信息同步失败')
+      } finally {
+        this.syncingMarkets = false
       }
     },
     addHistory(type, nodeName, message, success, time) {

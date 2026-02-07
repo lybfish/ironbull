@@ -35,24 +35,46 @@
         <el-table-column prop="tenant_name" label="租户" width="120" show-overflow-tooltip/>
         <el-table-column prop="user_email" label="用户" min-width="150" show-overflow-tooltip/>
         <el-table-column prop="strategy_name" label="策略" width="150" show-overflow-tooltip/>
-        <el-table-column prop="exchange_account_label" label="交易所账户" width="150" show-overflow-tooltip/>
-        <el-table-column prop="mode" label="模式" width="80" align="center">
+        <el-table-column label="交易所" width="90" align="center">
           <template slot-scope="{row}">
-            <el-tag :type="row.mode === 2 ? 'danger' : 'info'" size="mini">{{ row.mode === 2 ? '实盘' : '模拟' }}</el-tag>
+            <el-tag size="mini" effect="plain">{{ (row.exchange || '').toUpperCase() }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="点卡" width="120" align="center">
+        <el-table-column prop="exchange_account_label" label="交易所账户" width="140" show-overflow-tooltip/>
+        <el-table-column prop="mode" label="执行模式" width="90" align="center">
+          <template slot-scope="{row}">
+            <el-tag :type="row.mode === 2 ? 'warning' : 'info'" size="mini">{{ row.mode === 2 ? '循环' : '单次' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="跟单比例" width="80" align="center">
+          <template slot-scope="{row}">
+            <span>{{ row.ratio || 100 }}%</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="累计盈亏" width="110" align="right">
+          <template slot-scope="{row}">
+            <span :class="Number(row.total_profit || 0) >= 0 ? 'text-success' : 'text-danger'">
+              {{ Number(row.total_profit || 0) >= 0 ? '+' : '' }}{{ formatNum(row.total_profit) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="成交笔数" width="80" align="center">
+          <template slot-scope="{row}">
+            <span>{{ row.total_trades || 0 }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="点卡" width="110" align="center">
           <template slot-scope="{row}">
             <div style="font-size:12px">自充: {{ formatNum(row.point_card_self) }}</div>
             <div style="font-size:12px; color:#909399">赠送: {{ formatNum(row.point_card_gift) }}</div>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="80" align="center">
+        <el-table-column prop="status" label="状态" width="70" align="center">
           <template slot-scope="{row}">
             <el-tag :type="row.status === 1 ? 'success' : 'info'" size="mini" effect="dark">{{ row.status === 1 ? '运行' : '停止' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="绑定时间" width="170">
+        <el-table-column prop="created_at" label="绑定时间" width="160">
           <template slot-scope="{row}">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="100" align="center" fixed="right">
@@ -82,7 +104,9 @@
         <el-descriptions-item label="用户">{{ detailRow.user_email || '-' }} (ID: {{ detailRow.user_id }})</el-descriptions-item>
         <el-descriptions-item label="策略">{{ detailRow.strategy_name || detailRow.strategy_code }} ({{ detailRow.strategy_code }})</el-descriptions-item>
         <el-descriptions-item label="交易所账户">{{ detailRow.exchange_account_label || '-' }} (账户ID: {{ detailRow.account_id }})</el-descriptions-item>
-        <el-descriptions-item label="模式">{{ detailRow.mode === 2 ? '实盘' : '模拟' }}</el-descriptions-item>
+        <el-descriptions-item label="执行模式">{{ detailRow.mode === 2 ? '循环执行' : '单次执行' }}</el-descriptions-item>
+        <el-descriptions-item label="跟单比例">{{ detailRow.ratio || 100 }}%</el-descriptions-item>
+        <el-descriptions-item label="交易所">{{ (detailRow.exchange || '').toUpperCase() }}</el-descriptions-item>
         <el-descriptions-item label="点卡（自充/赠送）">{{ formatNum(detailRow.point_card_self) }} / {{ formatNum(detailRow.point_card_gift) }}</el-descriptions-item>
         <el-descriptions-item label="累计盈亏">{{ formatNum(detailRow.total_profit) }}</el-descriptions-item>
         <el-descriptions-item label="交易笔数">{{ detailRow.total_trades || 0 }}</el-descriptions-item>
@@ -185,4 +209,6 @@ export default {
 }
 .search-bar { margin-bottom: 8px; }
 .tip { color: #909399; font-size: 12px; }
+.text-success { color: #67C23A; }
+.text-danger { color: #F56C6C; }
 </style>
