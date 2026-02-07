@@ -2,10 +2,10 @@
 # ============================================================
 # IronBull 本地一键发布：push 后 SSH 到线上拉代码并执行 deploy（参考 old3 deploy.sh）
 # 用法：
-#   make push-deploy              # 本地 push → 线上 pull + 迁移 + 重启（有未提交修改会报错，需先 add/commit）
-#   make push-deploy COMMIT=1 MSG="fix: xxx"  # 自动 git add -A && git commit 后再 push
+#   make push-deploy              # 一键：有未提交则自动 add+commit，再 push → 线上 pull + 迁移 + 重启
+#   make push-deploy MSG="fix: xxx"  # 指定提交说明（默认 "deploy"）
 #   make push-deploy BUILD=1      # 含线上构建 admin-web
-#   make push-deploy NO_MIGRATE=1
+#   make push-deploy NO_MIGRATE=1  # 不跑迁移
 #   make push-deploy DRY_RUN=1
 # 首次使用请先: make deploy-setup
 # ============================================================
@@ -22,8 +22,7 @@ NO_MIGRATE="${NO_MIGRATE:-}"
 BUILD="${BUILD:-}"
 DRY_RUN="${DRY_RUN:-}"
 NAME="${NAME:-}"
-COMMIT="${COMMIT:-}"
-MSG="${MSG:-deploy}"
+MSG="${MSG:-deploy}"   # 自动提交时的 commit message，可覆盖：make push-deploy MSG="fix: xxx"
 
 # 若通过 make push-deploy NAME=prod 调用，CONFIG_NAME 可能是 default，用 NAME
 [[ -n "$NAME" ]] && CONFIG_NAME="$NAME" && CONFIG_FILE="$SCRIPT_DIR/.deploy.$CONFIG_NAME.env"
@@ -78,22 +77,12 @@ echo ""
 
 cd "$ROOT"
 
-# 0. 未提交修改：要求先 add/commit，或使用 COMMIT=1 自动提交
+# 0. 若有未提交修改：自动 add + commit，再继续 push 与发布（一键完成）
 if [[ -n "$(git status --porcelain)" ]]; then
-    if [[ "$COMMIT" = "1" ]]; then
-        echo "[0/4] 存在未提交修改，自动 add + commit..."
-        run git add -A
-        run git commit -m "${MSG}" || true
-        echo ""
-    else
-        echo "存在未提交的修改，请先执行："
-        echo "  git add -A"
-        echo "  git commit -m \"你的提交说明\""
-        echo "然后再执行 make push-deploy"
-        echo ""
-        echo "或使用自动提交： make push-deploy COMMIT=1 MSG=\"提交说明\""
-        exit 1
-    fi
+    echo "[0/4] 存在未提交修改，自动 add + commit..."
+    run git add -A
+    run git commit -m "${MSG}" || true
+    echo ""
 fi
 
 # 1. 确保分支并 push
