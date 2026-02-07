@@ -438,6 +438,7 @@ def get_status():
         "state": monitor_state,
         "config": {
             "interval_seconds": MONITOR_INTERVAL,
+            "sync_interval_seconds": SYNC_INTERVAL,
             "strategies_count": len(strategies),
             "notify_enabled": NOTIFY_ON_SIGNAL,
             "dispatch_by_strategy": DISPATCH_BY_STRATEGY,
@@ -454,6 +455,7 @@ def get_config_api():
         "success": True,
         "config": {
             "interval_seconds": MONITOR_INTERVAL,
+            "sync_interval_seconds": SYNC_INTERVAL,
             "notify_on_signal": NOTIFY_ON_SIGNAL,
             "dispatch_by_strategy": DISPATCH_BY_STRATEGY,
             "strategy_dispatch_amount": STRATEGY_DISPATCH_AMOUNT,
@@ -468,22 +470,25 @@ def update_config():
     更新配置 — 策略级参数请直接修改 dim_strategy 表（monitor_loop 每轮自动加载）。
     此端点仅支持修改全局运行参数。
     """
-    global MONITOR_INTERVAL, NOTIFY_ON_SIGNAL
+    global MONITOR_INTERVAL, NOTIFY_ON_SIGNAL, SYNC_INTERVAL
 
     data = request.get_json() or {}
 
     if "interval_seconds" in data:
         MONITOR_INTERVAL = int(data["interval_seconds"])
+    if "sync_interval_seconds" in data:
+        SYNC_INTERVAL = int(data["sync_interval_seconds"])
     if "notify_on_signal" in data:
         NOTIFY_ON_SIGNAL = bool(data["notify_on_signal"])
     # 策略级参数（min_confidence / cooldown_minutes / symbols 等）已下沉到 dim_strategy 表，
     # 直接修改数据库即可，monitor_loop 每轮自动加载最新配置。
-    log.info("全局监控配置已更新", interval=MONITOR_INTERVAL, notify=NOTIFY_ON_SIGNAL)
+    log.info("全局监控配置已更新", interval=MONITOR_INTERVAL, sync_interval=SYNC_INTERVAL, notify=NOTIFY_ON_SIGNAL)
 
     return jsonify({
         "success": True,
         "config": {
             "interval_seconds": MONITOR_INTERVAL,
+            "sync_interval_seconds": SYNC_INTERVAL,
             "notify_on_signal": NOTIFY_ON_SIGNAL,
             "note": "策略级参数请直接修改 dim_strategy 表",
         },

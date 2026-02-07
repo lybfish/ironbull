@@ -93,7 +93,8 @@
               <el-tag :type="statusRunning ? 'success' : 'info'" size="small">{{ statusRunning ? '运行中' : '已停止' }}</el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="最后检测时间">{{ formatTime(state.last_check) }}</el-descriptions-item>
-            <el-descriptions-item label="轮询间隔">{{ statusConfig.interval_seconds || '-' }} 秒</el-descriptions-item>
+            <el-descriptions-item label="信号检测间隔">{{ statusConfig.interval_seconds || '-' }} 秒</el-descriptions-item>
+            <el-descriptions-item label="数据同步间隔">{{ statusConfig.sync_interval_seconds || '-' }} 秒</el-descriptions-item>
             <el-descriptions-item label="错误次数">{{ state.errors || 0 }}</el-descriptions-item>
           </el-descriptions>
         </el-card>
@@ -102,10 +103,14 @@
       <el-col :span="12">
         <el-card shadow="never" v-loading="configLoading">
           <div slot="header">全局配置</div>
-          <el-form :model="config" label-width="120px" size="small">
-            <el-form-item label="轮询间隔(秒)">
+          <el-form :model="config" label-width="140px" size="small">
+            <el-form-item label="信号检测间隔(秒)">
               <el-input-number v-model="config.interval_seconds" :min="10" :max="600" :step="10" style="width: 140px" />
               <span class="form-tip">建议 60–300 秒</span>
+            </el-form-item>
+            <el-form-item label="数据同步间隔(秒)">
+              <el-input-number v-model="config.sync_interval_seconds" :min="10" :max="600" :step="10" style="width: 140px" />
+              <span class="form-tip">余额/持仓/成交同步频率</span>
             </el-form-item>
             <el-form-item label="有信号时通知">
               <el-switch v-model="config.notify_on_signal" />
@@ -184,7 +189,7 @@ export default {
       refreshTimer: null,
       state: {},
       statusConfig: {},
-      config: { interval_seconds: 300, notify_on_signal: true },
+      config: { interval_seconds: 300, sync_interval_seconds: 300, notify_on_signal: true },
       strategies: []
     }
   },
@@ -253,6 +258,7 @@ export default {
         const data = res.data
         const cfg = data.config || data || {}
         if (cfg.interval_seconds != null) this.config.interval_seconds = cfg.interval_seconds
+        if (cfg.sync_interval_seconds != null) this.config.sync_interval_seconds = cfg.sync_interval_seconds
         if (cfg.notify_on_signal !== undefined) this.config.notify_on_signal = !!cfg.notify_on_signal
       } catch (e) {
         this.$message.error('获取配置失败')
@@ -265,6 +271,7 @@ export default {
       try {
         await updateSignalConfig({
           interval_seconds: this.config.interval_seconds,
+          sync_interval_seconds: this.config.sync_interval_seconds,
           notify_on_signal: this.config.notify_on_signal
         })
         this.$message.success('配置已保存')
