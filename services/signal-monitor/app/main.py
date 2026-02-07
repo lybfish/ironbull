@@ -1185,13 +1185,21 @@ SYNC_INTERVAL = config.get_int("sync_interval_seconds", 300)  # 默认 5 分钟
 _sync_stop_event = threading.Event()
 
 
+_MARKET_SYNC_INTERVAL = 3600  # 市场信息每小时刷新一次
+_last_market_sync = 0
+
+
 def _sync_loop():
-    """后台定时同步：余额、持仓、成交 → 数据库"""
+    """后台定时同步：余额、持仓、成交 → 数据库；市场信息每小时刷新"""
+    global _last_market_sync
+    import time as _time
     from libs.sync_node.service import (
         sync_balance_from_nodes,
         sync_positions_from_nodes,
         sync_trades_from_nodes,
     )
+    from libs.exchange.market_service import MarketInfoService
+
     log.info("自动同步线程启动", interval=SYNC_INTERVAL)
     while not _sync_stop_event.is_set():
         try:
@@ -1204,6 +1212,22 @@ def _sync_loop():
                 log.debug("开始自动同步: 成交")
                 sync_trades_from_nodes(session)
                 session.commit()
+
+                # 市场信息刷新（每小时）
+                now = _time.time()
+                if now - _last_market_sync > _MARKET_SYNC_INTERVAL:
+                    log.info("开始同步市场信息 (dim_market_info)")
+                    try:
+                        mkt_svc = MarketInfoService(session)
+                        for ex in ("binance", "gate", "okx"):
+                            mkt_svc.sync_from_ccxt(ex, market_type="swap")
+                        session.commit()
+                        _last_market_sync = now
+                        log.info("市场信息同步完成")
+                    except Exception as me:
+                        session.rollback()
+                        log.warning("市场信息同步失败", error=str(me))
+
                 log.info("自动同步完成")
             except Exception as e:
                 session.rollback()

@@ -206,11 +206,11 @@ class LiveTrader(Trader):
         将合约张数转为币数量。
         - 如果 contractSize > 0 且 ≠ 1 → contracts × contractSize
         - 否则原样返回（如 Binance 已是币单位）
+        使用统一的 contracts_to_coins_by_size 纯函数。
         """
+        from libs.exchange.market_service import contracts_to_coins_by_size
         cs = self._get_contract_size(symbol)
-        if cs > 0 and cs != 1:
-            return contracts * cs
-        return contracts
+        return contracts_to_coins_by_size(contracts, cs)
 
     # ============ USDT → 数量换算（统一处理 contractSize） ============
 

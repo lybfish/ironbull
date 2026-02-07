@@ -20,6 +20,7 @@ import httpx
 
 from libs.core import get_config, get_logger, setup_logging
 from libs.exchange.utils import to_canonical_symbol, normalize_symbol
+from libs.exchange.market_service import contracts_to_coins_by_size
 from libs.trading.live_trader import LiveTrader
 from libs.trading.base import OrderSide, OrderType, OrderStatus
 
@@ -212,13 +213,11 @@ async def _sync_positions_one(task: TaskItem, sandbox: bool) -> Dict[str, Any]:
             qty = float(p.get("contracts", 0) or 0)
             if qty == 0:
                 continue
-            # Gate/OKX 合约张数→币数量：contracts × contractSize
+            # 统一转换：合约张数→币数量（Gate/OKX 有 contractSize，Binance=1 不变）
             contract_size = float(p.get("contractSize") or 0)
+            coin_qty = contracts_to_coins_by_size(abs(qty), contract_size)
             if contract_size > 0 and contract_size != 1:
-                coin_qty = abs(qty) * contract_size
                 log.debug("position contract→coin", contracts=qty, contract_size=contract_size, coin_qty=coin_qty)
-            else:
-                coin_qty = abs(qty)
             side = (p.get("side") or "long").lower()
             position_side = "LONG" if side == "long" else "SHORT"
             # 统一为规范 symbol（BTC/USDT），便于存储与跨所一致
@@ -308,15 +307,15 @@ async def _run_one(
                 log.warning("set_sl_tp failed", account_id=task.account_id, error=str(e))
 
         # 张数→币数量转换（Gate/OKX 合约以张为单位，需 × contractSize 得到真实币量）
+        # 统一转换：张数→币数量
         coin_qty = filled_qty
         if filled_qty > 0 and (task.market_type or "future") == "future":
             try:
                 ccxt_sym = trader._ccxt_symbol(symbol)
-                # markets 已在 create_order → usdt_to_quantity 中加载
                 market = trader.exchange.markets.get(ccxt_sym, {})
                 cs = float(market.get("contractSize") or 0)
+                coin_qty = contracts_to_coins_by_size(filled_qty, cs)
                 if cs > 0 and cs != 1:
-                    coin_qty = filled_qty * cs
                     log.info("order contract→coin", contracts=filled_qty, contract_size=cs, coin_qty=coin_qty)
             except Exception as conv_err:
                 log.warning("contract→coin conversion failed, using raw qty", error=str(conv_err))
@@ -414,13 +413,11 @@ async def _sync_trades_one(task: TaskItem, sandbox: bool, symbols: list = None, 
                     canonical = to_canonical_symbol(raw_sym, "future")
                     side = (t.get("side") or "buy").upper()
                     raw_qty = float(t.get("amount") or 0)
-                    # 张数→币数量转换（contractSize != 1 表示交易所用张为单位）
+                    # 统一转换：张数→币数量
+                    coin_qty = contracts_to_coins_by_size(raw_qty, contract_size)
                     if contract_size > 0 and contract_size != 1:
-                        coin_qty = raw_qty * contract_size
                         log.debug("trade contract→coin", symbol=sym, contracts=raw_qty,
                                   contract_size=contract_size, coin_qty=coin_qty)
-                    else:
-                        coin_qty = raw_qty
                     all_trades.append({
                         "trade_id": str(t.get("id") or ""),
                         "order_id": str(t.get("order") or ""),

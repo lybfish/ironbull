@@ -25,6 +25,13 @@ from .utils import (
     parse_timeframe,
     timeframe_to_ms,
 )
+from .market_service import (
+    MarketInfo,
+    MarketInfoService,
+    get_market_service,
+    contracts_to_coins_by_size,
+    coins_to_contracts_by_size,
+)
 
 __all__ = [
     # 客户端
@@ -41,4 +48,10 @@ __all__ = [
     "denormalize_symbol",
     "parse_timeframe",
     "timeframe_to_ms",
+    # 市场信息服务
+    "MarketInfo",
+    "MarketInfoService",
+    "get_market_service",
+    "contracts_to_coins_by_size",
+    "coins_to_contracts_by_size",
 ]
