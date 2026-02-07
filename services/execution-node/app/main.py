@@ -618,6 +618,7 @@ class ClosePositionRequest(BaseModel):
     side: str  # "BUY" or "SELL"（反向平仓方向）
     amount_usdt: float  # 用 USDT 金额（= 币数量 × 当前价），LiveTrader 自动换算合约张数
     trigger_type: str = "SL"  # "SL" or "TP"
+    position_side: Optional[str] = None  # 被平仓位方向 LONG/SHORT，必传否则会按开仓推导成反向
 
 
 async def _close_position_one(req: ClosePositionRequest, sandbox: bool) -> Dict[str, Any]:
@@ -641,6 +642,8 @@ async def _close_position_one(req: ClosePositionRequest, sandbox: bool) -> Dict[
         current_price = float(ticker.get("last") or ticker.get("close") or 0)
 
         # 用 amount_usdt 让 LiveTrader 内部统一换算（处理合约张数、精度等）
+        # position_side 必传：平的是当前持仓方向，否则 create_order 会按 side 推导成开反向仓
+        pos_side = (req.position_side or "").strip().upper() or ("LONG" if order_side == OrderSide.SELL else "SHORT")
         result = await trader.create_order(
             symbol=symbol,
             side=order_side,
@@ -650,6 +653,7 @@ async def _close_position_one(req: ClosePositionRequest, sandbox: bool) -> Dict[
             signal_id=f"PM_{req.trigger_type}",
             trade_type="CLOSE",
             close_reason=req.trigger_type,
+            position_side=pos_side,
         )
         ok = result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
         filled_qty = result.filled_quantity or 0

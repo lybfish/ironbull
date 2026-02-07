@@ -334,6 +334,7 @@ async def _close_position_local(
             signal_id=pm_signal_id,
             trade_type="CLOSE",
             close_reason=trigger_type,
+            position_side=side,  # 必传：平的是当前持仓方向 LONG/SHORT，否则会当成开反向仓
         )
         ok = result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
         if ok:
@@ -408,6 +409,7 @@ async def _close_position_remote(
         "side": close_side,
         "amount_usdt": round(amount_usdt, 2),
         "trigger_type": trigger_type,
+        "position_side": side,  # 被平仓位方向 LONG/SHORT，节点侧必传否则会开反向仓
     }
     try:
         headers = {}

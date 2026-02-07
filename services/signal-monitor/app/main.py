@@ -1580,7 +1580,6 @@ async def _close_position_by_account(session, account_id: int, symbol: str, posi
     from libs.member.models import ExchangeAccount
     from libs.position.models import Position
     from libs.position.monitor import _fetch_prices_batch, _normalize_exchange_for_ccxt
-    from libs.position.repository import PositionRepository
 
     account = session.query(ExchangeAccount).filter(ExchangeAccount.id == account_id, ExchangeAccount.status == 1).first()
     if not account:
@@ -1640,15 +1639,18 @@ async def _close_position_by_account(session, account_id: int, symbol: str, posi
             signal_id=pm_signal_id,
             trade_type="CLOSE",
             close_reason="MANUAL",
+            position_side=side,  # 必传，否则结算无法匹配到正确的持仓行（LONG/SHORT）
         )
         ok = result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
         if ok:
-            pos_repo = PositionRepository(session)
-            position.close_reason = "MANUAL"
-            position.stop_loss = None
-            position.take_profit = None
-            position.updated_at = datetime.now()
-            pos_repo.update(position)
+            # 只更新 close_reason，不覆盖 quantity/status（结算已将其置为 0 和 CLOSED）
+            from sqlalchemy import update as sql_update
+            session.execute(
+                sql_update(Position)
+                .where(Position.position_id == position.position_id)
+                .values(close_reason="MANUAL", stop_loss=None, take_profit=None, updated_at=datetime.now())
+            )
+            session.flush()
             log.info("手动平仓成功", account_id=account_id, symbol=symbol, filled_qty=result.filled_quantity)
         else:
             log.warning("手动平仓未成交", account_id=account_id, symbol=symbol, status=result.status.value)

@@ -279,10 +279,10 @@
               type="text"
               size="mini"
               style="color: #F56C6C"
-              :loading="closingSet.has(row.symbol + '_' + row.account_id)"
-              :disabled="closingSet.has(row.symbol + '_' + row.account_id)"
+              :loading="closingSet.has(closeLoadingKey(row))"
+              :disabled="closingSet.has(closeLoadingKey(row))"
               @click="handleClosePosition(row)">
-              {{ closingSet.has(row.symbol + '_' + row.account_id) ? '平仓中...' : '平仓' }}
+              {{ closingSet.has(closeLoadingKey(row)) ? '平仓中...' : '平仓' }}
             </el-button>
           </template>
         </el-table-column>
@@ -618,8 +618,13 @@ export default {
     },
 
     /* ---------- 手动平仓 ---------- */
+    /** 同一账户同 symbol 下可有 LONG/SHORT 两条，loading 按「symbol+account+方向」区分，避免多空一起转圈 */
+    closeLoadingKey(row) {
+      const side = (row.position_side || '').toUpperCase() || 'NONE'
+      return `${row.symbol}_${row.account_id}_${side}`
+    },
     handleClosePosition(row) {
-      const closingKey = row.symbol + '_' + row.account_id
+      const closingKey = this.closeLoadingKey(row)
       if (this.closingSet.has(closingKey)) return // 防止重复点击
       const side = this.isLong(row) ? '多头' : '空头'
       this.$confirm(
