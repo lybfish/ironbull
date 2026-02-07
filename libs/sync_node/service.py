@@ -115,13 +115,19 @@ def sync_balance_from_nodes(
             continue
         results = data.get("results") or []
         for r in results:
+            account_id = r.get("account_id")
             if not r.get("success"):
+                # 同步失败时更新 ExchangeAccount 的错误信息
+                _update_exchange_account_sync_status(
+                    session, account_id, success=False,
+                    error=r.get("error", "unknown error"),
+                )
                 total_fail += 1
                 continue
             try:
                 ledger_svc.sync_balance_from_exchange(
                     tenant_id=r["tenant_id"],
-                    account_id=r["account_id"],
+                    account_id=account_id,
                     currency="USDT",
                     balance=Decimal(str(r.get("balance", 0))),
                     available=Decimal(str(r.get("available", 0))),
@@ -131,11 +137,53 @@ def sync_balance_from_nodes(
                     margin_ratio=Decimal(str(r.get("margin_ratio", 0))),
                     equity=Decimal(str(r.get("equity", 0))),
                 )
+                # 同步成功：同时更新 ExchangeAccount 的余额字段
+                _update_exchange_account_sync_status(
+                    session, account_id, success=True,
+                    balance=float(r.get("balance", 0)),
+                    futures_balance=float(r.get("equity", 0) or r.get("balance", 0)),
+                    futures_available=float(r.get("available", 0)),
+                )
                 total_ok += 1
             except Exception as e:
-                log.warning("sync_balance write failed", account_id=r.get("account_id"), error=str(e))
+                log.warning("sync_balance write failed", account_id=account_id, error=str(e))
                 total_fail += 1
     return {"ok": total_ok, "fail": total_fail, "errors": errors}
+
+
+def _update_exchange_account_sync_status(
+    session,
+    account_id: int,
+    success: bool,
+    error: str = None,
+    balance: float = None,
+    futures_balance: float = None,
+    futures_available: float = None,
+):
+    """更新 dim_exchange_account 的余额和同步时间"""
+    from libs.member.models import ExchangeAccount
+    from datetime import datetime
+    try:
+        acc = session.query(ExchangeAccount).filter(
+            ExchangeAccount.id == account_id,
+        ).first()
+        if not acc:
+            return
+        acc.last_sync_at = datetime.now()
+        if success:
+            acc.last_sync_error = None
+            if balance is not None:
+                acc.balance = Decimal(str(balance))
+            if futures_balance is not None:
+                acc.futures_balance = Decimal(str(futures_balance))
+            if futures_available is not None:
+                acc.futures_available = Decimal(str(futures_available))
+        else:
+            acc.last_sync_error = (error or "unknown")[:255]
+        session.merge(acc)
+    except Exception as e:
+        log.warning("update exchange_account sync status failed",
+                    account_id=account_id, error=str(e))
 
 
 def sync_positions_from_nodes(

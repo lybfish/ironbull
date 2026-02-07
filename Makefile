@@ -13,7 +13,7 @@ SERVICES := $(ROOT)services
 # 可选：只操作指定服务，多个用空格分隔。例: make start SVC="data-api merchant-api"
 SVC      ?=
 
-.PHONY: help start stop restart status health test admin-install admin-build admin-dev node-bundle migrate migrate-013 migrate-014 migrate-015 migrate-016 migrate-017 migrate-018 migrate-019 migrate-020 clean deploy deploy-pull deploy-build deploy-setup deploy-init push-deploy deploy-child-setup deploy-child deploy-child-restart deploy-child-batch-setup deploy-child-batch deploy-child-batch-restart
+.PHONY: help start stop restart status health test admin-install admin-build admin-dev node-bundle migrate migrate-013 migrate-014 migrate-015 migrate-016 migrate-017 migrate-018 migrate-019 migrate-020 clean-data clean deploy deploy-pull deploy-build deploy-setup deploy-init push-deploy deploy-child-setup deploy-child deploy-child-restart deploy-child-batch-setup deploy-child-batch deploy-child-batch-restart
 
 # ---------------------------------------------------------------------------
 # 默认目标
@@ -49,6 +49,7 @@ help:
 	@echo "  数据库："
 	@echo "    make migrate                    执行所有迁移（013-020，幂等）"
 	@echo "    make migrate-020                执行指定迁移（strategy capital/risk_mode）"
+	@echo "    make clean-data                 清空交易数据（订单/成交/持仓/资金/信号）"
 	@echo "  线上发布："
 	@echo "    make deploy-setup [NAME=prod]   首次配置（服务器、路径、分支）"
 	@echo "    make deploy-init [NAME=xxx]     线上首次：创建目录并 clone 仓库"
@@ -153,6 +154,9 @@ migrate-020:
 	cd $(ROOT) && PYTHONPATH=$(ROOT) python3 scripts/run_migration_020.py
 
 migrate: migrate-013 migrate-014 migrate-015 migrate-016 migrate-017 migrate-018 migrate-019 migrate-020
+
+clean-data:
+	cd $(ROOT) && PYTHONPATH=$(ROOT) python3 scripts/clean_trading_data.py
 
 # ---------------------------------------------------------------------------
 # 线上发布
