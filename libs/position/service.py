@@ -401,12 +401,27 @@ class PositionService:
             market_type=market_type,
             position_side=position_side,
         )
+        from datetime import datetime as _dt
+
+        was_closed = (position.quantity or Decimal("0")) <= 0 or position.status == "CLOSED"
+        new_status = "OPEN" if quantity > 0 else "CLOSED"
+
         position.quantity = quantity
         position.available = quantity
         position.frozen = Decimal("0")
         position.avg_cost = avg_cost
         position.total_cost = quantity * avg_cost
-        position.status = "OPEN" if quantity > 0 else "CLOSED"
+        position.status = new_status
+
+        # 状态转换时更新开仓/平仓时间
+        if new_status == "OPEN" and was_closed:
+            # 重新开仓 → 刷新 opened_at，清除 closed_at
+            position.opened_at = _dt.now()
+            position.closed_at = None
+        elif new_status == "CLOSED" and not was_closed:
+            # 平仓 → 记录 closed_at
+            position.closed_at = _dt.now()
+
         # 合约附加字段（从交易所同步）
         if leverage is not None:
             position.leverage = leverage
