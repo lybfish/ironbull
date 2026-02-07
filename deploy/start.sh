@@ -36,6 +36,11 @@ fi
 
 export PYTHONPATH="$PROJECT_ROOT"
 mkdir -p "$PID_DIR" "$LOG_DIR"
+# 确保 pid 目录可写，否则 start/restart 会失败
+if ! [ -w "$PID_DIR" ]; then
+    echo "[!] Cannot write to $PID_DIR (permission denied). Fix: chown -R \$(whoami) $PROJECT_ROOT/tmp"
+    exit 1
+fi
 
 # ---- 服务定义（case 实现，兼容 Bash 3.x / macOS） ----
 ALL_SERVICES="data-provider data-api merchant-api signal-monitor monitor-daemon execution-node"
@@ -96,18 +101,22 @@ stop_service() {
     fi
 
     local pid
-    pid=$(cat "$pid_file")
+    pid=$(cat "$pid_file" 2>/dev/null) || pid=""
+    if [ -z "$pid" ]; then
+        echo "  [skip] $name not running (empty pid file)"
+        rm -f "$pid_file"
+        return
+    fi
     if kill -0 "$pid" 2>/dev/null; then
         echo "  [stop] $name (pid=$pid) ..."
-        kill "$pid"
+        kill "$pid" 2>/dev/null || true
         sleep 2
-        # 如果还没退出，强制杀
         if kill -0 "$pid" 2>/dev/null; then
             kill -9 "$pid" 2>/dev/null || true
         fi
         echo "  [ok] $name stopped"
     else
-        echo "  [skip] $name not running (stale pid)"
+        echo "  [skip] $name not running (stale pid $pid)"
     fi
     rm -f "$pid_file"
 }
@@ -175,8 +184,10 @@ case "$ACTION" in
         ;;
     *)
         echo "Usage: $0 {start|stop|restart|status} [service ...]"
-        echo "  Services: data-api merchant-api signal-monitor monitor-daemon"
-        echo "  Example:  $0 start data-api merchant-api"
+        echo "  Services: $ALL_SERVICES"
+        echo "  Example:  $0 restart"
+        echo "  Example:  $0 restart data-api merchant-api"
+        echo "  Note:     Run from project root; ensure tmp/pids is writable."
         exit 1
         ;;
 esac
