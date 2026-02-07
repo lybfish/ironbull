@@ -4,7 +4,7 @@ Member Models - 会员、交易所账户、策略绑定、策略目录
 
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON
 from sqlalchemy.dialects.mysql import DECIMAL
 from libs.core.database import Base
 
@@ -21,7 +21,7 @@ class Strategy(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     code = Column(String(64), nullable=False, unique=True, index=True)
     name = Column(String(100), nullable=False)
-    description = Column(String(500), nullable=True)
+    description = Column(Text, nullable=True)
 
     # ---- 交易标的 ----
     symbol = Column(String(32), nullable=False, comment="主交易对（向后兼容）")
@@ -48,7 +48,7 @@ class Strategy(Base):
     # ---- 对用户可见（商户/C 端只看到 show_to_user=1，展示用 user_display_name / user_description） ----
     show_to_user = Column(Integer, nullable=False, default=0, comment="是否对用户/商户展示 0否 1是")
     user_display_name = Column(String(100), nullable=True, comment="对用户展示的名称，空则用 name")
-    user_description = Column(String(500), nullable=True, comment="对用户展示的描述，空则用 description")
+    user_description = Column(Text, nullable=True, comment="对用户展示的描述，空则用 description")
     created_at = Column(DateTime, nullable=False, default=datetime.now)
     updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
 
@@ -143,7 +143,7 @@ class TenantStrategy(Base):
     tenant_id = Column(Integer, ForeignKey("dim_tenant.id", ondelete="CASCADE"), nullable=False, index=True)
     strategy_id = Column(Integer, ForeignKey("dim_strategy.id", ondelete="CASCADE"), nullable=False, index=True)
     display_name = Column(String(100), nullable=True, comment="租户侧展示名称，空则用主策略 name")
-    display_description = Column(String(500), nullable=True, comment="租户侧展示描述，空则用主策略 description")
+    display_description = Column(Text, nullable=True, comment="租户侧展示描述，空则用主策略 description")
     leverage = Column(Integer, nullable=True, comment="杠杆倍数覆盖，空则用主策略")
     amount_usdt = Column(DECIMAL(20, 2), nullable=True, comment="单笔金额(USDT)覆盖，空则用主策略")
     min_capital = Column(DECIMAL(20, 2), nullable=True, comment="最低资金覆盖，空则用主策略")

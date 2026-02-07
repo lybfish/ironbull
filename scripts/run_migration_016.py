@@ -76,6 +76,25 @@ def run():
         else:
             log.info("column fact_account.synced_balance already exists")
 
+        # 扩展 description 相关字段为 TEXT（原 VARCHAR(500) 不够长描述文本）
+        _desc_columns = [
+            ("dim_strategy", "description"),
+            ("dim_strategy", "user_description"),
+            ("dim_tenant_strategy", "display_description"),
+        ]
+        for tbl, col in _desc_columns:
+            if column_exists(conn, tbl, col, db_name):
+                # 查当前列类型
+                row = conn.execute(text(
+                    "SELECT DATA_TYPE FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA = :schema AND TABLE_NAME = :tbl AND COLUMN_NAME = :col"
+                ), {"schema": db_name, "tbl": tbl, "col": col}).scalar()
+                if row and row.lower() != "text":
+                    conn.execute(text(f"ALTER TABLE `{tbl}` MODIFY COLUMN `{col}` TEXT"))
+                    log.info(f"altered {tbl}.{col} from {row} to TEXT")
+                else:
+                    log.info(f"{tbl}.{col} already TEXT")
+
         conn.commit()
         log.info("migration 016 done")
 
