@@ -83,11 +83,11 @@ class MarketInfo(Base):
     cost_precision = Column(Integer, nullable=True, comment="金额精度位数")
 
     # ── 下单限制 ──
-    min_quantity = Column(DECIMAL(20, 10), nullable=True, comment="最小下单数量")
-    max_quantity = Column(DECIMAL(20, 10), nullable=True, comment="最大下单数量")
+    min_quantity = Column(DECIMAL(30, 10), nullable=True, comment="最小下单数量")
+    max_quantity = Column(DECIMAL(30, 10), nullable=True, comment="最大下单数量")
     min_cost = Column(DECIMAL(20, 8), nullable=True, comment="最小下单金额 (USDT)")
-    min_price = Column(DECIMAL(20, 10), nullable=True, comment="最小价格")
-    max_price = Column(DECIMAL(20, 2), nullable=True, comment="最大价格")
+    min_price = Column(DECIMAL(30, 10), nullable=True, comment="最小价格")
+    max_price = Column(DECIMAL(30, 2), nullable=True, comment="最大价格")
     tick_size = Column(DECIMAL(20, 10), nullable=True, comment="价格最小变动")
     step_size = Column(DECIMAL(20, 10), nullable=True, comment="数量最小变动")
 
