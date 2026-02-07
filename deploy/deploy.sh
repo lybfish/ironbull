@@ -68,7 +68,8 @@ if [ "$DO_MIGRATE" = true ]; then
         echo "  以用户 $MIGRATE_OWNER 执行迁移（当前为 root）"
         run sudo -i -u "$MIGRATE_OWNER" bash -c "cd $ROOT && make migrate"
     else
-        run make migrate
+        # 使用 login shell 确保 PATH 包含 pip 安装路径
+        run bash -l -c "cd $ROOT && make migrate"
     fi
     echo ""
 else
