@@ -52,7 +52,9 @@ from libs.member import MemberService, ExecutionTarget
 from libs.execution_node import ExecutionNodeRepository
 from libs.execution_node.apply_results import apply_remote_results as apply_remote_results_to_db
 from libs.queue import get_node_execute_queue, TaskMessage
+from libs.facts.models import SignalEvent
 import asyncio
+import json as _json
 from dataclasses import asdict
 
 # Flask App
@@ -325,6 +327,34 @@ def _quick_sync_positions():
         log.warning("快速同步 session 失败", error=str(e))
 
 
+def _write_signal_event(
+    signal_id: str,
+    event_type: str,
+    status: str,
+    source_service: str = "signal-monitor",
+    detail: dict = None,
+    account_id: int = None,
+    error_message: str = None,
+):
+    """写入信号事件到 fact_signal_event 表（独立 session，不影响主流程）"""
+    try:
+        session = get_session()
+        event = SignalEvent(
+            signal_id=signal_id or "",
+            event_type=event_type,
+            status=status,
+            source_service=source_service,
+            account_id=account_id,
+            detail=_json.dumps(detail, ensure_ascii=False, default=str) if detail else None,
+            error_message=error_message,
+        )
+        session.add(event)
+        session.commit()
+        session.close()
+    except Exception as e:
+        log.warning("write signal event failed", event_type=event_type, error=str(e))
+
+
 def monitor_loop():
     """监控主循环 - 每轮从数据库加载最新策略配置"""
     global monitor_state
@@ -378,6 +408,10 @@ def monitor_loop():
                                 log.info(f"检测到信号: {signal['side']} {symbol} @ {signal['entry_price']}")
 
                             for sig in signals_to_exec:
+                                # 确保信号有 signal_id
+                                if not sig.get("signal_id"):
+                                    sig["signal_id"] = gen_id("SIG")
+
                                 # 将策略层参数注入信号（amount_usdt、leverage），供执行层使用
                                 if strat_cfg.get("amount_usdt"):
                                     sig["amount_usdt"] = strat_cfg["amount_usdt"]
@@ -386,6 +420,24 @@ def monitor_loop():
 
                                 monitor_state["last_signal"] = sig
                                 monitor_state["total_signals"] += 1
+
+                                # ── 写入信号事件: CREATED ──
+                                _write_signal_event(
+                                    signal_id=sig["signal_id"],
+                                    event_type="CREATED",
+                                    status="pending",
+                                    detail={
+                                        "strategy": code,
+                                        "symbol": symbol,
+                                        "side": sig.get("side"),
+                                        "signal_type": sig.get("signal_type", "OPEN"),
+                                        "entry_price": sig.get("entry_price"),
+                                        "stop_loss": sig.get("stop_loss"),
+                                        "take_profit": sig.get("take_profit"),
+                                        "confidence": confidence,
+                                        "timeframe": timeframe,
+                                    },
+                                )
 
                                 # 按策略多账户分发（若启用）
                                 if DISPATCH_BY_STRATEGY and sig.get("strategy"):
@@ -396,8 +448,29 @@ def monitor_loop():
                                             targets=dispatch_result.get("targets", 0),
                                             success_count=dispatch_result.get("success_count", 0),
                                         )
+                                        # ── 写入信号事件: DISPATCHED ──
+                                        _dispatch_success = dispatch_result.get("success", False)
+                                        _dispatch_targets = dispatch_result.get("targets", 0)
+                                        _dispatch_ok = dispatch_result.get("success_count", 0)
+                                        _write_signal_event(
+                                            signal_id=sig["signal_id"],
+                                            event_type="DISPATCHED" if _dispatch_success else "FAILED",
+                                            status="executed" if _dispatch_success else "failed",
+                                            detail={
+                                                "action": dispatch_result.get("action"),
+                                                "targets": _dispatch_targets,
+                                                "success_count": _dispatch_ok,
+                                            },
+                                            error_message=dispatch_result.get("message") if not _dispatch_success else None,
+                                        )
                                     except Exception as e:
                                         log.error(f"strategy dispatch error [{sig.get('side')}]", error=str(e), traceback=traceback.format_exc())
+                                        _write_signal_event(
+                                            signal_id=sig["signal_id"],
+                                            event_type="FAILED",
+                                            status="failed",
+                                            error_message=str(e),
+                                        )
 
                                 # 推送通知
                                 if NOTIFY_ON_SIGNAL:
@@ -1110,6 +1183,31 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
 
         session.commit()
         success_count = sum(1 for r in results if r.get("success"))
+
+        # ── 为每个账户写入 EXECUTED 信号事件 ──
+        _sig_id = signal.get("signal_id", "")
+        for r in results:
+            if r.get("skipped"):
+                continue  # 跳过的不记录
+            try:
+                _write_signal_event(
+                    signal_id=_sig_id,
+                    event_type="EXECUTED" if r.get("success") else "FAILED",
+                    status="executed" if r.get("success") else "failed",
+                    source_service="signal-monitor",
+                    account_id=r.get("account_id"),
+                    detail={
+                        "order_id": r.get("order_id"),
+                        "filled_quantity": r.get("filled_quantity"),
+                        "filled_price": r.get("filled_price"),
+                        "symbol": symbol,
+                        "side": signal.get("side"),
+                    },
+                    error_message=r.get("error") if not r.get("success") else None,
+                )
+            except Exception:
+                pass  # 不影响主流程
+
         return {
             "success": True,
             "action": "dispatched",
