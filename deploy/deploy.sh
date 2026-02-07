@@ -73,9 +73,17 @@ if [ "$DO_MIGRATE" = true ]; then
     MIGRATE_CMD="$MIGRATE_CMD && make migrate"
     if [ "$(id -u)" = "0" ] && [ -n "$MIGRATE_OWNER" ] && [ "$MIGRATE_OWNER" != "root" ]; then
         echo "  以用户 $MIGRATE_OWNER 执行迁移（当前为 root）"
-        run sudo -u "$MIGRATE_OWNER" bash -lc "$MIGRATE_CMD"
+        if [ "$DRY_RUN" = true ]; then
+            echo "[dry-run] su - $MIGRATE_OWNER -c \"$MIGRATE_CMD\""
+        else
+            su - "$MIGRATE_OWNER" -c "$MIGRATE_CMD"
+        fi
     else
-        run bash -lc "$MIGRATE_CMD"
+        if [ "$DRY_RUN" = true ]; then
+            echo "[dry-run] bash -l -c \"$MIGRATE_CMD\""
+        else
+            bash -l -c "$MIGRATE_CMD"
+        fi
     fi
     echo ""
 else
