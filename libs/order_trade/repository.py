@@ -268,6 +268,10 @@ class OrderRepository:
             conditions.append(Order.status.in_(filter.statuses))
         if filter.signal_id:
             conditions.append(Order.signal_id == filter.signal_id)
+        if filter.trade_type:
+            conditions.append(Order.trade_type == filter.trade_type)
+        if filter.close_reason:
+            conditions.append(Order.close_reason == filter.close_reason)
         if filter.start_time:
             conditions.append(Order.created_at >= filter.start_time)
         if filter.end_time:
@@ -303,6 +307,10 @@ class OrderRepository:
             conditions.append(Order.status.in_(filter.statuses))
         if filter.signal_id:
             conditions.append(Order.signal_id == filter.signal_id)
+        if filter.trade_type:
+            conditions.append(Order.trade_type == filter.trade_type)
+        if filter.close_reason:
+            conditions.append(Order.close_reason == filter.close_reason)
         if filter.start_time:
             conditions.append(Order.created_at >= filter.start_time)
         if filter.end_time:
@@ -506,6 +514,8 @@ class FillRepository:
             conditions.append(Fill.symbol == filter.symbol)
         if filter.side:
             conditions.append(Fill.side == filter.side)
+        if filter.trade_type:
+            conditions.append(Fill.trade_type == filter.trade_type)
         if filter.start_time:
             conditions.append(Fill.filled_at >= filter.start_time)
         if filter.end_time:
@@ -535,6 +545,8 @@ class FillRepository:
             conditions.append(Fill.symbol == filter.symbol)
         if filter.side:
             conditions.append(Fill.side == filter.side)
+        if filter.trade_type:
+            conditions.append(Fill.trade_type == filter.trade_type)
         if filter.start_time:
             conditions.append(Fill.filled_at >= filter.start_time)
         if filter.end_time:

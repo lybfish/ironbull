@@ -51,6 +51,7 @@
             <el-select v-model="where.source_service" placeholder="全部" clearable style="width:150px">
               <el-option label="signal-hub" value="signal-hub"/>
               <el-option label="signal-monitor" value="signal-monitor"/>
+              <el-option label="position-monitor" value="position-monitor"/>
               <el-option label="risk-control" value="risk-control"/>
               <el-option label="execution-dispatcher" value="execution-dispatcher"/>
             </el-select>

@@ -59,6 +59,8 @@ def _order_to_dto(order: Order) -> OrderDTO:
         market_type=order.market_type,
         side=order.side,
         order_type=order.order_type,
+        trade_type=order.trade_type or "OPEN",
+        close_reason=order.close_reason,
         quantity=float(order.quantity) if order.quantity else 0,
         price=float(order.price) if order.price else None,
         stop_loss=float(order.stop_loss) if order.stop_loss else None,
@@ -101,6 +103,7 @@ def _fill_to_dto(fill: Fill, order: "Order | None" = None) -> FillDTO:
         created_at=fill.created_at,
         exchange=exchange,
         market_type=market_type,
+        trade_type=fill.trade_type,
     )
 
 
@@ -155,6 +158,8 @@ class OrderTradeService:
             market_type=dto.market_type,
             side=dto.side,
             order_type=dto.order_type,
+            trade_type=dto.trade_type or "OPEN",
+            close_reason=dto.close_reason,
             quantity=dto.quantity,
             price=dto.price,
             stop_loss=dto.stop_loss,
@@ -459,7 +464,7 @@ class OrderTradeService:
                 new_fill_time=dto.filled_at.timestamp(),
             )
         
-        # 创建成交记录
+        # 创建成交记录（trade_type 从关联订单继承）
         fill = Fill(
             fill_id=_generate_fill_id(),
             exchange_trade_id=dto.exchange_trade_id,
@@ -468,6 +473,7 @@ class OrderTradeService:
             account_id=dto.account_id,
             symbol=dto.symbol,
             side=dto.side,
+            trade_type=order.trade_type or "OPEN",
             quantity=dto.quantity,
             price=dto.price,
             fee=dto.fee,

@@ -92,8 +92,8 @@ def assign_node(
 ):
     """
     将交易所账户分配到指定执行节点。
-    - execution_node_id = null/0：回收到本机执行
-    - execution_node_id = N：分配到节点 N（会校验节点存在且启用）
+    - execution_node_id = null/0：解绑节点，停止执行（信号不再派发）
+    - execution_node_id = N：绑定到节点 N（会校验节点存在且启用）
     """
     account = db.query(ExchangeAccount).filter(ExchangeAccount.id == account_id).first()
     if not account:

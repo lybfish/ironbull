@@ -246,6 +246,16 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column v-if="viewMode !== 'open'" label="平仓原因" width="100" align="center">
+          <template slot-scope="{row}">
+            <template v-if="row.close_reason">
+              <el-tag :type="closeReasonType(row.close_reason)" size="mini">
+                {{ closeReasonLabel(row.close_reason) }}
+              </el-tag>
+            </template>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="开仓时间" width="160">
           <template slot-scope="{row}">
             {{ formatTime(row.opened_at) }}
@@ -299,6 +309,11 @@
           <el-descriptions-item label="状态">
             <el-tag :type="detailRow.status === 'OPEN' ? 'success' : 'info'" size="mini">{{ detailRow.status === 'OPEN' ? '持仓中' : '已平仓' }}</el-tag>
           </el-descriptions-item>
+          <el-descriptions-item v-if="detailRow.close_reason" label="平仓原因">
+            <el-tag :type="closeReasonType(detailRow.close_reason)" size="mini">
+              {{ closeReasonLabel(detailRow.close_reason) }}
+            </el-tag>
+          </el-descriptions-item>
         </el-descriptions>
 
         <!-- 止盈止损信息（从关联订单汇总） -->
@@ -335,6 +350,18 @@
             </template>
           </el-table-column>
           <el-table-column prop="order_type" label="类型" width="70" align="center"/>
+          <el-table-column label="开/平仓" width="90" align="center">
+            <template slot-scope="{row}">
+              <el-tag :type="(row.trade_type||'OPEN')==='CLOSE'?'warning':''" size="mini" effect="plain">
+                {{ {OPEN:'开仓',CLOSE:'平仓',ADD:'加仓',REDUCE:'减仓'}[(row.trade_type||'OPEN').toUpperCase()] || '开仓' }}
+              </el-tag>
+              <div v-if="row.close_reason" style="font-size:10px;margin-top:1px">
+                <el-tag :type="row.close_reason==='TP'?'success':'danger'" size="mini" effect="plain">
+                  {{ {SL:'止损',TP:'止盈',SIGNAL:'信号',MANUAL:'手动',LIQUIDATION:'强平'}[(row.close_reason||'').toUpperCase()] || row.close_reason }}
+                </el-tag>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column label="数量" width="100" align="right">
             <template slot-scope="{row}">{{ formatNum(row.filled_quantity) }} / {{ formatNum(row.quantity) }}</template>
           </el-table-column>
@@ -622,6 +649,14 @@ export default {
     isLong(row) {
       const side = (row.position_side || row.side || '').toLowerCase()
       return side === 'long'
+    },
+    closeReasonLabel(r) {
+      const m = { SL: '止损', TP: '止盈', SIGNAL: '信号平仓', MANUAL: '手动平仓', LIQUIDATION: '强平' }
+      return m[(r || '').toUpperCase()] || r || '-'
+    },
+    closeReasonType(r) {
+      const m = { SL: 'danger', TP: 'success', SIGNAL: 'warning', MANUAL: 'info', LIQUIDATION: 'danger' }
+      return m[(r || '').toUpperCase()] || 'info'
     },
     formatPrice(val) {
       if (val === null || val === undefined || val === '' || val === 0) return '-'

@@ -29,7 +29,13 @@ class PositionDTO:
     leverage: Optional[int] = None
     margin: Optional[float] = None
     liquidation_price: Optional[float] = None
+    # 自管止盈止损
+    entry_price: Optional[float] = None
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    strategy_code: Optional[str] = None
     status: str = "OPEN"
+    close_reason: Optional[str] = None
     opened_at: Optional[datetime] = None
     closed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
@@ -122,6 +128,7 @@ class PositionFilter:
     market_type: Optional[str] = None
     position_side: Optional[str] = None
     status: Optional[str] = None      # OPEN/CLOSED/LIQUIDATED
+    close_reason: Optional[str] = None  # SL/TP/SIGNAL/MANUAL/LIQUIDATION
     has_position: Optional[bool] = None  # True: quantity > 0
     
     # 分页

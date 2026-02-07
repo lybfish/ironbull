@@ -372,25 +372,39 @@ class AnalyticsService:
         if start_date > end_date:
             raise InvalidDateRangeError(start_date, end_date)
         
-        # 查询已完成的订单
-        query = self.session.query(Order).filter(
+        # ── 统计方式：基于已平仓的持仓（Position.status=CLOSED），而非订单 ──
+        # 这样可以准确获取 realized_pnl、close_reason、持仓时间
+        from libs.position.models import PositionChange
+        
+        pos_query = self.session.query(Position).filter(
+            Position.tenant_id == self.tenant_id,
+            Position.account_id == self.account_id,
+            Position.status == "CLOSED",
+            Position.closed_at >= datetime.combine(start_date, datetime.min.time()),
+            Position.closed_at <= datetime.combine(end_date, datetime.max.time()),
+        )
+        if symbol:
+            pos_query = pos_query.filter(Position.symbol == symbol)
+        if strategy_code:
+            pos_query = pos_query.filter(Position.strategy_code == strategy_code)
+        
+        closed_positions = pos_query.all()
+        
+        # 同时统计所有已成交订单（用于手续费、交易量）
+        order_query = self.session.query(Order).filter(
             Order.tenant_id == self.tenant_id,
             Order.account_id == self.account_id,
             Order.status == "FILLED",
             Order.created_at >= datetime.combine(start_date, datetime.min.time()),
             Order.created_at <= datetime.combine(end_date, datetime.max.time()),
         )
-        
-        if strategy_code:
-            # 如果有 strategy_code 字段可以过滤
-            pass
         if symbol:
-            query = query.filter(Order.symbol == symbol)
+            order_query = order_query.filter(Order.symbol == symbol)
+        orders = order_query.all()
         
-        orders = query.all()
+        total_trades = len(closed_positions)
         
-        if not orders:
-            # 没有交易，返回空统计
+        if not closed_positions:
             return self.stats_repo.upsert(
                 account_id=self.account_id,
                 period_type=period_type,
@@ -402,7 +416,6 @@ class AnalyticsService:
             )
         
         # 计算统计
-        total_trades = len(orders)
         winning_trades = 0
         losing_trades = 0
         break_even_trades = 0
@@ -420,22 +433,13 @@ class AnalyticsService:
         # 用于计算连续胜负
         results = []  # 1 = win, -1 = loss, 0 = break even
         
+        # 从订单聚合手续费和交易量
         for order in orders:
-            # 获取该订单的成交
-            fills = self.session.query(Fill).filter(
-                Fill.order_id == order.order_id,
-            ).all()
-            
-            if not fills:
-                continue
-            
-            # 计算订单盈亏（简化：使用 realized_pnl 如果有）
-            pnl = float(order.realized_pnl or 0)
-            
-            # 如果没有 realized_pnl，尝试从成交计算
-            if pnl == 0 and hasattr(order, 'filled_price') and order.filled_price:
-                # 这里简化处理，实际需要配对开仓/平仓订单
-                pass
+            total_volume += float(order.filled_quantity or 0) * float(order.avg_price or 0)
+            total_fee += float(order.total_fee or 0)
+        
+        for pos in closed_positions:
+            pnl = float(pos.realized_pnl or 0)
             
             if pnl > 0:
                 winning_trades += 1
@@ -451,12 +455,10 @@ class AnalyticsService:
                 break_even_trades += 1
                 results.append(0)
             
-            # 交易量和手续费
-            total_volume += float(order.filled_quantity or 0) * float(order.filled_price or 0)
-            total_fee += float(order.total_fee or 0)
-            
-            # 持仓时间（需要配对订单，这里简化）
-            # holding_periods.append(...)
+            # 计算持仓时间
+            if pos.opened_at and pos.closed_at:
+                holding_seconds = (pos.closed_at - pos.opened_at).total_seconds()
+                holding_periods.append(holding_seconds)
         
         # 胜率
         win_rate = self.calculator.calculate_win_rate(winning_trades, total_trades)

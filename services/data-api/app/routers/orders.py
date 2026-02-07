@@ -34,13 +34,15 @@ def list_orders(
     side: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     signal_id: Optional[str] = Query(None),
+    trade_type: Optional[str] = Query(None, description="OPEN/CLOSE/ADD/REDUCE"),
+    close_reason: Optional[str] = Query(None, description="SL/TP/SIGNAL/MANUAL/LIQUIDATION"),
     start_time: Optional[str] = Query(None, description="ISO datetime"),
     end_time: Optional[str] = Query(None, description="ISO datetime"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
-    """订单列表（支持按租户、账户、标的、状态、时间范围过滤）"""
+    """订单列表（支持按租户、账户、标的、状态、交易类型、时间范围过滤）"""
     try:
         filt = OrderFilter(
             tenant_id=tenant_id,
@@ -50,6 +52,8 @@ def list_orders(
             side=side,
             status=status,
             signal_id=signal_id,
+            trade_type=trade_type,
+            close_reason=close_reason,
             start_time=parse_datetime(start_time),
             end_time=parse_datetime(end_time),
             limit=limit,
@@ -70,6 +74,7 @@ def list_fills(
     order_id: Optional[str] = Query(None),
     symbol: Optional[str] = Query(None),
     side: Optional[str] = Query(None),
+    trade_type: Optional[str] = Query(None, description="OPEN/CLOSE/ADD/REDUCE"),
     start_time: Optional[str] = Query(None, description="ISO datetime"),
     end_time: Optional[str] = Query(None, description="ISO datetime"),
     limit: int = Query(100, ge=1, le=500),
@@ -84,6 +89,7 @@ def list_fills(
             order_id=order_id,
             symbol=symbol,
             side=side,
+            trade_type=trade_type,
             start_time=parse_datetime(start_time),
             end_time=parse_datetime(end_time),
             limit=limit,

@@ -6,7 +6,7 @@ GET /api/strategy-bindings-admin -> 策略绑定列表（支持按租户/用户/
 
 from typing import Dict, Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Body
 from sqlalchemy.orm import Session
 
 from libs.member.models import StrategyBinding, User, ExchangeAccount, Strategy
@@ -23,6 +23,9 @@ def _binding_dict(b: StrategyBinding, user: User = None, tenant: Tenant = None, 
     if account:
         acc_label = f"{account.exchange}({account.api_key[:8]}...)" if account.api_key else account.exchange
 
+    risk_mode = int(b.risk_mode or 1)
+    risk_label = StrategyBinding.RISK_MODE_LABELS.get(risk_mode, "稳健")
+
     return {
         "id": b.id,
         "user_id": b.user_id,
@@ -36,6 +39,14 @@ def _binding_dict(b: StrategyBinding, user: User = None, tenant: Tenant = None, 
         "strategy_name": strategy.name if strategy else b.strategy_code,
         "mode": int(b.mode or 2),
         "ratio": int(b.ratio or 100),
+        # 用户仓位参数
+        "capital": float(b.capital or 0),
+        "leverage": int(b.leverage or 20),
+        "risk_mode": risk_mode,
+        "risk_mode_label": risk_label,
+        "amount_usdt": float(b.amount_usdt) if b.capital else 0,
+        "margin_per_trade": round(float(b.capital or 0) * b.risk_pct, 2) if b.capital else 0,
+        # 统计
         "total_profit": float(b.total_profit or 0),
         "total_trades": int(b.total_trades or 0),
         "point_card_self": float(user.point_card_self or 0) if user else 0,
@@ -112,4 +123,54 @@ def list_bindings(
         "total": total,
         "page": page,
         "page_size": page_size,
+    }
+
+
+@router.put("/{binding_id}")
+def update_binding(
+    binding_id: int,
+    capital: Optional[float] = Body(None, description="本金(USDT)"),
+    leverage: Optional[int] = Body(None, description="杠杆倍数"),
+    risk_mode: Optional[int] = Body(None, description="风险档位: 1=稳健 2=均衡 3=激进"),
+    status: Optional[int] = Body(None, description="状态: 1=运行 0=停止"),
+    _admin: Dict[str, Any] = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """管理员修改策略绑定参数"""
+    binding = db.query(StrategyBinding).filter(StrategyBinding.id == binding_id).first()
+    if not binding:
+        return {"success": False, "message": "绑定不存在"}
+
+    changed = []
+    if capital is not None and capital > 0:
+        binding.capital = capital
+        changed.append(f"本金={capital}")
+    if leverage is not None and leverage > 0:
+        binding.leverage = leverage
+        changed.append(f"杠杆={leverage}")
+    if risk_mode is not None:
+        if risk_mode not in StrategyBinding.RISK_MODE_MAP:
+            return {"success": False, "message": "无效的风险档位（1=稳健 2=均衡 3=激进）"}
+        binding.risk_mode = risk_mode
+        changed.append(f"风险={StrategyBinding.RISK_MODE_LABELS.get(risk_mode)}")
+    if status is not None and status in (0, 1):
+        binding.status = status
+        changed.append(f"状态={'运行' if status == 1 else '停止'}")
+
+    if not changed:
+        return {"success": False, "message": "未提供任何修改参数"}
+
+    db.commit()
+    db.refresh(binding)
+
+    # 返回更新后的完整数据
+    user = db.query(User).filter(User.id == binding.user_id).first()
+    tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first() if user else None
+    strategy = db.query(Strategy).filter(Strategy.code == binding.strategy_code).first()
+    account = db.query(ExchangeAccount).filter(ExchangeAccount.id == binding.account_id).first()
+
+    return {
+        "success": True,
+        "message": f"已修改: {', '.join(changed)}",
+        "data": _binding_dict(binding, user=user, tenant=tenant, strategy=strategy, account=account),
     }

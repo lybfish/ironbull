@@ -65,8 +65,16 @@ class Position(Base):
     margin = Column(DECIMAL(20, 8), nullable=True, comment="保证金")
     liquidation_price = Column(DECIMAL(20, 8), nullable=True, comment="强平价格")
     
+    # 自管止盈止损（不挂交易所单，由 position_monitor 监控到价平仓）
+    entry_price = Column(DECIMAL(20, 8), nullable=True, comment="入场价格")
+    stop_loss = Column(DECIMAL(20, 8), nullable=True, comment="止损价格")
+    take_profit = Column(DECIMAL(20, 8), nullable=True, comment="止盈价格")
+    strategy_code = Column(String(64), nullable=True, comment="策略代码（用于冷却回调）")
+    
     # 状态
     status = Column(String(16), nullable=False, default="OPEN", comment="OPEN/CLOSED/LIQUIDATED")
+    close_reason = Column(String(32), nullable=True,
+                          comment="平仓原因: SL/TP/SIGNAL/MANUAL/LIQUIDATION")
     
     # 时间戳
     opened_at = Column(DateTime, nullable=True, comment="开仓时间")
@@ -108,7 +116,12 @@ class Position(Base):
             "leverage": self.leverage,
             "margin": float(self.margin) if self.margin else None,
             "liquidation_price": float(self.liquidation_price) if self.liquidation_price else None,
+            "entry_price": float(self.entry_price) if self.entry_price else None,
+            "stop_loss": float(self.stop_loss) if self.stop_loss else None,
+            "take_profit": float(self.take_profit) if self.take_profit else None,
+            "strategy_code": self.strategy_code,
             "status": self.status,
+            "close_reason": self.close_reason,
             "opened_at": self.opened_at.isoformat() if self.opened_at else None,
             "closed_at": self.closed_at.isoformat() if self.closed_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,

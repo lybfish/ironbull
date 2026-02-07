@@ -325,7 +325,9 @@ async def _run_one(
         filled_qty = result.filled_quantity or 0
         filled_price = result.filled_price or entry_price
         exchange_order_id = str(result.exchange_order_id) if result.exchange_order_id else None
-        if ok and (stop_loss or take_profit) and filled_qty > 0:
+        # 交易所 SL/TP 开关（默认关闭，改为自管模式）
+        exchange_sl_tp = config.get_bool("exchange_sl_tp", False)
+        if ok and (stop_loss or take_profit) and filled_qty > 0 and exchange_sl_tp:
             try:
                 await trader.set_sl_tp(
                     symbol=symbol,
@@ -600,6 +602,107 @@ def api_cancel_conditionals(req: CancelConditionalsRequest, _: None = Depends(ve
         r = asyncio.run(_cancel_conditionals_one(task=task, sandbox=req.sandbox, symbols=req.symbols))
         results.append(r)
     return {"success": True, "results": results}
+
+
+# ========== 平仓端点（position_monitor 自管 SL/TP 触发）==========
+
+class ClosePositionRequest(BaseModel):
+    account_id: int
+    tenant_id: int
+    exchange: str
+    api_key: str
+    api_secret: str
+    passphrase: Optional[str] = None
+    market_type: str = "future"
+    symbol: str
+    side: str  # "BUY" or "SELL"（反向平仓方向）
+    amount_usdt: float  # 用 USDT 金额（= 币数量 × 当前价），LiveTrader 自动换算合约张数
+    trigger_type: str = "SL"  # "SL" or "TP"
+
+
+async def _close_position_one(req: ClosePositionRequest, sandbox: bool) -> Dict[str, Any]:
+    """在节点侧执行平仓市价单"""
+    symbol = to_canonical_symbol(normalize_symbol(req.symbol or "", "binance"), "future")
+    order_side = OrderSide.BUY if (req.side or "SELL").upper() == "BUY" else OrderSide.SELL
+    trader = LiveTrader(
+        exchange=req.exchange or "binance",
+        api_key=req.api_key,
+        api_secret=req.api_secret,
+        passphrase=req.passphrase or "",
+        sandbox=sandbox,
+        market_type=req.market_type or "future",
+        settlement_service=None,
+    )
+    try:
+        await trader.exchange.load_markets()
+        # 获取当前价格作为参考
+        ccxt_sym = trader._ccxt_symbol(symbol)
+        ticker = await trader.exchange.fetch_ticker(ccxt_sym)
+        current_price = float(ticker.get("last") or ticker.get("close") or 0)
+
+        # 用 amount_usdt 让 LiveTrader 内部统一换算（处理合约张数、精度等）
+        result = await trader.create_order(
+            symbol=symbol,
+            side=order_side,
+            order_type=OrderType.MARKET,
+            amount_usdt=req.amount_usdt,
+            price=current_price,
+            signal_id=f"PM_{req.trigger_type}",
+            trade_type="CLOSE",
+            close_reason=req.trigger_type,
+        )
+        ok = result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
+        filled_qty = result.filled_quantity or 0
+        filled_price = result.filled_price or current_price
+
+        # 张数→币数量转换
+        coin_qty = filled_qty
+        if filled_qty > 0 and (req.market_type or "future") == "future":
+            try:
+                market = trader.exchange.markets.get(ccxt_sym, {})
+                cs = float(market.get("contractSize") or 0)
+                coin_qty = contracts_to_coins_by_size(filled_qty, cs)
+            except Exception:
+                pass
+
+        await trader.close()
+        log.info(f"[NODE] {req.trigger_type}平仓{'成功' if ok else '失败'}",
+                 account_id=req.account_id, symbol=symbol,
+                 filled_qty=coin_qty, filled_price=filled_price)
+        return {
+            "account_id": req.account_id,
+            "success": ok,
+            "filled_quantity": coin_qty,
+            "filled_price": filled_price,
+            "trigger_type": req.trigger_type,
+            "error": None,
+        }
+    except Exception as e:
+        try:
+            await trader.close()
+        except Exception:
+            pass
+        log.error(f"[NODE] {req.trigger_type}平仓异常",
+                  account_id=req.account_id, symbol=req.symbol, error=str(e))
+        return {
+            "account_id": req.account_id,
+            "success": False,
+            "filled_quantity": 0,
+            "filled_price": 0,
+            "trigger_type": req.trigger_type,
+            "error": str(e),
+        }
+
+
+@app.post("/api/close-position")
+def api_close_position(req: ClosePositionRequest, _: None = Depends(verify_center_token)):
+    """
+    接收中心 position_monitor 的平仓指令（自管 SL/TP 到价触发）。
+    在节点侧用用户 API key 发市价反向单平仓。
+    """
+    sandbox = config.get_bool("exchange_sandbox", True)
+    result = asyncio.run(_close_position_one(req, sandbox))
+    return result
 
 
 @app.get("/health")

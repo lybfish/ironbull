@@ -445,6 +445,14 @@ def get_status():
                 "cooldown_until": until.isoformat(),
                 "remaining_minutes": round((until - now).total_seconds() / 60, 1),
             })
+    # 持仓监控统计
+    pm_stats = {}
+    if not EXCHANGE_SL_TP:
+        try:
+            from libs.position.monitor import get_monitor_stats
+            pm_stats = get_monitor_stats()
+        except Exception:
+            pass
     return jsonify({
         "success": True,
         "state": monitor_state,
@@ -455,7 +463,10 @@ def get_status():
             "notify_enabled": NOTIFY_ON_SIGNAL,
             "dispatch_by_strategy": DISPATCH_BY_STRATEGY,
             "strategy_dispatch_amount": STRATEGY_DISPATCH_AMOUNT,
+            "exchange_sl_tp": EXCHANGE_SL_TP,
+            "position_monitor": not EXCHANGE_SL_TP,
         },
+        "position_monitor_stats": pm_stats,
         "cooldowns": cooldowns,
     })
 
@@ -667,6 +678,8 @@ DISPATCH_BY_STRATEGY = config.get_bool("dispatch_by_strategy", False)
 STRATEGY_DISPATCH_AMOUNT = config.get_float("strategy_dispatch_amount", 100.0)
 # 为 True 时，远程节点任务投递到 NODE_EXECUTE_QUEUE，由 worker 消费并 POST 到节点；否则直接 POST
 USE_NODE_EXECUTION_QUEUE = config.get_bool("use_node_execution_queue", False)
+# 是否在交易所挂 SL/TP 单（False=自管模式，由 position_monitor 监控到价平仓，防止交易所扫损）
+EXCHANGE_SL_TP = config.get_bool("exchange_sl_tp", False)
 
 # 自动交易器（全局单例）
 auto_trader: Optional[AutoTrader] = None
@@ -674,6 +687,58 @@ auto_trader: Optional[AutoTrader] = None
 _db_session = None
 # 结算服务
 _settlement_service: Optional[TradeSettlementService] = None
+
+
+def _write_sl_tp_to_position(
+    session,
+    target: ExecutionTarget,
+    symbol: str,
+    order_side,
+    filled_price: float,
+    stop_loss: float,
+    take_profit: float,
+    strategy_code: str = "",
+):
+    """
+    将 SL/TP + 入场价写入 fact_position 表，供 position_monitor 监控到价平仓。
+    """
+    from libs.position.repository import PositionRepository
+    from libs.trading.base import OrderSide as _OrderSide
+    pos_repo = PositionRepository(session)
+    # OrderSide enum → position_side 字符串
+    if isinstance(order_side, _OrderSide):
+        position_side = "LONG" if order_side == _OrderSide.BUY else "SHORT"
+    else:
+        position_side = "LONG" if str(order_side).upper().endswith("BUY") else "SHORT"
+    # 尝试两种 symbol 格式查找持仓
+    pos = None
+    for s in [symbol, symbol.replace("/", "")]:
+        pos = pos_repo.get_by_key(
+            tenant_id=target.tenant_id,
+            account_id=target.account_id,
+            symbol=s,
+            exchange=target.exchange or "binance",
+            position_side=position_side,
+        )
+        if pos:
+            break
+    if pos:
+        from decimal import Decimal
+        pos.entry_price = Decimal(str(filled_price)) if filled_price else None
+        pos.stop_loss = Decimal(str(stop_loss)) if stop_loss else None
+        pos.take_profit = Decimal(str(take_profit)) if take_profit else None
+        pos.strategy_code = strategy_code or None
+        pos_repo.update(pos)
+        log.info(
+            "SL/TP 已写入持仓表（自管模式）",
+            account_id=target.account_id,
+            symbol=symbol,
+            entry=filled_price,
+            sl=stop_loss,
+            tp=take_profit,
+        )
+    else:
+        log.warning("未找到持仓记录，无法写入 SL/TP", account_id=target.account_id, symbol=symbol)
 
 
 async def _execute_signal_for_target(
@@ -716,6 +781,12 @@ async def _execute_signal_for_target(
         account_id=target.account_id,
     )
     try:
+        # 根据信号类型映射 trade_type
+        sig_type = (signal.get("signal_type") or "OPEN").upper()
+        trade_type = {"OPEN": "OPEN", "CLOSE": "CLOSE", "ADD": "ADD", "REDUCE": "REDUCE",
+                      "HEDGE": "OPEN", "GRID": "OPEN"}.get(sig_type, "OPEN")
+        close_reason = signal.get("close_reason") if trade_type == "CLOSE" else None
+
         # 传 amount_usdt 让 LiveTrader 内部统一换算数量（自动处理 contractSize、最小限制等）
         order_result = await trader.create_order(
             symbol=symbol,
@@ -727,23 +798,40 @@ async def _execute_signal_for_target(
             signal_id=signal.get("signal_id"),
             stop_loss=stop_loss or None,
             take_profit=take_profit or None,
+            trade_type=trade_type,
+            close_reason=close_reason,
         )
         ok = order_result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
         filled_qty = order_result.filled_quantity or 0
         filled_price = order_result.filled_price or entry_price
         sl_tp_ok = False
         if ok and (stop_loss or take_profit) and filled_qty > 0:
+            if EXCHANGE_SL_TP:
+                # 交易所挂单模式（保留项，默认关闭）
+                try:
+                    await trader.set_sl_tp(
+                        symbol=symbol,
+                        side=order_side,
+                        quantity=filled_qty,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                    )
+                    sl_tp_ok = True
+                except Exception as e:
+                    log.warning("set_sl_tp failed", account_id=target.account_id, error=str(e))
+            else:
+                # 自管模式：SL/TP 写入持仓表，由 position_monitor 监控到价平仓
+                sl_tp_ok = True  # 标记为已处理（由监控服务接管）
+        # ── 写入持仓表的 SL/TP + entry_price（自管模式核心）──
+        if ok and filled_qty > 0:
             try:
-                await trader.set_sl_tp(
-                    symbol=symbol,
-                    side=order_side,
-                    quantity=filled_qty,
-                    stop_loss=stop_loss,
-                    take_profit=take_profit,
+                strategy_code = signal.get("strategy") or signal.get("strategy_code") or ""
+                _write_sl_tp_to_position(
+                    session, target, symbol, order_side,
+                    filled_price, stop_loss, take_profit, strategy_code,
                 )
-                sl_tp_ok = True
             except Exception as e:
-                log.warning("set_sl_tp failed", account_id=target.account_id, error=str(e))
+                log.warning("write sl/tp to position failed", account_id=target.account_id, error=str(e))
         await trader.close()
         return {
             "account_id": target.account_id,
@@ -851,10 +939,10 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
                 pass
             return False
 
-        # 按 execution_node_id 分组：None/0=本机，其余=远程节点
+        # 按 execution_node_id 分组（所有 target 必定 node_id > 0，已在 get_execution_targets 中过滤）
         by_node = defaultdict(list)
         for t in targets:
-            nid = (t.execution_node_id or 0) or 0
+            nid = t.execution_node_id or 0
             by_node[nid].append(t)
 
         def _is_single_mode_exhausted(target) -> bool:
@@ -902,7 +990,13 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
                     "skipped": True,
                 })
                 continue
-            amount, leverage = _resolve_amount_leverage_for_tenant(repo, strategy, target.tenant_id)
+            # 优先级: 用户绑定参数 > 租户配置 > 策略默认
+            if target.binding_amount_usdt > 0:
+                # 用户绑定了本金+杠杆+风险档位，直接用计算好的 amount_usdt
+                amount = target.binding_amount_usdt
+                leverage = target.binding_leverage if target.binding_leverage > 0 else 20
+            else:
+                amount, leverage = _resolve_amount_leverage_for_tenant(repo, strategy, target.tenant_id)
             target_amount = round(amount * (target.ratio / 100), 2) if target.ratio and target.ratio != 100 else amount
             signal_for_target = dict(signal)
             if leverage > 0:
@@ -943,7 +1037,12 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
                         "success": False, "error": f"已有 {symbol} {position_side} 持仓，跳过", "skipped": True,
                     })
                     continue
-                amount, leverage = _resolve_amount_leverage_for_tenant(repo, strategy, t.tenant_id)
+                # 优先级: 用户绑定参数 > 租户配置 > 策略默认
+                if t.binding_amount_usdt > 0:
+                    amount = t.binding_amount_usdt
+                    leverage = t.binding_leverage if t.binding_leverage > 0 else 20
+                else:
+                    amount, leverage = _resolve_amount_leverage_for_tenant(repo, strategy, t.tenant_id)
                 task_amount = round(amount * (t.ratio / 100), 2) if t.ratio and t.ratio != 100 else amount
                 task_list.append({
                     "account_id": t.account_id,
@@ -1412,6 +1511,14 @@ def _auto_start_monitor():
     _sync_stop_event.clear()
     sync_thread = threading.Thread(target=_sync_loop, daemon=True)
     sync_thread.start()
+    # 启动持仓 SL/TP 自管监控（不在交易所挂单，自己监控到价平仓）
+    if not EXCHANGE_SL_TP:
+        from libs.position.monitor import start_position_monitor, set_on_sl_triggered
+        # 注册止损冷却回调：止损平仓后自动设置策略冷却
+        set_on_sl_triggered(lambda symbol, strategy: set_cooldown(symbol, strategy))
+        pm_interval = config.get_float("position_monitor_interval", 5.0)
+        start_position_monitor(interval=pm_interval)
+        log.info("position_monitor 已启动（自管SL/TP模式）", interval=pm_interval)
 
 
 # Flask 启动后自动启动监控（仅在非 import 场景执行一次）

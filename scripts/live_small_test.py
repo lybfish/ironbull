@@ -144,8 +144,8 @@ async def _run(
             return
 
         ccxt_sym = trader._ccxt_symbol(symbol)
-        # 先尝试切全仓（无持仓时易成功；有持仓时可能失败，忽略即可）
-        await trader.ensure_cross_margin_mode(ccxt_sym)
+        # 先尝试切逐仓（无持仓时易成功；有持仓时可能失败，忽略即可）
+        await trader.ensure_isolated_margin_mode(ccxt_sym)
         positions = await trader.exchange.fetch_positions()
         # 持仓数量：CCXT 多为 contracts，Gate 原始为 size，统一用 _pos_contracts
         def _pos_contracts(p):

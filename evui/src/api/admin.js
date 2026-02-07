@@ -93,6 +93,9 @@ export function getStrategyBindings(params = {}) {
 export function getBindingsAdmin(params = {}) {
   return axios.get('/strategy-bindings-admin', {params})
 }
+export function updateBinding(bindingId, data) {
+  return axios.put(`/strategy-bindings-admin/${bindingId}`, data)
+}
 
 // ---- 交易所账户 ----
 export function getExchangeAccounts(params = {}) {

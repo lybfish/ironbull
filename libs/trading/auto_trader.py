@@ -388,9 +388,10 @@ class AutoTrader:
                     filled_qty = order_result.filled_quantity
                     filled_price = order_result.filled_price or entry_price
                     
-                    # 设置止盈止损单
+                    # 设置止盈止损单（受 exchange_sl_tp 开关控制，默认关闭）
                     sl_tp_results = {}
-                    if stop_loss or take_profit:
+                    _exchange_sl_tp = get_config().get_bool("exchange_sl_tp", False)
+                    if (stop_loss or take_profit) and _exchange_sl_tp:
                         try:
                             sl_tp_results = await trader.set_sl_tp(
                                 symbol=symbol,
@@ -400,12 +401,14 @@ class AutoTrader:
                                 take_profit=take_profit,
                             )
                             logger.info(
-                                "sl/tp orders set",
+                                "sl/tp orders set (exchange mode)",
                                 sl_status=sl_tp_results.get("sl", {}).status if sl_tp_results.get("sl") else None,
                                 tp_status=sl_tp_results.get("tp", {}).status if sl_tp_results.get("tp") else None,
                             )
                         except Exception as e:
                             logger.error("failed to set sl/tp", error=str(e))
+                    elif stop_loss or take_profit:
+                        logger.info("SL/TP 自管模式，不挂交易所单（由 position_monitor 接管）")
                     
                     # 记录交易
                     trade = TradeRecord(
@@ -499,6 +502,8 @@ class AutoTrader:
                 side=close_side,
                 order_type=OrderType.MARKET,
                 quantity=trade.quantity,
+                trade_type="CLOSE",
+                close_reason="SIGNAL",
             )
             
             if order_result.status in [OrderStatus.FILLED, OrderStatus.PARTIAL]:

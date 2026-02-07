@@ -159,8 +159,8 @@ class LiveTrader(Trader):
         
         # 合约持仓模式：None=未检测，True=双向持仓，False=单向持仓（不传 positionSide）
         self._position_mode_dual: Optional[bool] = None
-        # 已尝试设为全仓的 symbol 集合（逐仓→全仓，每 symbol 只尝试一次）
-        self._margin_cross_tried: Set[str] = set()
+        # 已尝试设为逐仓的 symbol 集合（每 symbol 只尝试一次）
+        self._margin_isolated_tried: Set[str] = set()
         
         logger.info("live trader initialized", exchange=exchange, sandbox=sandbox)
 
@@ -314,15 +314,13 @@ class LiveTrader(Trader):
 
         try:
             if self.exchange_name == "gateio":
-                # Gate 统一账户：通过 CCXT 的 set_leverage 或跳过
-                # Gate CCXT 的 set_leverage 需要额外参数，直接用原生 API
+                # Gate 统一账户：leverage > 0 即逐仓模式，不传 cross_leverage_limit
                 contract = self._gate_contract_name(symbol)
                 try:
                     await self.exchange.privateFuturesPostSettlePositions({
                         "settle": DEFAULT_SETTLE,
                         "contract": contract,
                         "leverage": str(leverage),
-                        "cross_leverage_limit": str(leverage),
                     })
                 except Exception:
                     # Gate 可能不支持或已有持仓，尝试 CCXT 方式
@@ -338,7 +336,7 @@ class LiveTrader(Trader):
                 params: Dict[str, Any] = {
                     "instId": inst_id,
                     "lever": str(leverage),
-                    "mgnMode": "cross",
+                    "mgnMode": "isolated",
                 }
                 # 双向持仓需要分别设 long 和 short
                 if self._position_mode_dual:
@@ -476,26 +474,27 @@ class LiveTrader(Trader):
             return val.lower()
         return val
 
-    async def ensure_cross_margin_mode(self, symbol: str) -> None:
+    async def ensure_isolated_margin_mode(self, symbol: str) -> None:
         """
-        合约：若为逐仓则尝试改为全仓（每 symbol 只尝试一次）。
-        - Binance：用 set_margin_mode("cross", symbol)，已是全仓返回 -4046 可忽略。
-        - OKX：需通过 set-leverage 同时传 lever + mgnMode=cross；先查当前杠杆以免改变用户设置。
+        合约：确保使用逐仓保证金模式（每 symbol 只尝试一次）。
+        逐仓优势：单笔亏损不影响整个账户余额，风险隔离。
+        - Binance：用 set_margin_mode("isolated", symbol)，已是逐仓返回 -4046 可忽略。
+        - OKX：需通过 set-leverage 同时传 lever + mgnMode=isolated；先查当前杠杆以免改变用户设置。
         - Gate：CCXT 不支持 set_margin_mode，统一账户默认全仓，跳过。
         """
         if self.market_type != "future" or not symbol:
             return
         ccxt_sym = self._ccxt_symbol(symbol) if ":" not in symbol else symbol
-        if ccxt_sym in self._margin_cross_tried:
+        if ccxt_sym in self._margin_isolated_tried:
             return
-        self._margin_cross_tried.add(ccxt_sym)
+        self._margin_isolated_tried.add(ccxt_sym)
 
         # --- Gate：统一账户默认全仓，CCXT 不支持切换，跳过 ---
         if self.exchange_name == "gateio":
             logger.debug("gate unified account, skip margin mode switch", symbol=ccxt_sym)
             return
 
-        # --- OKX：通过 leverage API 设 mgnMode=cross（需同时传 lever） ---
+        # --- OKX：通过 leverage API 设 mgnMode=isolated（需同时传 lever） ---
         if self.exchange_name == "okx":
             try:
                 # 先查当前杠杆和保证金模式
@@ -503,31 +502,31 @@ class LiveTrader(Trader):
                 inst_id = self.exchange.market_id(ccxt_sym)
                 lev_info = await self.exchange.privateGetAccountLeverageInfo({
                     "instId": inst_id,
-                    "mgnMode": "cross",
+                    "mgnMode": "isolated",
                 })
                 data = lev_info.get("data", [])
                 if data:
                     current_lever = data[0].get("lever", str(DEFAULT_LEVERAGE_FALLBACK))
                     current_mgn = data[0].get("mgnMode", "")
-                    if current_mgn == "cross":
-                        logger.debug("okx already cross margin", symbol=ccxt_sym, lever=current_lever)
+                    if current_mgn == "isolated":
+                        logger.debug("okx already isolated margin", symbol=ccxt_sym, lever=current_lever)
                         return
                 else:
                     current_lever = str(DEFAULT_LEVERAGE_FALLBACK)
 
-                # 设为全仓，保持原有杠杆
+                # 设为逐仓，保持原有杠杆
                 await self.exchange.privatePostAccountSetLeverage({
                     "instId": inst_id,
-                    "mgnMode": "cross",
+                    "mgnMode": "isolated",
                     "lever": str(current_lever),
                 })
-                logger.info("okx margin set to cross", symbol=ccxt_sym, lever=current_lever)
+                logger.info("okx margin set to isolated", symbol=ccxt_sym, lever=current_lever)
             except Exception as e:
                 err_str = str(e).lower()
                 if "no need" in err_str or "already" in err_str:
-                    logger.debug("okx margin already cross", symbol=ccxt_sym)
+                    logger.debug("okx margin already isolated", symbol=ccxt_sym)
                 else:
-                    logger.warning("okx set cross margin failed, continue", symbol=ccxt_sym, error=str(e))
+                    logger.warning("okx set isolated margin failed, continue", symbol=ccxt_sym, error=str(e))
             return
 
         # --- Binance 及其他：用 CCXT 统一接口 ---
@@ -535,17 +534,17 @@ class LiveTrader(Trader):
         if not set_margin:
             return
         try:
-            result = set_margin("cross", ccxt_sym)
+            result = set_margin("isolated", ccxt_sym)
             if asyncio.iscoroutine(result):
                 await result
-            logger.info("margin mode set to cross", exchange=self.exchange_name, symbol=ccxt_sym)
+            logger.info("margin mode set to isolated", exchange=self.exchange_name, symbol=ccxt_sym)
         except Exception as e:
             err_str = str(e).lower()
-            # Binance -4046: No need to change margin type（已是全仓）
+            # Binance -4046: No need to change margin type（已是逐仓）
             if "-4046" in err_str or "no need" in err_str:
-                logger.debug("margin already cross or unchanged", symbol=ccxt_sym)
+                logger.debug("margin already isolated or unchanged", symbol=ccxt_sym)
             else:
-                logger.warning("set margin to cross failed (e.g. has position), continue", symbol=ccxt_sym, error=str(e))
+                logger.warning("set margin to isolated failed (e.g. has position), continue", symbol=ccxt_sym, error=str(e))
 
     async def create_order(
         self,
@@ -560,6 +559,8 @@ class LiveTrader(Trader):
         leverage: Optional[int] = None,        # 杠杆倍数（从信号/策略传入，下单前自动设置）
         stop_loss: Optional[float] = None,     # 止损价（记录到订单）
         take_profit: Optional[float] = None,   # 止盈价（记录到订单）
+        trade_type: Optional[str] = "OPEN",    # 交易类型: OPEN/CLOSE/ADD/REDUCE
+        close_reason: Optional[str] = None,    # 平仓原因: SL/TP/SIGNAL/MANUAL/LIQUIDATION
         **kwargs,
     ) -> OrderResult:
         """
@@ -596,10 +597,10 @@ class LiveTrader(Trader):
             price = self._price_precision(ccxt_sym, price)
         
         try:
-            # 合约：先确保持仓模式（尝试双向）、再尝试逐仓→全仓，最后决定是否传 positionSide
+            # 合约：先确保持仓模式（尝试双向）、再确保逐仓保证金，最后决定是否传 positionSide
             if self.market_type == "future":
                 await self.ensure_dual_position_mode()
-                await self.ensure_cross_margin_mode(ccxt_sym)
+                await self.ensure_isolated_margin_mode(ccxt_sym)
                 # 设置杠杆（从信号/策略传入）
                 if leverage and leverage > 0:
                     await self.ensure_leverage(symbol, leverage)
@@ -619,6 +620,8 @@ class LiveTrader(Trader):
                     stop_loss=stop_loss,
                     take_profit=take_profit,
                     leverage=leverage,
+                    trade_type=trade_type,
+                    close_reason=close_reason,
                 )
                 if db_order_id:
                     order_id = db_order_id  # 使用数据库订单ID
@@ -913,7 +916,7 @@ class LiveTrader(Trader):
             # 注意：ordType=conditional + closeFraction 只能存 SL 或 TP 其一；oco 可同时包含两者。
             algo_params: Dict[str, Any] = {
                 "instId": inst_id,
-                "tdMode": "cross",
+                "tdMode": "isolated",
                 "side": close_side,
                 "posSide": pos_side,
                 "ordType": "oco",
@@ -1036,7 +1039,7 @@ class LiveTrader(Trader):
         try:
             if self.market_type == "future":
                 await self.ensure_dual_position_mode()
-                await self.ensure_cross_margin_mode(ccxt_sym)
+                await self.ensure_isolated_margin_mode(ccxt_sym)
             params: Dict[str, Any] = {
                 "stopPrice": stop_price,
             }
@@ -1130,7 +1133,7 @@ class LiveTrader(Trader):
         try:
             if self.market_type == "future":
                 await self.ensure_dual_position_mode()
-                await self.ensure_cross_margin_mode(ccxt_sym)
+                await self.ensure_isolated_margin_mode(ccxt_sym)
             params: Dict[str, Any] = {
                 "stopPrice": take_profit_price,
             }
@@ -1567,6 +1570,8 @@ class LiveTrader(Trader):
         stop_loss: Optional[float] = None,
         take_profit: Optional[float] = None,
         leverage: Optional[int] = None,
+        trade_type: Optional[str] = "OPEN",
+        close_reason: Optional[str] = None,
     ) -> Optional[str]:
         """创建订单记录（PENDING 状态）"""
         order_type_str = "MARKET" if order_type == OrderType.MARKET else "LIMIT"
@@ -1587,6 +1592,8 @@ class LiveTrader(Trader):
                     stop_loss=Decimal(str(stop_loss)) if stop_loss else None,
                     take_profit=Decimal(str(take_profit)) if take_profit else None,
                     leverage=leverage,
+                    trade_type=trade_type or "OPEN",
+                    close_reason=close_reason,
                 )
                 logger.debug("order record created (settlement)", order_id=order_dto.order_id)
                 return order_dto.order_id
@@ -1616,6 +1623,8 @@ class LiveTrader(Trader):
                 stop_loss=stop_loss,
                 take_profit=take_profit,
                 leverage=leverage,
+                trade_type=trade_type or "OPEN",
+                close_reason=close_reason,
             ))
             
             logger.debug("order record created", order_id=order_dto.order_id)

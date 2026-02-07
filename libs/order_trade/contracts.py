@@ -33,6 +33,8 @@ class CreateOrderDTO:
     market_type: str = "spot"           # spot/future
     position_side: Optional[str] = None # LONG/SHORT（合约）
     leverage: Optional[int] = None
+    trade_type: Optional[str] = "OPEN"  # OPEN/CLOSE/ADD/REDUCE
+    close_reason: Optional[str] = None  # SL/TP/SIGNAL/MANUAL/LIQUIDATION（仅 CLOSE 时）
     request_id: Optional[str] = None
 
 
@@ -67,6 +69,8 @@ class OrderDTO:
     market_type: str
     side: str
     order_type: str
+    trade_type: Optional[str]
+    close_reason: Optional[str]
     quantity: float
     price: Optional[float]
     stop_loss: Optional[float]
@@ -112,6 +116,8 @@ class OrderDTO:
             "market_type": self.market_type,
             "side": self.side,
             "order_type": self.order_type,
+            "trade_type": self.trade_type,
+            "close_reason": self.close_reason,
             "quantity": self.quantity,
             "price": self.price,
             "stop_loss": self.stop_loss,
@@ -145,6 +151,8 @@ class OrderFilter:
     status: Optional[str] = None
     statuses: Optional[List[str]] = None    # 多状态过滤
     signal_id: Optional[str] = None
+    trade_type: Optional[str] = None        # OPEN/CLOSE/ADD/REDUCE
+    close_reason: Optional[str] = None      # SL/TP/SIGNAL/MANUAL/LIQUIDATION
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     limit: int = 100
@@ -190,6 +198,7 @@ class FillDTO:
     created_at: datetime
     exchange: Optional[str] = None
     market_type: Optional[str] = None
+    trade_type: Optional[str] = None
     
     @property
     def value(self) -> float:
@@ -206,6 +215,7 @@ class FillDTO:
             "account_id": self.account_id,
             "symbol": self.symbol,
             "side": self.side,
+            "trade_type": self.trade_type,
             "quantity": self.quantity,
             "price": self.price,
             "fee": self.fee,
@@ -226,6 +236,7 @@ class FillFilter:
     order_id: Optional[str] = None
     symbol: Optional[str] = None
     side: Optional[str] = None
+    trade_type: Optional[str] = None
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     limit: int = 100

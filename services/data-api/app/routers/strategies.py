@@ -203,6 +203,8 @@ def list_strategy_bindings(
         point_total = 0.0
         if user:
             point_total = float(user.point_card_self or 0) + float(user.point_card_gift or 0)
+        from libs.member.models import StrategyBinding as SB
+        risk_mode = int(b.risk_mode or 1)
         result.append({
             "id": b.id,
             "user_id": b.user_id,
@@ -213,6 +215,13 @@ def list_strategy_bindings(
             "strategy_name": strategy_name,
             "mode": int(b.mode or 2),
             "status": int(b.status or 1),
+            # 用户仓位参数
+            "capital": float(b.capital or 0),
+            "leverage": int(b.leverage or 20),
+            "risk_mode": risk_mode,
+            "risk_mode_label": SB.RISK_MODE_LABELS.get(risk_mode, "稳健"),
+            "amount_usdt": float(b.amount_usdt) if b.capital else 0,
+            # 统计
             "total_profit": float(b.total_profit or 0),
             "total_trades": int(b.total_trades or 0),
             "point_card_total": point_total,

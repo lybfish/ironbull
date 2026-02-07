@@ -31,6 +31,7 @@
         <el-alert type="info" :closable="false" show-icon>
           <span>已选择 <strong>{{ selection.length }}</strong> 个账户</span>
           <el-button size="mini" type="primary" style="margin-left: 12px;" @click="showBatchAssign">批量分配节点</el-button>
+          <el-button size="mini" type="warning" style="margin-left: 8px;" @click="handleBatchUnassign">批量解绑</el-button>
         </el-alert>
       </div>
 
@@ -72,9 +73,10 @@
         <el-table-column prop="created_at" label="创建时间" width="170">
           <template slot-scope="{row}">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="120" align="center" fixed="right">
+        <el-table-column label="操作" width="160" align="center" fixed="right">
           <template slot-scope="{row}">
             <el-button size="mini" type="primary" @click="showAssign(row)">分配节点</el-button>
+            <el-button v-if="row.execution_node_id" size="mini" type="warning" @click="handleUnassign(row)">解绑</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -95,7 +97,7 @@
           </span>
         </el-form-item>
         <el-form-item label="节点">
-          <el-select v-model="assignNodeId" style="width:100%" placeholder="选择节点（留空=回收到本机）" clearable>
+          <el-select v-model="assignNodeId" style="width:100%" placeholder="选择节点" clearable>
             <el-option v-for="n in nodes" :key="n.id" :label="n.name + ' (' + n.node_code + ')'" :value="n.id"/>
           </el-select>
         </el-form-item>
@@ -181,12 +183,49 @@ export default {
     async handleAssign() {
       this.assigning = true
       try {
-        await assignNode(this.assignRow.id, {execution_node_id: this.assignNodeId})
-        this.$message.success('分配成功')
+        await assignNode(this.assignRow.id, {execution_node_id: this.assignNodeId || null})
+        this.$message.success(this.assignNodeId ? '分配成功' : '已解绑节点')
         this.assignVisible = false
         this.fetchData()
-      } catch (e) { this.$message.error(e.response?.data?.detail || '分配失败') }
+      } catch (e) { this.$message.error(e.response?.data?.detail || '操作失败') }
       finally { this.assigning = false }
+    },
+    async handleUnassign(row) {
+      try {
+        await this.$confirm(`确认将账户 #${row.id} (${row.exchange}) 从节点解绑？`, '解绑节点', {
+          confirmButtonText: '确认解绑',
+          cancelButtonText: '取消',
+          type: 'warning',
+        })
+        await assignNode(row.id, {execution_node_id: null})
+        this.$message.success('已解绑节点，该账户将由本机执行')
+        this.fetchData()
+      } catch (e) {
+        if (e !== 'cancel') {
+          this.$message.error(e.response?.data?.detail || '解绑失败')
+        }
+      }
+    },
+    async handleBatchUnassign() {
+      const ids = this.selection.filter(r => r.execution_node_id).map(r => r.id)
+      if (ids.length === 0) {
+        this.$message.warning('选中的账户均未绑定节点')
+        return
+      }
+      try {
+        await this.$confirm(`确认将 ${ids.length} 个账户从节点解绑？`, '批量解绑', {
+          confirmButtonText: '确认解绑',
+          cancelButtonText: '取消',
+          type: 'warning',
+        })
+        await batchAssignNode({account_ids: ids, execution_node_id: null})
+        this.$message.success(`已解绑 ${ids.length} 个账户`)
+        this.fetchData()
+      } catch (e) {
+        if (e !== 'cancel') {
+          this.$message.error(e.response?.data?.detail || '批量解绑失败')
+        }
+      }
     },
     async handleBatchAssign() {
       if (!this.batchNodeId) { this.$message.warning('请选择节点'); return }

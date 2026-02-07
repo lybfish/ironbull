@@ -146,6 +146,9 @@ class PositionRepository:
         if filter.status:
             query = query.filter(Position.status == filter.status)
         
+        if filter.close_reason:
+            query = query.filter(Position.close_reason == filter.close_reason)
+        
         if filter.has_position is True:
             query = query.filter(Position.quantity > 0)
         elif filter.has_position is False:
@@ -170,6 +173,9 @@ class PositionRepository:
         
         if filter.status:
             query = query.filter(Position.status == filter.status)
+        
+        if filter.close_reason:
+            query = query.filter(Position.close_reason == filter.close_reason)
         
         if filter.has_position is True:
             query = query.filter(Position.quantity > 0)

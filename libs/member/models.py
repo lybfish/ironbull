@@ -124,7 +124,7 @@ class ExchangeAccount(Base):
     futures_balance = Column(DECIMAL(20, 8), nullable=False, default=0)
     futures_available = Column(DECIMAL(20, 8), nullable=False, default=0)
     status = Column(Integer, nullable=False, default=1)
-    execution_node_id = Column(Integer, nullable=True, default=None, index=True, comment="执行节点ID，空=本机")
+    execution_node_id = Column(Integer, nullable=True, default=None, index=True, comment="执行节点ID，空/0=未绑定不执行，>0=绑定到对应节点")
     last_sync_at = Column(DateTime, nullable=True)
     last_sync_error = Column(String(255), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.now)
@@ -156,8 +156,22 @@ class TenantStrategy(Base):
 class StrategyBinding(Base):
     """
     用户策略订阅表（dim_strategy_binding）
+
+    用户绑定策略时设置三项：
+    - capital: 本金 / 最大仓位（USDT）
+    - leverage: 杠杆倍数（默认20）
+    - risk_mode: 风险档位 1=稳健(1%) 2=均衡(1.5%) 3=激进(2%)
+
+    下单金额计算：
+      risk_pct = {1: 0.01, 2: 0.015, 3: 0.02}[risk_mode]
+      margin = capital × risk_pct
+      amount_usdt = margin × leverage
     """
     __tablename__ = "dim_strategy_binding"
+
+    # 风险模式 → risk_pct 映射
+    RISK_MODE_MAP = {1: 0.01, 2: 0.015, 3: 0.02}
+    RISK_MODE_LABELS = {1: "稳健", 2: "均衡", 3: "激进"}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("dim_user.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -165,8 +179,28 @@ class StrategyBinding(Base):
     strategy_code = Column(String(64), nullable=False, index=True)
     mode = Column(Integer, nullable=False, default=2)  # 1=单次 2=循环
     ratio = Column(Integer, nullable=False, default=100)
+
+    # ── 用户自定义仓位参数 ──
+    capital = Column(DECIMAL(20, 2), nullable=True, comment="本金/最大仓位(USDT)")
+    leverage = Column(Integer, nullable=True, default=20, comment="杠杆倍数")
+    risk_mode = Column(Integer, nullable=True, default=1, comment="风险档位: 1=稳健(1%) 2=均衡(1.5%) 3=激进(2%)")
+
     total_profit = Column(DECIMAL(20, 8), nullable=False, default=0)
     total_trades = Column(Integer, nullable=False, default=0)
     status = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime, nullable=False, default=datetime.now)
     updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+    @property
+    def risk_pct(self) -> float:
+        """当前风险比例"""
+        return self.RISK_MODE_MAP.get(self.risk_mode or 1, 0.01)
+
+    @property
+    def amount_usdt(self) -> float:
+        """计算下单金额: capital × risk_pct × leverage"""
+        cap = float(self.capital or 0)
+        lev = int(self.leverage or 20)
+        if cap <= 0:
+            return 0
+        return round(cap * self.risk_pct * lev, 2)

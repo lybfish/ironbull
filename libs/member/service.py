@@ -25,6 +25,11 @@ class ExecutionTarget:
     按策略绑定可执行目标：绑定 + 交易所账户凭证（仅服务端使用，勿暴露给前端）。
     用于 signal-monitor 等根据 strategy_code 查绑定后，对每个账户创建 LiveTrader 并执行。
     execution_node_id 非空时表示由该节点执行，空或 0 表示本机执行。
+
+    用户仓位参数（优先级最高，覆盖租户/策略配置）：
+    - binding_capital: 用户设定的本金
+    - binding_leverage: 用户设定的杠杆
+    - binding_amount_usdt: 计算后的下单金额 = capital × risk_pct × leverage
     """
     tenant_id: int
     account_id: int
@@ -39,6 +44,9 @@ class ExecutionTarget:
     ratio: int  # 跟单比例 1-100
     execution_node_id: Optional[int] = None  # 执行节点ID，空/0=本机
     mode: int = 2  # 1=单次执行 2=循环执行
+    binding_capital: float = 0  # 用户本金
+    binding_leverage: int = 0   # 用户杠杆
+    binding_amount_usdt: float = 0  # 用户计算后的下单金额
 
 
 def _generate_invite_code() -> str:
@@ -180,8 +188,19 @@ class MemberService:
         account_id: int,
         mode: int = 2,
         min_point_card: float = 0,
+        capital: float = 0,
+        leverage: int = 20,
+        risk_mode: int = 1,
     ) -> Tuple[Optional[StrategyBinding], str]:
-        """开启策略。strategy_id 为 dim_strategy.id，需解析出 strategy_code。点卡余额不足时拒绝开通。"""
+        """
+        开启策略。strategy_id 为 dim_strategy.id，需解析出 strategy_code。
+        点卡余额不足时拒绝开通。
+
+        用户仓位参数：
+        - capital: 本金/最大仓位（USDT），必填
+        - leverage: 杠杆倍数（默认20）
+        - risk_mode: 风险档位 1=稳健(1%) 2=均衡(1.5%) 3=激进(2%)
+        """
         user = self.repo.get_user_by_id(user_id, tenant_id)
         if not user:
             return None, "用户不存在"
@@ -195,10 +214,16 @@ class MemberService:
         acc = self.repo.get_account_by_id(account_id, user_id=user_id)
         if not acc or acc.tenant_id != tenant_id or acc.status != 1:
             return None, "交易账户不存在或未启用"
+        # 校验 risk_mode
+        if risk_mode not in StrategyBinding.RISK_MODE_MAP:
+            return None, "无效的风险档位（1=稳健 2=均衡 3=激进）"
         binding = self.repo.get_binding(user_id, account_id, strategy.code)
         if binding:
             binding.status = 1
             binding.mode = mode
+            binding.capital = capital if capital > 0 else binding.capital
+            binding.leverage = leverage
+            binding.risk_mode = risk_mode
             self.repo.update_binding(binding)
             return binding, ""
         binding = StrategyBinding(
@@ -206,6 +231,9 @@ class MemberService:
             account_id=account_id,
             strategy_code=strategy.code,
             mode=mode,
+            capital=capital if capital > 0 else None,
+            leverage=leverage,
+            risk_mode=risk_mode,
             status=1,
         )
         self.repo.create_binding(binding)
@@ -226,6 +254,37 @@ class MemberService:
         self.repo.update_binding(binding)
         return True
 
+    def update_strategy_params(
+        self,
+        user_id: int,
+        tenant_id: int,
+        strategy_id: int,
+        account_id: int,
+        capital: float = None,
+        leverage: int = None,
+        risk_mode: int = None,
+    ) -> Tuple[Optional[StrategyBinding], str]:
+        """修改策略绑定的仓位参数（本金/杠杆/风险档位），不影响运行状态。"""
+        strategy = self.repo.get_strategy_by_id(strategy_id)
+        if not strategy:
+            return None, "策略不存在"
+        binding = self.repo.get_binding(user_id, account_id, strategy.code)
+        if not binding:
+            return None, "策略绑定不存在"
+        user = self.repo.get_user_by_id(user_id, tenant_id)
+        if not user:
+            return None, "用户不存在"
+        if capital is not None and capital > 0:
+            binding.capital = capital
+        if leverage is not None and leverage > 0:
+            binding.leverage = leverage
+        if risk_mode is not None:
+            if risk_mode not in StrategyBinding.RISK_MODE_MAP:
+                return None, "无效的风险档位（1=稳健 2=均衡 3=激进）"
+            binding.risk_mode = risk_mode
+        self.repo.update_binding(binding)
+        return binding, ""
+
     def get_user_strategies(self, user_id: int, tenant_id: int) -> List[dict]:
         """用户已绑定的策略列表，含策略名称（优先租户实例展示名）、账户、盈亏等"""
         user = self.repo.get_user_by_id(user_id, tenant_id)
@@ -242,6 +301,7 @@ class MemberService:
                 ts = self.repo.get_tenant_strategy(tenant_id, s.id)
                 if ts and (ts.display_name or "").strip():
                     strategy_name = (ts.display_name or "").strip()
+            risk_label = StrategyBinding.RISK_MODE_LABELS.get(b.risk_mode or 1, "稳健")
             result.append({
                 "strategy_id": strategy_id,
                 "strategy_name": strategy_name,
@@ -249,6 +309,11 @@ class MemberService:
                 "account_id": b.account_id,
                 "status": b.status,
                 "mode": b.mode,
+                "capital": float(b.capital or 0),
+                "leverage": int(b.leverage or 20),
+                "risk_mode": int(b.risk_mode or 1),
+                "risk_mode_label": risk_label,
+                "amount_usdt": float(b.amount_usdt) if b.capital else 0,
                 "total_profit": float(b.total_profit or 0),
                 "total_trades": int(b.total_trades or 0),
                 "create_time": b.created_at.strftime("%Y-%m-%d %H:%M:%S") if b.created_at else "",
@@ -281,10 +346,20 @@ class MemberService:
             total_point = float(user.point_card_self or 0) + float(user.point_card_gift or 0)
             if total_point <= 0:
                 continue  # 点卡为 0 不执行，相当于策略对该账户暂停
+            # ── 节点绑定校验（两步验证）──
+            # 用户绑定了策略 ≠ 可以下单，还需管理员绑定执行节点
+            # execution_node_id = None/0 表示未绑定节点，不执行
+            # execution_node_id > 0 表示绑定到远程节点
+            raw_node_id = getattr(acc, "execution_node_id", None)
+            if not raw_node_id or raw_node_id <= 0:
+                continue  # 未绑定执行节点，跳过
             market_type = "future" if (acc.account_type or "futures").lower() in ("futures", "future") else "spot"
-            node_id = getattr(acc, "execution_node_id", None)
-            if node_id is not None and node_id == 0:
-                node_id = None
+            node_id = raw_node_id
+            # 用户自定义仓位参数
+            b_capital = float(b.capital or 0)
+            b_leverage = int(b.leverage or 0)
+            b_amount = float(b.amount_usdt) if b_capital > 0 else 0
+
             targets.append(ExecutionTarget(
                 tenant_id=acc.tenant_id,
                 account_id=acc.id,
@@ -299,5 +374,8 @@ class MemberService:
                 ratio=int(b.ratio or 100),
                 execution_node_id=node_id,
                 mode=int(b.mode or 2),
+                binding_capital=b_capital,
+                binding_leverage=b_leverage,
+                binding_amount_usdt=b_amount,
             ))
         return targets

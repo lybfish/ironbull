@@ -51,6 +51,14 @@
               <el-option label="卖出" value="SELL"/>
             </el-select>
           </el-form-item>
+          <el-form-item label="开/平仓">
+            <el-select v-model="where.trade_type" placeholder="全部" clearable style="width:100px">
+              <el-option label="开仓" value="OPEN"/>
+              <el-option label="平仓" value="CLOSE"/>
+              <el-option label="加仓" value="ADD"/>
+              <el-option label="减仓" value="REDUCE"/>
+            </el-select>
+          </el-form-item>
           <el-form-item label="日期范围">
             <el-date-picker
               v-model="where.dateRange"
@@ -109,6 +117,18 @@
         <el-table-column prop="order_type" label="类型" width="80" align="center">
           <template slot-scope="{row}">
             <span>{{ row.order_type }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="开/平仓" width="100" align="center">
+          <template slot-scope="{row}">
+            <el-tag :type="tradeTypeTag(row.trade_type)" size="mini" effect="dark">
+              {{ tradeTypeLabel(row.trade_type) }}
+            </el-tag>
+            <div v-if="row.close_reason" style="font-size:11px;margin-top:2px">
+              <el-tag :type="row.close_reason === 'TP' ? 'success' : 'danger'" size="mini" effect="plain">
+                {{ closeReasonLabel(row.close_reason) }}
+              </el-tag>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="杠杆" width="60" align="center">
@@ -194,7 +214,7 @@ export default {
       total: 0,
       currentPage: 1,
       pageSize: 20,
-      where: { symbol: '', status: '', side: '', exchange: '', dateRange: null },
+      where: { symbol: '', status: '', side: '', exchange: '', trade_type: '', dateRange: null },
       accountOptions: []
     }
   },
@@ -279,12 +299,24 @@ export default {
       const m = { PENDING: '待处理', FILLED: '已成交', CANCELLED: '已取消', REJECTED: '已拒绝', PARTIAL: '部分成交' }
       return m[(s || '').toUpperCase()] || s
     },
+    tradeTypeLabel(t) {
+      const m = { OPEN: '开仓', CLOSE: '平仓', ADD: '加仓', REDUCE: '减仓' }
+      return m[(t || '').toUpperCase()] || '开仓'
+    },
+    tradeTypeTag(t) {
+      const m = { OPEN: '', CLOSE: 'warning', ADD: 'info', REDUCE: 'info' }
+      return m[(t || '').toUpperCase()] || ''
+    },
+    closeReasonLabel(r) {
+      const m = { SL: '止损', TP: '止盈', SIGNAL: '信号平仓', MANUAL: '手动平仓', LIQUIDATION: '强平' }
+      return m[(r || '').toUpperCase()] || r
+    },
     onSearch() {
       this.currentPage = 1
       this.fetchData()
     },
     reset() {
-      this.where = { symbol: '', status: '', side: '', exchange: '', dateRange: null }
+      this.where = { symbol: '', status: '', side: '', exchange: '', trade_type: '', dateRange: null }
       this.currentPage = 1
       this.fetchData()
     },
@@ -304,6 +336,7 @@ export default {
         if (this.where.symbol) params.symbol = this.where.symbol
         if (this.where.status) params.status = this.where.status
         if (this.where.side) params.side = this.where.side
+        if (this.where.trade_type) params.trade_type = this.where.trade_type
         if (this.where.dateRange && this.where.dateRange.length === 2) {
           params.start_time = this.where.dateRange[0] + 'T00:00:00'
           params.end_time = this.where.dateRange[1] + 'T23:59:59'

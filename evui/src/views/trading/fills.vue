@@ -37,6 +37,14 @@
               <el-option label="卖出" value="SELL"/>
             </el-select>
           </el-form-item>
+          <el-form-item label="开/平仓">
+            <el-select v-model="where.trade_type" placeholder="全部" clearable style="width:100px">
+              <el-option label="开仓" value="OPEN"/>
+              <el-option label="平仓" value="CLOSE"/>
+              <el-option label="加仓" value="ADD"/>
+              <el-option label="减仓" value="REDUCE"/>
+            </el-select>
+          </el-form-item>
           <el-form-item label="交易所">
             <el-select v-model="where.exchange" placeholder="全部" clearable style="width:120px">
               <el-option
@@ -99,6 +107,13 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="trade_type" label="开/平仓" width="80" align="center">
+          <template slot-scope="{row}">
+            <el-tag :type="tradeTypeTag(row.trade_type)" size="mini" effect="plain">
+              {{ tradeTypeLabel(row.trade_type) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="price" label="成交价" width="120" align="right">
           <template slot-scope="{row}">{{ formatPrice(row.price) }}</template>
         </el-table-column>
@@ -148,7 +163,7 @@ export default {
       total: 0,
       currentPage: 1,
       pageSize: 20,
-      where: { symbol: '', side: '', exchange: '', dateRange: null },
+      where: { symbol: '', side: '', trade_type: '', exchange: '', dateRange: null },
       accountOptions: []
     }
   },
@@ -189,6 +204,12 @@ export default {
     isBuy(row) {
       return (row.side || '').toUpperCase() === 'BUY'
     },
+    tradeTypeLabel(t) {
+      return { OPEN: '开仓', CLOSE: '平仓', ADD: '加仓', REDUCE: '减仓' }[t] || t || '开仓'
+    },
+    tradeTypeTag(t) {
+      return { OPEN: '', CLOSE: 'danger', ADD: 'warning', REDUCE: 'info' }[t] || ''
+    },
     formatPrice(val) {
       if (val == null || val === '') return '-'
       const n = Number(val)
@@ -224,7 +245,7 @@ export default {
       this.fetchData()
     },
     reset() {
-      this.where = { symbol: '', side: '', exchange: '', dateRange: null }
+      this.where = { symbol: '', side: '', trade_type: '', exchange: '', dateRange: null }
       this.currentPage = 1
       this.fetchData()
     },
@@ -243,6 +264,7 @@ export default {
         }
         if (this.where.symbol) params.symbol = this.where.symbol
         if (this.where.side) params.side = this.where.side
+        if (this.where.trade_type) params.trade_type = this.where.trade_type
         if (this.where.dateRange && this.where.dateRange.length === 2) {
           params.start_time = this.where.dateRange[0] + 'T00:00:00'
           params.end_time = this.where.dateRange[1] + 'T23:59:59'

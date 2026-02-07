@@ -105,6 +105,12 @@
 ### 节点列表 500 修复
 - **data-api**：`services/data-api/app/routers/nodes.py` 的 `list_nodes` 曾有一段错误 SQL（在 `db.query` 里嵌套 `db.query`），已删除错误子查询，仅保留按节点 count 账户数的循环。
 
+### 策略回测与优化（market_regime）
+- **回测引擎**（`services/backtest/app/backtest_engine.py`）：支持逐仓/杠杆、保证金模式（cross/isolated）；**移动止损**：`trailing_stop_pct`（回撤距离）、`trailing_activation_pct`（激活阈值）；Trade 新增 `highest_price`/`lowest_price`/`initial_stop_loss`，出场原因含 `TRAILING_STOP`。
+- **market_regime 策略**（`libs/strategies/market_regime.py`）：`sl_tp_mode="margin_pct"` 时用 `tp_pct`/`sl_pct`（保证金百分比）；`tp_pct<=0` 不设固定止盈（配合移动止损）；**分治**：`ranging_tp_pct`/`ranging_sl_pct`、`trending_tp_pct`/`trending_sl_pct` 可分别设震荡/趋势的 TP/SL；`skip_ranging=True` 时跳过震荡行情只做趋势单边。
+- **回测脚本**：`scripts/backtest_trailing_stop.py`（E0–E4 移动止损对比，用 `/tmp/eth_usdt_1y_1h.json`）；`scripts/backtest_optimize.py`（F0–F4 策略优化对比）。
+- **结论**：固定 45% TP / 70% SL 盈亏比 <1，一年略亏；**推荐 F1**：`tp_pct=1.00`、`sl_pct=0.50`（赢 10 亏 5，盈亏比 2:1），一年 ETH/USDT 1h 回测约 +4.3%，回撤 7.9%。移动止损在对冲模式下表现差，不推荐。
+
 ---
 
 ## 4. 关键文件索引
@@ -127,6 +133,7 @@
 | 部署与发布     | deploy/deploy.sh（chown tmp + sudo -u 属主 start.sh restart）、deploy/start.sh、deploy/push-and-deploy.sh、.deploy.*.env |
 | Merchant API 文档 | docs/api/MERCHANT_API.md、services/merchant-api/README.md |
 | 成交流水同步   | libs/sync_node/service.py（sync_trades_from_nodes）、services/execution-node（/api/sync-trades）、data-api routers/sync.py（POST /api/sync/trades）、fact_transaction |
+| 回测与策略优化 | services/backtest/app/backtest_engine.py（逐仓/杠杆/移动止损）、libs/strategies/market_regime.py（margin_pct/分治/skip_ranging）、scripts/backtest_trailing_stop.py、scripts/backtest_optimize.py |
 
 ---
 
@@ -140,6 +147,7 @@
 - **奖励分配**：全溯源已完成，7 个场景 97 项校验通过（含超发 cap、租户隔离、无邀请人、自持不足等边界情况）。
 - **租户**：2 个活跃租户，均有根账户。新建租户自动创建根账户。
 - **部署**：push-deploy 已改为「root 时 chown tmp + 以仓库属主执行 start.sh restart」；发布后会打印服务状态。若线上服务全 stopped，按上文「部署与发布」一节的一键命令修复。
+- **策略回测**：market_regime 已支持保证金百分比 TP/SL、分治（震荡/趋势不同参数）、纯趋势（skip_ranging）。回测推荐 **tp_pct=1.0、sl_pct=0.5**（F1）；上线时可在租户策略实例中配置该参数。
 
 ---
 
@@ -154,6 +162,7 @@
 
 ## 7. 后续可选
 
-- **部署到生产**：迁移 016-017 已就绪；部署流程已修复（chown + 属主 restart），按 SESSION 中「部署与发布」执行即可
-- 构建体积优化（大 chunk 代码分割、路由懒加载）
-- 监控告警增强（更多端点、历史告警、邮件/钉钉通道）
+- **部署到生产**：迁移 016-017 已就绪；部署流程已修复（chown + 属主 restart），按 SESSION 中「部署与发布」执行即可。
+- **策略参数**：若 market_regime 上线，建议租户策略实例配置 **tp_pct=1.0、sl_pct=0.5**（回测 F1 最优）。
+- 构建体积优化（大 chunk 代码分割、路由懒加载）。
+- 监控告警增强（更多端点、历史告警、邮件/钉钉通道）。

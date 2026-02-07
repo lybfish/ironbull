@@ -418,9 +418,17 @@ class PositionService:
             # 重新开仓 → 刷新 opened_at，清除 closed_at
             position.opened_at = _dt.now()
             position.closed_at = None
+            # 清除旧的 SL/TP 和 close_reason（防止旧数据干扰新开仓）
+            position.stop_loss = None
+            position.take_profit = None
+            position.entry_price = None
+            position.strategy_code = None
+            position.close_reason = None
         elif new_status == "CLOSED" and not was_closed:
-            # 平仓 → 记录 closed_at
+            # 平仓 → 记录 closed_at，清除 SL/TP（position_monitor 不再需要监控）
             position.closed_at = _dt.now()
+            position.stop_loss = None
+            position.take_profit = None
 
         # 合约附加字段（从交易所同步）
         if leverage is not None:
@@ -664,7 +672,12 @@ class PositionService:
             leverage=position.leverage,
             margin=float(position.margin) if position.margin else None,
             liquidation_price=float(position.liquidation_price) if position.liquidation_price else None,
+            entry_price=float(position.entry_price) if position.entry_price else None,
+            stop_loss=float(position.stop_loss) if position.stop_loss else None,
+            take_profit=float(position.take_profit) if position.take_profit else None,
+            strategy_code=position.strategy_code,
             status=position.status,
+            close_reason=position.close_reason,
             opened_at=position.opened_at,
             closed_at=position.closed_at,
             created_at=position.created_at,

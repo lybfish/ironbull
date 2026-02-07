@@ -53,6 +53,10 @@ class Order(Base):
     # 订单参数
     side = Column(String(8), nullable=False, comment="BUY/SELL")
     order_type = Column(String(32), nullable=False, comment="MARKET/LIMIT/STOP_MARKET/TAKE_PROFIT_MARKET")
+    trade_type = Column(String(16), nullable=True, default="OPEN",
+                        comment="交易类型: OPEN/CLOSE/ADD/REDUCE")
+    close_reason = Column(String(32), nullable=True,
+                          comment="平仓原因: SL/TP/SIGNAL/MANUAL/LIQUIDATION (仅 trade_type=CLOSE 时)")
     quantity = Column(DECIMAL(20, 8), nullable=False, comment="委托数量")
     price = Column(DECIMAL(20, 8), nullable=True, comment="委托价格（限价单）")
     
@@ -109,6 +113,8 @@ class Order(Base):
             "market_type": self.market_type,
             "side": self.side,
             "order_type": self.order_type,
+            "trade_type": self.trade_type,
+            "close_reason": self.close_reason,
             "quantity": float(self.quantity) if self.quantity else None,
             "price": float(self.price) if self.price else None,
             "stop_loss": float(self.stop_loss) if self.stop_loss else None,
@@ -153,6 +159,7 @@ class Fill(Base):
     # 交易标的（冗余存储）
     symbol = Column(String(32), nullable=False, index=True, comment="交易对")
     side = Column(String(8), nullable=False, comment="BUY/SELL")
+    trade_type = Column(String(16), nullable=True, comment="交易类型: OPEN/CLOSE/ADD/REDUCE（冗余存储）")
     
     # 成交数据
     quantity = Column(DECIMAL(20, 8), nullable=False, comment="成交数量")
@@ -189,6 +196,7 @@ class Fill(Base):
             "account_id": self.account_id,
             "symbol": self.symbol,
             "side": self.side,
+            "trade_type": self.trade_type,
             "quantity": float(self.quantity) if self.quantity else 0,
             "price": float(self.price) if self.price else 0,
             "fee": float(self.fee) if self.fee else 0,

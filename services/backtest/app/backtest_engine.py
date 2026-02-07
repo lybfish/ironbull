@@ -26,9 +26,13 @@ class Trade:
     quantity: float = 1.0
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
-    exit_reason: Optional[str] = None  # "STOP_LOSS", "TAKE_PROFIT", "SIGNAL", "END"
+    exit_reason: Optional[str] = None  # "STOP_LOSS", "TAKE_PROFIT", "SIGNAL", "END", "TRAILING_STOP"
     pnl: Optional[float] = None
     pnl_pct: Optional[float] = None
+    # 移动止损追踪字段
+    highest_price: Optional[float] = None   # 多头持仓期间最高价
+    lowest_price: Optional[float] = None    # 空头持仓期间最低价
+    initial_stop_loss: Optional[float] = None  # 原始止损价（保本模式记录用）
 
 
 @dataclass
@@ -97,6 +101,10 @@ class BacktestEngine:
         risk_per_trade: float = 0.0,     # 每笔交易最大亏损金额（0=固定仓位，>0=以损定仓）
         amount_usdt: float = 0.0,        # 每笔固定名义持仓金额（与线上一致，>0 时覆盖其他模式）
         min_rr: float = 0.0,             # 最小盈亏比过滤（0=不过滤，>0=TP/SL < min_rr 的信号跳过）
+        leverage: float = 1.0,           # 杠杆倍数（逐仓模式）
+        margin_mode: str = "isolated",   # 保证金模式: isolated=逐仓(默认), cross=全仓
+        trailing_stop_pct: float = 0.0,  # 移动止损回撤距离（基于保证金百分比，0=不启用）
+        trailing_activation_pct: float = 0.0,  # 移动止损激活阈值（浮盈达到保证金的X%后激活，0=立即激活）
     ):
         self.initial_balance = initial_balance
         self.commission_rate = commission_rate
@@ -105,6 +113,10 @@ class BacktestEngine:
         self.amount_usdt = amount_usdt        # 固定名义持仓（USDT）
         self.min_rr = min_rr                  # 最小盈亏比过滤
         self.rr_filtered = 0                  # 被过滤的信号计数
+        self.leverage = leverage              # 杠杆倍数
+        self.margin_mode = margin_mode        # 保证金模式
+        self.trailing_stop_pct = trailing_stop_pct          # 移动止损距离
+        self.trailing_activation_pct = trailing_activation_pct  # 激活阈值
         
         # 账户状态
         self.balance = initial_balance
@@ -128,19 +140,19 @@ class BacktestEngine:
     def _has_sufficient_balance(self, entry_price: float) -> bool:
         """
         检查余额是否足够开仓。
-        合约交易需要初始保证金，此处按 amount_usdt / 20 (即 20x 杠杆保证金) 或
-        余额的 5% 作为最低保证金要求，二者取较大值。
-        余额 <= 0 直接拒绝。
+        逐仓模式：需要 amount_usdt / leverage 的保证金
+        全仓模式：余额 > 0 即可
         """
         if self.balance <= 0:
             return False
         if self.amount_usdt > 0:
-            # 至少需要名义金额的 5% 作为保证金（等效 20x 杠杆）
-            min_margin = self.amount_usdt * 0.05
+            # 保证金 = 名义金额 / 杠杆
+            min_margin = self.amount_usdt / max(self.leverage, 1)
+            return self.balance >= min_margin
         else:
             # 非 amount_usdt 模式，至少需要初始资金的 2%
             min_margin = self.initial_balance * 0.02
-        return self.balance >= min_margin
+            return self.balance >= min_margin
 
     def _calc_position_size(self, entry_price: float, stop_loss: float, base_qty: float = 1.0) -> float:
         """
@@ -208,6 +220,9 @@ class BacktestEngine:
         
         # 检测策略是否需要对冲模式
         self._detect_hedge_mode(strategy)
+        
+        # 保存策略引用（用于止损冷却回调）
+        self._strategy = strategy
         
         # 重置状态
         self._reset()
@@ -279,6 +294,7 @@ class BacktestEngine:
         self.trade_id_counter = 0
         self.equity_curve = []
         self.rr_filtered = 0
+        self.liquidated_count = 0  # 逐仓爆仓计数
     
     def _build_positions_info(self) -> Dict:
         """构建持仓信息传给策略"""
@@ -567,7 +583,13 @@ class BacktestEngine:
         trade.exit_time = exit_time
         trade.exit_reason = exit_reason
         trade.pnl = pnl
-        trade.pnl_pct = (pnl / trade.entry_price) * 100
+        
+        # 逐仓模式: pnl_pct 基于保证金（名义/杠杆）
+        if self.margin_mode == "isolated" and self.leverage > 1 and self.amount_usdt > 0:
+            margin = self.amount_usdt / self.leverage
+            trade.pnl_pct = (pnl / margin) * 100 if margin > 0 else 0
+        else:
+            trade.pnl_pct = (pnl / (trade.entry_price * trade.quantity)) * 100
         
         # 更新账户余额
         self.balance += pnl
@@ -595,30 +617,44 @@ class BacktestEngine:
     
     def _check_position_sl_tp(self, position: Trade, high: float, low: float, 
                                current_time: datetime, is_long: bool) -> Optional[str]:
-        """检查单个持仓的止损止盈"""
+        """检查单个持仓的止损止盈（含移动止损逻辑）"""
         
-        # 止损检查
+        # ── 移动止损: 更新极值并动态调整 SL ──
+        if self.trailing_stop_pct > 0:
+            self._update_trailing_stop(position, high, low, is_long)
+        
+        # ── 止损检查（含移动止损触发）──
         if position.stop_loss:
+            triggered = False
+            exit_price = position.stop_loss
+            
             if is_long and low <= position.stop_loss:
-                pnl = self._calculate_pnl(position, position.stop_loss)
-                self._finalize_trade(position, position.stop_loss, current_time, "STOP_LOSS", pnl)
+                triggered = True
+            elif not is_long and high >= position.stop_loss:
+                triggered = True
+            
+            if triggered:
+                # 判断是原始止损还是移动止损触发
+                is_trailing = (
+                    self.trailing_stop_pct > 0
+                    and position.initial_stop_loss is not None
+                    and position.stop_loss != position.initial_stop_loss
+                )
+                reason = "TRAILING_STOP" if is_trailing else "STOP_LOSS"
+                pnl = self._calculate_pnl(position, exit_price)
+                self._finalize_trade(position, exit_price, current_time, reason, pnl)
                 self.trades.append(position)
                 if self.hedge_mode:
                     if is_long:
                         self.long_position = None
                     else:
                         self.short_position = None
-                return "STOP_LOSS"
-            
-            if not is_long and high >= position.stop_loss:
-                pnl = self._calculate_pnl(position, position.stop_loss)
-                self._finalize_trade(position, position.stop_loss, current_time, "STOP_LOSS", pnl)
-                self.trades.append(position)
-                if self.hedge_mode:
-                    self.short_position = None
-                return "STOP_LOSS"
+                # 通知策略进入冷却（如果策略支持）
+                if reason == "STOP_LOSS" and hasattr(self, '_strategy') and hasattr(self._strategy, 'set_cooldown'):
+                    self._strategy.set_cooldown()
+                return reason
         
-        # 止盈检查
+        # ── 止盈检查 ──
         if position.take_profit:
             if is_long and high >= position.take_profit:
                 pnl = self._calculate_pnl(position, position.take_profit)
@@ -637,6 +673,64 @@ class BacktestEngine:
                 return "TAKE_PROFIT"
         
         return None
+    
+    def _update_trailing_stop(self, position: Trade, high: float, low: float, is_long: bool):
+        """
+        移动止损逻辑
+        
+        - 追踪持仓期间的最高价（多头）/ 最低价（空头）
+        - 当浮盈达到激活阈值后，开始动态调整 SL
+        - trailing_stop_pct 是基于保证金百分比的回撤距离
+          例: 0.30 = 保证金的 30%, 20X 杠杆下 = 价格回撤 1.5%
+        """
+        entry = position.entry_price
+        
+        # 计算回撤距离（价格百分比）
+        trail_dist_pct = self.trailing_stop_pct / max(self.leverage, 1)
+        
+        # 计算激活阈值（价格百分比）
+        activation_dist_pct = self.trailing_activation_pct / max(self.leverage, 1)
+        
+        # 保存初始 SL（首次调用时）
+        if position.initial_stop_loss is None:
+            position.initial_stop_loss = position.stop_loss
+        
+        if is_long:
+            # 更新最高价
+            if position.highest_price is None:
+                position.highest_price = high
+            elif high > position.highest_price:
+                position.highest_price = high
+            
+            # 检查是否达到激活阈值
+            profit_pct = (position.highest_price - entry) / entry
+            if profit_pct < activation_dist_pct:
+                return  # 未达到激活阈值，保持原始 SL
+            
+            # 计算新的移动止损价
+            new_sl = position.highest_price * (1 - trail_dist_pct)
+            
+            # SL 只能上移，不能下移
+            if position.stop_loss is None or new_sl > position.stop_loss:
+                position.stop_loss = round(new_sl, 2)
+        else:
+            # 空头: 更新最低价
+            if position.lowest_price is None:
+                position.lowest_price = low
+            elif low < position.lowest_price:
+                position.lowest_price = low
+            
+            # 检查是否达到激活阈值
+            profit_pct = (entry - position.lowest_price) / entry
+            if profit_pct < activation_dist_pct:
+                return  # 未达到激活阈值，保持原始 SL
+            
+            # 计算新的移动止损价
+            new_sl = position.lowest_price * (1 + trail_dist_pct)
+            
+            # SL 只能下移（对空头来说），不能上移
+            if position.stop_loss is None or new_sl < position.stop_loss:
+                position.stop_loss = round(new_sl, 2)
     
     # ========== 权益计算 ==========
     
