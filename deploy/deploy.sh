@@ -73,10 +73,9 @@ if [ "$DO_MIGRATE" = true ]; then
     MIGRATE_CMD="$MIGRATE_CMD && make migrate"
     if [ "$(id -u)" = "0" ] && [ -n "$MIGRATE_OWNER" ] && [ "$MIGRATE_OWNER" != "root" ]; then
         echo "  以用户 $MIGRATE_OWNER 执行迁移（当前为 root）"
-        # sudo -i 将所有参数拼为一个字符串传给 login shell -c，所以直接传单个字符串
-        run sudo -i -u "$MIGRATE_OWNER" -- "$MIGRATE_CMD"
+        run sudo -u "$MIGRATE_OWNER" bash -lc "$MIGRATE_CMD"
     else
-        run bash -l -c "$MIGRATE_CMD"
+        run bash -lc "$MIGRATE_CMD"
     fi
     echo ""
 else
