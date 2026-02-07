@@ -128,6 +128,7 @@ fi
 echo "[3/4] 连接服务器并拉代码、发布..."
 DEPLOY_SCRIPT="$DEPLOY_PATH/deploy/deploy.sh"
 if [[ -n "$SUDO_CMD" ]]; then
+    # deploy.sh 内部会 sudo -i -u 属主执行 start.sh，确保环境完整
     REMOTE_RUN="cd $DEPLOY_PATH && $SUDO_CMD bash $DEPLOY_SCRIPT $REMOTE_ARGS"
 else
     REMOTE_RUN="cd $DEPLOY_PATH && bash $DEPLOY_SCRIPT $REMOTE_ARGS"
@@ -135,7 +136,11 @@ fi
 ssh_cmd "$REMOTE_RUN"
 echo ""
 
-echo "[4/4] 完成"
+echo "[4/4] 验证远程服务..."
+if [[ "$DRY_RUN" != "1" ]]; then
+    ssh_cmd "cd $DEPLOY_PATH && bash deploy/start.sh status" 2>/dev/null || true
+    echo "  若上面有 stopped，请 SSH 登录后执行: cd $DEPLOY_PATH && sudo chown -R \$(stat -c %U $DEPLOY_PATH) tmp && bash deploy/start.sh restart"
+fi
 echo "=========================================="
 echo "  发布流程已执行完毕"
 echo "=========================================="

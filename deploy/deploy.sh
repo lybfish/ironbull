@@ -81,14 +81,25 @@ REPO_OWNER=""
 if command -v stat >/dev/null 2>&1; then
     REPO_OWNER=$(stat -c '%U' "$ROOT" 2>/dev/null) || true
 fi
+START_SCRIPT="$ROOT/deploy/start.sh"
+if [ ! -x "$START_SCRIPT" ]; then
+    [ -f "$START_SCRIPT" ] && chmod +x "$START_SCRIPT" 2>/dev/null || true
+fi
 if [ "$(id -u)" = "0" ] && [ -n "$REPO_OWNER" ] && [ "$REPO_OWNER" != "root" ]; then
     [ -d "$ROOT/tmp" ] && run chown -R "$REPO_OWNER:$REPO_OWNER" "$ROOT/tmp" 2>/dev/null || true
     echo "  以用户 $REPO_OWNER 执行 restart（当前为 root，依赖在该用户下）"
-    run sudo -u "$REPO_OWNER" make -C "$ROOT" restart
+    # -i 加载用户的 .bash_profile / .bashrc，确保 PATH 包含 python3 及 pip 安装的模块
+    run sudo -i -u "$REPO_OWNER" bash "$START_SCRIPT" restart
 else
-    run make restart
+    run bash "$START_SCRIPT" restart
 fi
 echo ""
 
 echo "=== 发布完成 ==="
-echo "建议执行: make status && make health"
+echo "服务状态："
+if [ "$(id -u)" = "0" ] && [ -n "$REPO_OWNER" ] && [ "$REPO_OWNER" != "root" ]; then
+    run sudo -i -u "$REPO_OWNER" bash "$START_SCRIPT" status 2>/dev/null || true
+else
+    run bash "$START_SCRIPT" status 2>/dev/null || true
+fi
+echo "建议: make health 检查各端口"

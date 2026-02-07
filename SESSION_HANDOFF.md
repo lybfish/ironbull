@@ -80,6 +80,31 @@
 - **信号与执行**：按租户解析 amount_usdt/leverage（signal-monitor `_resolve_amount_leverage_for_tenant`）；`get_execution_targets_by_strategy_code` 仅返回「该租户策略实例存在且 status=1」的 target；execution-node TaskItem 支持 `leverage`；node_execute_worker 转发时带上每 task 的 amount_usdt/leverage。
 - **evui**：运营管理 → 租户策略（/operation/tenant-strategies）；选租户后列表/新增/编辑/删除/一键复制主策略；新增实例时勾选「一键复制」会拉取主策略详情并预填表单（展示名、描述、杠杆、单笔金额、最低资金），样式为复选框 + 单独一行灰色说明。
 
+### Merchant API 文档与用户详情
+- **文档**：`docs/api/MERCHANT_API.md` 整理 19 个接口；`services/merchant-api/README.md` 指向该文档。
+- **用户详情**：GET /merchant/user/info 的 `accounts[]` 含完整 `api_key`、`api_secret`、`passphrase` 及 `bound_exchanges`，供商户管理 API 密钥。
+
+### 成交流水同步
+- **链路**：execution-node 提供 GET /api/sync-trades（ccxt fetch_my_trades）；`libs/sync_node/service.py` 的 `sync_trades_from_nodes()` 拉取并去重；data-api POST /api/sync/trades 触发同步，写入 `fact_transaction`。
+- **data-api**：`services/data-api/app/routers/sync.py` 注册 POST /api/sync/trades；需鉴权。
+
+### Nginx 与后台
+- **管理后台**：`api.aigomsg.com/ib/` 反代 IronBull 管理后台，不影响现有 PHP。
+- **Merchant API**：独立域名 `merchant.aigomsg.com` 反代到 8010。
+- **evui**：Logo 换为 `evui/src/assets/image.png`，项目名改为「Aigo」；vue.config.js、.env.production、登录页与版权已改。
+
+### 部署与发布（重要）
+- **问题**：线上用 `make push-deploy` 时若使用 sudo，`make restart` 在 root 下执行，root 的 Python 无 uvicorn → 服务起不来；且 root 写入的 `tmp/pids/*.pid` 导致 ec2-user 无法覆盖，后续手动启动也失败。
+- **修复**：  
+  - **deploy/deploy.sh**：若当前是 root 且仓库属主非 root，则先 `chown -R $REPO_OWNER tmp`，再 `sudo -u $REPO_OWNER bash $ROOT/deploy/start.sh restart`（不再用 `make restart`，直接调 start.sh）。发布结束后自动执行一次 `start.sh status` 输出服务状态。  
+  - **deploy/start.sh**：启动前对已存在但进程已死的 pid 文件执行 `rm -f`，避免 root 留下的 pid 文件导致权限错误。  
+  - **deploy/push-and-deploy.sh**：发布完成后增加「验证远程服务」步骤（SSH 执行 status），若有 stopped 会提示 chown tmp + restart 的一键命令。
+- **配置**：`DEPLOY_SUDO=yes` 时远程执行 `sudo bash deploy.sh`；默认不跑迁移，需线上迁移时用 `make push-deploy MIGRATE=1`。
+- **线上若服务全 stopped**：SSH 后执行 `sudo chown -R ec2-user:ec2-user /opt/ironbull/tmp`，再以 ec2-user 执行 `cd /opt/ironbull && bash deploy/start.sh restart`。monitor-daemon 在 `monitor_enabled=false` 时会主动退出，属预期。
+
+### 节点列表 500 修复
+- **data-api**：`services/data-api/app/routers/nodes.py` 的 `list_nodes` 曾有一段错误 SQL（在 `db.query` 里嵌套 `db.query`），已删除错误子查询，仅保留按节点 count 账户数的循环。
+
 ---
 
 ## 4. 关键文件索引
@@ -99,6 +124,9 @@
 | Merchant API   | services/merchant-api/app/routers/（user、reward、pointcard、strategy） |
 | 实盘/交易所    | scripts/live_small_test.py、libs/trading/live_trader.py、libs/exchange/ |
 | 迁移与测试     | migrations/（014-017）；scripts/run_migrations_014_015.py、test_data_api_all.py、test_full_business.py、test_reward_distribution.py |
+| 部署与发布     | deploy/deploy.sh（chown tmp + sudo -u 属主 start.sh restart）、deploy/start.sh、deploy/push-and-deploy.sh、.deploy.*.env |
+| Merchant API 文档 | docs/api/MERCHANT_API.md、services/merchant-api/README.md |
+| 成交流水同步   | libs/sync_node/service.py（sync_trades_from_nodes）、services/execution-node（/api/sync-trades）、data-api routers/sync.py（POST /api/sync/trades）、fact_transaction |
 
 ---
 
@@ -111,6 +139,7 @@
 - **数据库**：需执行 014-017 后所有功能才正常。014-015 可用 `scripts/run_migrations_014_015.py`；016-017 直接用 mysql 执行 `migrations/016_*.sql` 和 `migrations/017_*.sql`。
 - **奖励分配**：全溯源已完成，7 个场景 97 项校验通过（含超发 cap、租户隔离、无邀请人、自持不足等边界情况）。
 - **租户**：2 个活跃租户，均有根账户。新建租户自动创建根账户。
+- **部署**：push-deploy 已改为「root 时 chown tmp + 以仓库属主执行 start.sh restart」；发布后会打印服务状态。若线上服务全 stopped，按上文「部署与发布」一节的一键命令修复。
 
 ---
 
@@ -119,11 +148,12 @@
 - 新环境或未跑过 014/015 时：先执行 `scripts/run_migrations_014_015.py`，否则租户策略接口可能 503 或表不存在。
 - data-api 中 `tenant_strategies` 路由必须挂在 `tenants` 之前，否则 `/api/tenants/{id}/tenant-strategies` 会被 tenants 的 `/{tenant_id}` 吃掉导致 404。
 - 全量接口自测：`scripts/test_data_api_all.py`（需先登录拿到 token）；说明见 `scripts/README_DATA_API_TEST.md`。
+- **部署**：首次或出问题时，确保服务器上 `tmp` 属主与执行 start.sh 的用户一致；发布用 `make push-deploy`（默认不跑迁移，MIGRATE=1 时跑）。
 
 ---
 
 ## 7. 后续可选
 
-- **部署到生产**：执行迁移 016-017，补建已有租户的根账户（脚本逻辑已有，见会话记录），部署最新代码
+- **部署到生产**：迁移 016-017 已就绪；部署流程已修复（chown + 属主 restart），按 SESSION 中「部署与发布」执行即可
 - 构建体积优化（大 chunk 代码分割、路由懒加载）
 - 监控告警增强（更多端点、历史告警、邮件/钉钉通道）

@@ -42,6 +42,19 @@ if ! [ -w "$PID_DIR" ]; then
     exit 1
 fi
 
+# 诊断：确认 python3 和关键模块可用
+echo "[✓] Running as: $(whoami) | HOME=$HOME | python3=$(command -v python3 || echo 'NOT FOUND')"
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "[!] python3 not found in PATH. PATH=$PATH"
+    echo "    Fix: install python3, or ensure your .bash_profile adds it to PATH"
+    exit 1
+fi
+if ! python3 -c "import uvicorn" 2>/dev/null; then
+    echo "[!] python3 found ($(command -v python3)) but 'uvicorn' module not installed"
+    echo "    Fix: pip3 install uvicorn fastapi"
+    exit 1
+fi
+
 # ---- 服务定义（case 实现，兼容 Bash 3.x / macOS） ----
 ALL_SERVICES="data-provider data-api merchant-api signal-monitor monitor-daemon execution-node"
 
@@ -90,7 +103,18 @@ start_service() {
     nohup $cmd >> "$log_file" 2>&1 &
     local pid=$!
     echo $pid > "$pid_file"
-    echo "  [ok] $name started (pid=$pid, log=$log_file)"
+
+    # 等待 2 秒后验证进程是否真的存活（捕获秒退情况）
+    sleep 2
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "  [ok] $name started (pid=$pid, log=$log_file)"
+    else
+        echo "  [FAIL] $name exited immediately (pid=$pid was not alive after 2s)"
+        echo "  --- last 15 lines of $log_file ---"
+        tail -15 "$log_file" 2>/dev/null || echo "  (no log output)"
+        echo "  ---"
+        rm -f "$pid_file"
+    fi
 }
 
 stop_service() {
