@@ -558,6 +558,8 @@ class LiveTrader(Trader):
         signal_id: Optional[str] = None,      # 关联信号ID（用于 OrderTrade 记录）
         amount_usdt: Optional[float] = None,  # USDT 金额（优先于 quantity，自动换算张数/币数量）
         leverage: Optional[int] = None,        # 杠杆倍数（从信号/策略传入，下单前自动设置）
+        stop_loss: Optional[float] = None,     # 止损价（记录到订单）
+        take_profit: Optional[float] = None,   # 止盈价（记录到订单）
         **kwargs,
     ) -> OrderResult:
         """
@@ -614,6 +616,9 @@ class LiveTrader(Trader):
                     price=price,
                     position_side=position_side,
                     signal_id=signal_id,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    leverage=leverage,
                 )
                 if db_order_id:
                     order_id = db_order_id  # 使用数据库订单ID
@@ -1559,6 +1564,9 @@ class LiveTrader(Trader):
         price: Optional[float],
         position_side: Optional[str],
         signal_id: Optional[str],
+        stop_loss: Optional[float] = None,
+        take_profit: Optional[float] = None,
+        leverage: Optional[int] = None,
     ) -> Optional[str]:
         """创建订单记录（PENDING 状态）"""
         order_type_str = "MARKET" if order_type == OrderType.MARKET else "LIMIT"
@@ -1576,6 +1584,9 @@ class LiveTrader(Trader):
                     signal_id=signal_id,
                     position_side=position_side or "NONE",
                     market_type=self.market_type,
+                    stop_loss=Decimal(str(stop_loss)) if stop_loss else None,
+                    take_profit=Decimal(str(take_profit)) if take_profit else None,
+                    leverage=leverage,
                 )
                 logger.debug("order record created (settlement)", order_id=order_dto.order_id)
                 return order_dto.order_id
@@ -1602,6 +1613,9 @@ class LiveTrader(Trader):
                 signal_id=signal_id,
                 market_type=self.market_type,
                 position_side=position_side,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                leverage=leverage,
             ))
             
             logger.debug("order record created", order_id=order_dto.order_id)

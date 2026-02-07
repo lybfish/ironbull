@@ -55,6 +55,9 @@ class Account(Base):
     total_fee = Column(DECIMAL(20, 8), nullable=False, default=0, comment="累计手续费")
     realized_pnl = Column(DECIMAL(20, 8), nullable=False, default=0, comment="累计已实现盈亏")
     
+    # 同步专用：记录上次交易所同步的余额，用于检测入金出金（不受 settle_trade 影响）
+    synced_balance = Column(DECIMAL(20, 8), nullable=False, default=0, comment="上次交易所同步余额")
+    
     # 合约专用
     margin_used = Column(DECIMAL(20, 8), nullable=False, default=0, comment="已用保证金")
     unrealized_pnl = Column(DECIMAL(20, 8), nullable=False, default=0, comment="未实现盈亏（从交易所同步）")

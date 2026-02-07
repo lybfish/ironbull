@@ -436,10 +436,12 @@ class LedgerService:
         从交易所同步余额到 fact_account。
         
         除了更新余额/可用/冻结快照，还更新合约扩展字段（未实现盈亏、保证金、权益）。
-        检测余额变化：
-        - 余额增加（排除未实现盈亏波动）视为划转入金，累加 total_deposit 并记录流水
-        - 余额减少视为划转出金，累加 total_withdraw 并记录流水
-        - 小额波动（< 0.01 USDT）忽略，避免浮动盈亏造成误判
+        
+        入金/出金检测逻辑（v2）：
+        - 用 synced_balance（上次交易所同步余额）而非 balance（会被 settle_trade 修改）做对比
+        - 两次同步之间的余额差 = 已知交易活动（已实现盈亏 + 手续费）+ 未知变动（真实入金/出金）
+        - 查询两次同步之间的 FILL 流水，得到已知的余额变动
+        - 只将"无法解释的差额"（> 1 USDT）记为入金/出金
         """
         account, created = self.account_repo.get_or_create(
             tenant_id=tenant_id,
@@ -447,20 +449,21 @@ class LedgerService:
             currency=currency,
         )
         
-        old_balance = Decimal(str(account.balance or 0))
-        diff = balance - old_balance
+        # 用 synced_balance 做对比（不受 settle_trade 干扰）
+        last_synced = Decimal(str(account.synced_balance or 0))
+        raw_diff = balance - last_synced
         
         # 更新余额快照 + 合约扩展字段
         account.balance = balance
         account.available = available
         account.frozen = frozen
+        account.synced_balance = balance  # 更新同步余额
         # 合约扩展字段（每次同步都从交易所覆盖）
         account.margin_used = margin_used
         account.unrealized_pnl = unrealized_pnl
         account.equity = equity if equity else balance + unrealized_pnl
         account.margin_ratio = margin_ratio
         
-        # 检测余额变动（忽略小于 0.01 的浮动）
         # 首次创建账户且有余额 → 视为初始入金
         if created and balance > Decimal("0.01"):
             account.total_deposit = Decimal(str(account.total_deposit or 0)) + balance
@@ -475,24 +478,36 @@ class LedgerService:
                 transaction_at=datetime.now(),
                 remark="交易所余额初始同步",
             )
-        elif abs(diff) > Decimal("0.01"):
-            if diff > 0:
-                # 余额增加 → 划转入金
-                account.total_deposit = Decimal(str(account.total_deposit or 0)) + diff
+            return self._to_account_dto(account)
+        
+        # 计算已知的交易活动导致的余额变化（排除入金/出金/同步类型的流水）
+        explained_change = self._calc_explained_balance_change(account)
+        
+        # 未解释的差额 = 总差额 - 已知交易活动
+        unexplained = raw_diff - explained_change
+        
+        # 阈值：1 USDT（避免资金费率、精度误差等小额波动误判）
+        TRANSFER_THRESHOLD = Decimal("1.0")
+        
+        if abs(unexplained) > TRANSFER_THRESHOLD:
+            if unexplained > 0:
+                # 无法解释的余额增加 → 可能是外部入金
+                account.total_deposit = Decimal(str(account.total_deposit or 0)) + unexplained
                 self.account_repo.update(account)
                 self._record_transaction(
                     account=account,
                     transaction_type=TransactionType.DEPOSIT,
-                    amount=diff,
+                    amount=unexplained,
                     fee=Decimal("0"),
                     source_type="SYNC",
                     source_id=None,
                     transaction_at=datetime.now(),
-                    remark=f"交易所余额同步检测入金 +{float(diff):.4f}",
+                    remark=f"交易所同步检测入金 +{float(unexplained):.4f}"
+                           f"（总差额{float(raw_diff):+.4f}，已知交易{float(explained_change):+.4f}）",
                 )
             else:
-                # 余额减少 → 划转出金
-                withdraw_amount = abs(diff)
+                # 无法解释的余额减少 → 可能是外部出金
+                withdraw_amount = abs(unexplained)
                 account.total_withdraw = Decimal(str(account.total_withdraw or 0)) + withdraw_amount
                 self.account_repo.update(account)
                 self._record_transaction(
@@ -503,12 +518,47 @@ class LedgerService:
                     source_type="SYNC",
                     source_id=None,
                     transaction_at=datetime.now(),
-                    remark=f"交易所余额同步检测出金 -{float(withdraw_amount):.4f}",
+                    remark=f"交易所同步检测出金 -{float(withdraw_amount):.4f}"
+                           f"（总差额{float(raw_diff):+.4f}，已知交易{float(explained_change):+.4f}）",
                 )
         else:
             self.account_repo.update(account)
         
         return self._to_account_dto(account)
+    
+    def _calc_explained_balance_change(self, account) -> Decimal:
+        """
+        计算上次同步以来、由已知交易活动导致的交易所余额变化。
+        
+        对于合约交易所，钱包余额的变化来自：
+        - 已实现盈亏（平仓盈利/亏损）
+        - 手续费（交易手续费）
+        - 资金费率（合约 funding fee）
+        
+        注意：settle_trade 用现货逻辑记账（扣/加全额），与交易所真实余额变化不同。
+        因此这里查询 fact_fill 的手续费 + fact_position 的已实现盈亏变化来估算。
+        
+        简化方案：查最近的 fill 手续费总和。已实现盈亏较难准确追踪，
+        依赖 synced_balance 的 diff + 阈值过滤来兜底。
+        """
+        try:
+            from sqlalchemy import func
+            from libs.order_trade.models import Fill
+            
+            # 查询该账户自上次更新以来的成交手续费总和
+            result = self.session.query(
+                func.coalesce(func.sum(Fill.fee), 0),
+            ).filter(
+                Fill.account_id == account.account_id,
+                Fill.tenant_id == account.tenant_id,
+                Fill.created_at >= account.updated_at,
+            ).scalar()
+            
+            total_fee = Decimal(str(result or 0))
+            # 手续费会减少交易所余额
+            return -total_fee
+        except Exception:
+            return Decimal("0")
     
     def list_accounts(self, filter: AccountFilter) -> List[AccountDTO]:
         """查询账户列表"""

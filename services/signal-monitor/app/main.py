@@ -725,6 +725,8 @@ async def _execute_signal_for_target(
             price=entry_price,
             leverage=leverage or None,
             signal_id=signal.get("signal_id"),
+            stop_loss=stop_loss or None,
+            take_profit=take_profit or None,
         )
         ok = order_result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
         filled_qty = order_result.filled_quantity or 0

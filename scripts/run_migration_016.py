@@ -62,6 +62,20 @@ def run():
         else:
             log.info("column fact_account.margin_ratio already exists")
 
+        # synced_balance：记录上次交易所同步余额（不受 settle_trade 影响）
+        if not column_exists(conn, "fact_account", "synced_balance", db_name):
+            conn.execute(text(
+                "ALTER TABLE fact_account ADD COLUMN synced_balance DECIMAL(20,8) NOT NULL DEFAULT 0 "
+                "COMMENT '上次交易所同步余额' AFTER realized_pnl"
+            ))
+            # 初始化：将当前 balance 复制到 synced_balance，避免首次同步误判
+            conn.execute(text(
+                "UPDATE fact_account SET synced_balance = balance WHERE synced_balance = 0 AND balance > 0"
+            ))
+            log.info("added column: fact_account.synced_balance (initialized from balance)")
+        else:
+            log.info("column fact_account.synced_balance already exists")
+
         conn.commit()
         log.info("migration 016 done")
 

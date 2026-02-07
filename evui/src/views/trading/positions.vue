@@ -256,20 +256,158 @@
             {{ formatTime(row.closed_at) }}
           </template>
         </el-table-column>
-        <el-table-column prop="updated_at" label="更新时间" min-width="160">
+        <el-table-column prop="updated_at" label="更新时间" width="160">
           <template slot-scope="{row}">
             {{ formatTime(row.updated_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="80" align="center" fixed="right">
+          <template slot-scope="{row}">
+            <el-button type="text" size="mini" @click="showDetail(row)">详情</el-button>
           </template>
         </el-table-column>
       </el-table>
 
       <el-empty v-if="!loading && filteredList.length === 0" description="暂无持仓数据"/>
     </el-card>
+
+    <!-- 持仓详情弹窗 -->
+    <el-dialog :title="'持仓详情 - ' + (detailRow.symbol || '')" :visible.sync="detailVisible" width="900px" top="5vh" append-to-body>
+      <div v-if="detailRow.symbol" class="detail-content">
+        <!-- 持仓基本信息 -->
+        <el-descriptions :column="3" border size="small" style="margin-bottom:16px">
+          <el-descriptions-item label="标的">{{ detailRow.symbol }}</el-descriptions-item>
+          <el-descriptions-item label="交易所">{{ (detailRow.exchange || '').toUpperCase() }}</el-descriptions-item>
+          <el-descriptions-item label="方向">
+            <el-tag :type="isLong(detailRow) ? 'success' : 'danger'" size="mini" effect="dark">{{ isLong(detailRow) ? '多头' : '空头' }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="数量">{{ formatNum(detailRow.quantity) }}</el-descriptions-item>
+          <el-descriptions-item label="开仓均价">{{ formatPrice(detailRow.avg_cost) }}</el-descriptions-item>
+          <el-descriptions-item label="杠杆">{{ detailRow.leverage || '-' }}x</el-descriptions-item>
+          <el-descriptions-item label="名义价值">{{ formatMoney(calcNotional(detailRow)) }} USDT</el-descriptions-item>
+          <el-descriptions-item label="保证金">{{ detailRow.margin ? formatMoney(detailRow.margin) : '-' }}</el-descriptions-item>
+          <el-descriptions-item label="强平价">
+            <span v-if="detailRow.liquidation_price" class="liq-price">{{ formatPrice(detailRow.liquidation_price) }}</span>
+            <span v-else class="text-muted">-</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="未实现盈亏">
+            <span :class="pnlClass(detailRow.unrealized_pnl)">{{ formatPnl(detailRow.unrealized_pnl) }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="已实现盈亏">
+            <span :class="pnlClass(detailRow.realized_pnl)">{{ formatPnl(detailRow.realized_pnl) }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <el-tag :type="detailRow.status === 'OPEN' ? 'success' : 'info'" size="mini">{{ detailRow.status === 'OPEN' ? '持仓中' : '已平仓' }}</el-tag>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <!-- 止盈止损信息（从关联订单汇总） -->
+        <div v-if="detailSlTp.stop_loss || detailSlTp.take_profit" class="sltp-bar">
+          <el-tag v-if="detailSlTp.stop_loss" type="danger" size="small" effect="plain">
+            <i class="el-icon-bottom"></i> 止损 {{ formatPrice(detailSlTp.stop_loss) }}
+          </el-tag>
+          <el-tag v-if="detailSlTp.take_profit" type="success" size="small" effect="plain">
+            <i class="el-icon-top"></i> 止盈 {{ formatPrice(detailSlTp.take_profit) }}
+          </el-tag>
+          <span class="text-muted" style="font-size:12px;margin-left:8px">（来自关联订单）</span>
+        </div>
+
+        <!-- 手续费汇总 -->
+        <div class="fee-summary" v-if="detailTotalFee > 0">
+          <el-tag size="small" type="warning" effect="plain">
+            累计手续费：{{ formatMoney(detailTotalFee) }} USDT
+          </el-tag>
+        </div>
+
+        <!-- 关联订单 -->
+        <h4 style="margin:16px 0 8px"><i class="el-icon-s-order"></i> 关联订单 <span v-if="detailOrders.length" class="text-muted" style="font-size:12px">({{ detailOrders.length }}笔)</span></h4>
+        <el-table :data="detailOrders" stripe border size="mini" v-loading="detailLoading" :header-cell-style="{background:'#fafafa'}" max-height="260">
+          <el-table-column prop="order_id" label="订单ID" width="130">
+            <template slot-scope="{row}">
+              <el-tooltip :content="row.order_id" placement="top">
+                <span class="id-text">{{ (row.order_id || '').slice(0, 10) }}...</span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
+          <el-table-column prop="side" label="方向" width="70" align="center">
+            <template slot-scope="{row}">
+              <el-tag :type="(row.side||'').toUpperCase()==='BUY' ? 'success' : 'danger'" size="mini" effect="dark">{{ (row.side||'').toUpperCase()==='BUY' ? '买入' : '卖出' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="order_type" label="类型" width="70" align="center"/>
+          <el-table-column label="数量" width="100" align="right">
+            <template slot-scope="{row}">{{ formatNum(row.filled_quantity) }} / {{ formatNum(row.quantity) }}</template>
+          </el-table-column>
+          <el-table-column label="成交均价" width="100" align="right">
+            <template slot-scope="{row}">{{ formatPrice(row.avg_price) }}</template>
+          </el-table-column>
+          <el-table-column label="止损" width="90" align="right">
+            <template slot-scope="{row}">
+              <span v-if="row.stop_loss" style="color:#F56C6C">{{ formatPrice(row.stop_loss) }}</span>
+              <span v-else class="text-muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="止盈" width="90" align="right">
+            <template slot-scope="{row}">
+              <span v-if="row.take_profit" style="color:#67C23A">{{ formatPrice(row.take_profit) }}</span>
+              <span v-else class="text-muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="手续费" width="80" align="right">
+            <template slot-scope="{row}">
+              <span v-if="row.total_fee">{{ formatNum(row.total_fee) }}</span>
+              <span v-else class="text-muted">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="status" label="状态" width="80" align="center">
+            <template slot-scope="{row}">
+              <el-tag :type="row.status==='FILLED'?'success':row.status==='CANCELLED'?'info':'warning'" size="mini">{{ row.status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="时间" min-width="140">
+            <template slot-scope="{row}">{{ formatTime(row.created_at) }}</template>
+          </el-table-column>
+        </el-table>
+
+        <!-- 关联成交 -->
+        <h4 style="margin:16px 0 8px"><i class="el-icon-tickets"></i> 成交记录 <span v-if="detailFills.length" class="text-muted" style="font-size:12px">({{ detailFills.length }}笔)</span></h4>
+        <el-table :data="detailFills" stripe border size="mini" v-loading="detailLoading" :header-cell-style="{background:'#fafafa'}" max-height="220">
+          <el-table-column prop="fill_id" label="成交ID" width="130">
+            <template slot-scope="{row}">
+              <span class="id-text">{{ (row.fill_id || '').slice(0, 10) }}...</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="side" label="方向" width="70" align="center">
+            <template slot-scope="{row}">
+              <el-tag :type="(row.side||'').toUpperCase()==='BUY' ? 'success' : 'danger'" size="mini">{{ (row.side||'').toUpperCase()==='BUY' ? '买入' : '卖出' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="数量" width="100" align="right">
+            <template slot-scope="{row}">{{ formatNum(row.quantity) }}</template>
+          </el-table-column>
+          <el-table-column label="成交价" width="110" align="right">
+            <template slot-scope="{row}">{{ formatPrice(row.price) }}</template>
+          </el-table-column>
+          <el-table-column label="成交额" width="110" align="right">
+            <template slot-scope="{row}">{{ formatMoney(row.value || row.quantity * row.price) }}</template>
+          </el-table-column>
+          <el-table-column label="手续费" width="90" align="right">
+            <template slot-scope="{row}">
+              <span v-if="row.fee" style="color:#E6A23C">{{ formatNum(row.fee) }}</span>
+              <span v-else class="text-muted">0</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="时间" min-width="140">
+            <template slot-scope="{row}">{{ formatTime(row.filled_at) }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script>
-import { getPositions } from '@/api/trading'
+import { getPositions, getOrders, getFills } from '@/api/trading'
 import { getExchangeAccounts } from '@/api/admin'
 
 export default {
@@ -289,7 +427,13 @@ export default {
       autoRefresh: false,
       refreshTimer: null,
       lastUpdateTime: '',
-      accountOptions: []
+      accountOptions: [],
+      // 详情弹窗
+      detailVisible: false,
+      detailLoading: false,
+      detailRow: {},
+      detailOrders: [],
+      detailFills: []
     }
   },
   computed: {
@@ -316,6 +460,24 @@ export default {
         }
         return true
       })
+    },
+    /** 从关联订单中汇总止盈止损（取最新有效值） */
+    detailSlTp() {
+      let sl = null, tp = null
+      for (const o of this.detailOrders) {
+        if (o.stop_loss && !sl) sl = o.stop_loss
+        if (o.take_profit && !tp) tp = o.take_profit
+      }
+      return { stop_loss: sl, take_profit: tp }
+    },
+    /** 从关联订单中汇总手续费 */
+    detailTotalFee() {
+      return this.detailOrders.reduce((sum, o) => sum + (Number(o.total_fee) || 0), 0)
+        + this.detailFills.reduce((sum, f) => {
+          // 若订单未记录fee但成交记录有fee，用成交的（避免重复）
+          const orderHasFee = this.detailOrders.some(o => o.order_id === f.order_id && Number(o.total_fee) > 0)
+          return sum + (orderHasFee ? 0 : (Number(f.fee) || 0))
+        }, 0)
     },
     /** 统计指标 */
     stats() {
@@ -388,6 +550,27 @@ export default {
     resetQuery() {
       this.where = { symbol: '', position_side: '', exchange: '', account_id: '' }
       this.fetchData()
+    },
+
+    /* ---------- 详情弹窗 ---------- */
+    async showDetail(row) {
+      this.detailRow = row
+      this.detailOrders = []
+      this.detailFills = []
+      this.detailVisible = true
+      this.detailLoading = true
+      try {
+        const [ordersRes, fillsRes] = await Promise.all([
+          getOrders({ symbol: row.symbol, account_id: row.account_id, limit: 100 }),
+          getFills({ symbol: row.symbol, account_id: row.account_id, limit: 200 })
+        ])
+        this.detailOrders = (ordersRes.data.data || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        this.detailFills = (fillsRes.data.data || []).sort((a, b) => new Date(b.filled_at) - new Date(a.filled_at))
+      } catch (e) {
+        this.$message.error('获取关联数据失败')
+      } finally {
+        this.detailLoading = false
+      }
     },
 
     /* ---------- 计算字段 ---------- */
@@ -564,5 +747,25 @@ export default {
 }
 ::v-deep .row-loss {
   background-color: rgba(245, 108, 108, 0.04) !important;
+}
+
+/* 详情弹窗 */
+.detail-content {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.sltp-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.fee-summary {
+  margin-bottom: 12px;
+}
+.id-text {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  color: #606266;
 }
 </style>

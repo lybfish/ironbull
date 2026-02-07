@@ -405,6 +405,9 @@ class TradeSettlementService:
         signal_id: Optional[str] = None,
         position_side: str = "NONE",
         market_type: str = "spot",
+        stop_loss: Optional[Decimal] = None,
+        take_profit: Optional[Decimal] = None,
+        leverage: Optional[int] = None,
     ) -> OrderDTO:
         """创建订单（委托前）"""
         return self.order_trade_service.create_order(CreateOrderDTO(
@@ -419,6 +422,9 @@ class TradeSettlementService:
             signal_id=signal_id,
             position_side=position_side,
             market_type=market_type,
+            stop_loss=float(stop_loss) if stop_loss is not None else None,
+            take_profit=float(take_profit) if take_profit is not None else None,
+            leverage=int(leverage) if leverage is not None else None,
         ))
     
     def submit_order(

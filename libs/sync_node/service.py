@@ -11,7 +11,7 @@ import httpx
 from libs.core import get_config, get_logger
 from libs.execution_node import ExecutionNodeRepository
 from libs.member import MemberRepository
-from datetime import datetime
+from datetime import datetime, timedelta
 from libs.ledger import LedgerService
 from libs.ledger.states import TransactionType
 from libs.ledger.repository import generate_transaction_id
@@ -240,6 +240,7 @@ def sync_positions_from_nodes(
             closed_symbols = set()
             try:
                 from libs.position.repository import PositionRepository
+                from libs.position.models import Position as PositionModel
                 pos_repo = PositionRepository(session)
                 open_positions = pos_repo.get_positions_by_account(
                     tenant_id=r["tenant_id"],
@@ -274,6 +275,24 @@ def sync_positions_from_nodes(
                         if _retry_on_deadlock(session, _close_ghost,
                                               f"close_ghost {r.get('account_id')}/{_db_sym}"):
                             closed_symbols.add(_db_sym)
+
+                # 补充：查找最近 30 分钟内关闭的持仓，也加入清理列表
+                # 这样即使上一轮 cancel-conditionals 失败，后续同步仍会重试取消
+                try:
+                    _cutoff = datetime.now() - timedelta(minutes=30)
+                    recently_closed = session.query(PositionModel).filter(
+                        PositionModel.tenant_id == r["tenant_id"],
+                        PositionModel.account_id == r["account_id"],
+                        PositionModel.exchange == exchange,
+                        PositionModel.status == "CLOSED",
+                        PositionModel.quantity == 0,
+                        PositionModel.updated_at >= _cutoff,
+                    ).all()
+                    for rp in recently_closed:
+                        closed_symbols.add(rp.symbol)
+                except Exception as e:
+                    log.debug("query recently closed positions failed", error=str(e))
+
             except Exception as e:
                 log.warning("close stale positions failed",
                             account_id=r.get("account_id"), error=str(e))
@@ -288,6 +307,9 @@ def sync_positions_from_nodes(
                             "sandbox": sandbox,
                             "symbols": list(closed_symbols),
                         }
+                        log.info("发送取消残留条件单请求",
+                                 account_id=r["account_id"],
+                                 symbols=list(closed_symbols))
                         with httpx.Client(timeout=30) as cancel_client:
                             cancel_resp = cancel_client.post(
                                 f"{base_url}/api/cancel-conditionals",
@@ -297,13 +319,21 @@ def sync_positions_from_nodes(
                             if cancel_resp.status_code == 200:
                                 cancel_data = cancel_resp.json()
                                 for cr in cancel_data.get("results", []):
-                                    if cr.get("cancelled", 0) > 0:
-                                        log.info("自动取消残留条件单",
+                                    cancelled_n = cr.get("cancelled", 0)
+                                    if cancelled_n > 0:
+                                        log.info("自动取消残留条件单成功",
                                                  account_id=r["account_id"],
                                                  symbols=list(closed_symbols),
-                                                 cancelled=cr.get("cancelled"))
+                                                 cancelled=cancelled_n)
+                                    else:
+                                        log.debug("无残留条件单需取消",
+                                                  account_id=r["account_id"],
+                                                  symbols=list(closed_symbols))
                             else:
-                                log.warning("取消条件单请求失败", status=cancel_resp.status_code)
+                                log.warning("取消条件单请求失败",
+                                            account_id=r["account_id"],
+                                            status=cancel_resp.status_code,
+                                            body=cancel_resp.text[:200])
                 except Exception as e:
                     log.warning("cancel conditionals failed",
                                 account_id=r.get("account_id"), error=str(e))

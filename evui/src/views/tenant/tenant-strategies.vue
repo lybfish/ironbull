@@ -333,6 +333,10 @@ export default {
       this.editVisible = true
     },
     async submitEdit() {
+      if (!this.editForm.id) {
+        this.$message.error('策略实例ID无效，请重新打开编辑')
+        return
+      }
       const payload = {
         display_name: this.editForm.display_name || null,
         display_description: this.editForm.display_description || null,
@@ -356,6 +360,7 @@ export default {
       }
     },
     async copyFromMaster(row) {
+      if (!row.id) { this.$message.error('策略实例ID无效'); return }
       try {
         await this.$confirm('确定用主策略参数覆盖当前实例的杠杆、单笔金额、最低资金及展示名/描述？', '一键复制主策略', { type: 'warning' })
       } catch {
@@ -371,6 +376,7 @@ export default {
       }
     },
     async remove(row) {
+      if (!row.id) { this.$message.error('策略实例ID无效'); return }
       try {
         await this.$confirm(`确定删除该租户下的策略实例「${row.display_name || row.strategy_name}」？`, '删除', { type: 'warning' })
       } catch {
