@@ -39,6 +39,12 @@ def strategies_list(
         min_cap = float(ts.min_capital) if ts.min_capital is not None else (float(s.min_capital) if s.min_capital is not None else (float(cfg.get("min_capital", 200)) if isinstance(cfg, dict) else 200))
         name = (ts.display_name or "").strip() or s.name
         desc = (ts.display_description or "").strip() or (s.description or "").strip() or (cfg.get("description", "") if isinstance(cfg, dict) else "")
+        # 仓位参数：优先取实例覆盖，否则用主策略
+        capital = float(ts.capital) if getattr(ts, "capital", None) is not None else (float(getattr(s, "capital", 0) or 0))
+        leverage = int(ts.leverage) if ts.leverage is not None else (int(getattr(s, "leverage", 0) or 0))
+        risk_mode = int(getattr(ts, "risk_mode", None) or 0) if getattr(ts, "risk_mode", None) is not None else int(getattr(s, "risk_mode", 1) or 1)
+        pct = {1: 0.01, 2: 0.015, 3: 0.02}.get(risk_mode, 0.01)
+        amount_usdt = round(capital * pct * leverage, 2) if capital > 0 and leverage > 0 else 0
         list_data.append({
             "id": s.id,
             "strategy_id": s.id,
@@ -47,6 +53,11 @@ def strategies_list(
             "symbol": s.symbol,
             "timeframe": s.timeframe or "",
             "min_capital": min_cap,
+            "capital": capital,
+            "leverage": leverage,
+            "risk_mode": risk_mode,
+            "risk_mode_label": {1: "稳健", 2: "均衡", 3: "激进"}.get(risk_mode, "稳健"),
+            "amount_usdt": amount_usdt,
             "status": ts.status,
         })
     return ok(list_data)

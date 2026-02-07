@@ -133,8 +133,10 @@ STRATEGY_REGISTRY = {
     "supertrend": SuperTrendStrategy,
     # 策略组合
     "portfolio": PortfolioStrategy,
-    # 市场状态识别
+    # 市场状态识别（三个风险版本共享同一算法类）
     "market_regime": MarketRegimeStrategy,
+    "market_regime_balanced": MarketRegimeStrategy,
+    "market_regime_aggressive": MarketRegimeStrategy,
 }
 
 

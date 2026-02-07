@@ -69,9 +69,11 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="单笔仓位" width="100" align="right">
+        <el-table-column label="下单金额(U)" width="110" align="right">
           <template slot-scope="{row}">
-            <span v-if="row.amount_usdt > 0">{{ formatNum(row.amount_usdt) }}</span>
+            <span v-if="row.amount_usdt > 0">{{ formatNum(row.amount_usdt) }}
+              <el-tooltip content="= 本金 × 风险比例 × 杠杆" placement="top"><i class="el-icon-info" style="color:#c0c4cc;font-size:12px;margin-left:2px"></i></el-tooltip>
+            </span>
             <span v-else style="color:#909399">-</span>
           </template>
         </el-table-column>
@@ -135,7 +137,9 @@
         <el-descriptions-item label="杠杆">{{ detailRow.leverage || 20 }}X</el-descriptions-item>
         <el-descriptions-item label="风险档位">{{ detailRow.risk_mode_label || '稳健' }}（{{ detailRow.risk_mode === 3 ? '2%' : detailRow.risk_mode === 2 ? '1.5%' : '1%' }}）</el-descriptions-item>
         <el-descriptions-item label="单笔保证金">{{ detailRow.margin_per_trade > 0 ? formatNum(detailRow.margin_per_trade) + ' USDT' : '-' }}</el-descriptions-item>
-        <el-descriptions-item label="单笔仓位">{{ detailRow.amount_usdt > 0 ? formatNum(detailRow.amount_usdt) + ' USDT' : '-' }}</el-descriptions-item>
+        <el-descriptions-item label="下单金额">{{ detailRow.amount_usdt > 0 ? formatNum(detailRow.amount_usdt) + ' USDT' : '-' }}
+          <span v-if="detailRow.amount_usdt > 0" style="color:#909399;font-size:12px"> (自动计算)</span>
+        </el-descriptions-item>
         <el-descriptions-item label="交易所">{{ (detailRow.exchange || '').toUpperCase() }}</el-descriptions-item>
         <el-descriptions-item label="点卡（自充/赠送）">{{ formatNum(detailRow.point_card_self) }} / {{ formatNum(detailRow.point_card_gift) }}</el-descriptions-item>
         <el-descriptions-item label="累计盈亏">{{ formatNum(detailRow.total_profit) }}</el-descriptions-item>
