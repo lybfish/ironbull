@@ -392,26 +392,8 @@ class AutoTrader:
                     filled_qty = order_result.filled_quantity
                     filled_price = order_result.filled_price or entry_price
                     
-                    # 设置止盈止损单（受 exchange_sl_tp 开关控制，默认关闭）
-                    sl_tp_results = {}
-                    _exchange_sl_tp = get_config().get_bool("exchange_sl_tp", False)
-                    if (stop_loss or take_profit) and _exchange_sl_tp:
-                        try:
-                            sl_tp_results = await trader.set_sl_tp(
-                                symbol=symbol,
-                                side=order_side,
-                                quantity=filled_qty,
-                                stop_loss=stop_loss,
-                                take_profit=take_profit,
-                            )
-                            logger.info(
-                                "sl/tp orders set (exchange mode)",
-                                sl_status=sl_tp_results.get("sl", {}).status if sl_tp_results.get("sl") else None,
-                                tp_status=sl_tp_results.get("tp", {}).status if sl_tp_results.get("tp") else None,
-                            )
-                        except Exception as e:
-                            logger.error("failed to set sl/tp", error=str(e))
-                    elif stop_loss or take_profit:
+                    # 不挂交易所止盈止损单，SL/TP 由 position_monitor 自管到价平仓
+                    if stop_loss or take_profit:
                         logger.info("SL/TP 自管模式，不挂交易所单（由 position_monitor 接管）")
                     
                     # 记录交易
@@ -429,12 +411,6 @@ class AutoTrader:
                         status="filled",
                     )
                     
-                    # 保存止盈止损订单ID
-                    if sl_tp_results.get("sl"):
-                        trade.sl_order_id = sl_tp_results["sl"].exchange_order_id
-                    if sl_tp_results.get("tp"):
-                        trade.tp_order_id = sl_tp_results["tp"].exchange_order_id
-                    
                     self.open_positions[symbol] = trade
                     self.trade_history.append(trade)
                     self._daily_trades += 1
@@ -444,9 +420,9 @@ class AutoTrader:
                     result["trade_id"] = trade_id
                     result["message"] = f"已执行 {side} {symbol} @ {filled_price}"
                     
-                    # 止盈止损状态
-                    sl_status = "✅" if sl_tp_results.get("sl") and sl_tp_results["sl"].status == OrderStatus.OPEN else "❌"
-                    tp_status = "✅" if sl_tp_results.get("tp") and sl_tp_results["tp"].status == OrderStatus.OPEN else "❌"
+                    # 止盈止损为自管，不挂交易所单
+                    sl_status = "自管" if stop_loss else "-"
+                    tp_status = "自管" if take_profit else "-"
                     
                     # 发送成交通知
                     self.notifier.send_alert(

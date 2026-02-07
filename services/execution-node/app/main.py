@@ -325,19 +325,7 @@ async def _run_one(
         filled_qty = result.filled_quantity or 0
         filled_price = result.filled_price or entry_price
         exchange_order_id = str(result.exchange_order_id) if result.exchange_order_id else None
-        # 交易所 SL/TP 开关（默认关闭，改为自管模式）
-        exchange_sl_tp = config.get_bool("exchange_sl_tp", False)
-        if ok and (stop_loss or take_profit) and filled_qty > 0 and exchange_sl_tp:
-            try:
-                await trader.set_sl_tp(
-                    symbol=symbol,
-                    side=order_side,
-                    quantity=filled_qty,
-                    stop_loss=stop_loss,
-                    take_profit=take_profit,
-                )
-            except Exception as e:
-                log.warning("set_sl_tp failed", account_id=task.account_id, error=str(e))
+        # 不在交易所挂止盈止损单，由中心 position_monitor 自管到价平仓
 
         # 张数→币数量转换（Gate/OKX 合约以张为单位，需 × contractSize 得到真实币量）
         # 统一转换：张数→币数量

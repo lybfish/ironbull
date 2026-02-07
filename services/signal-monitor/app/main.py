@@ -795,8 +795,8 @@ DISPATCH_BY_STRATEGY = config.get_bool("dispatch_by_strategy", False)
 STRATEGY_DISPATCH_AMOUNT = config.get_float("strategy_dispatch_amount", 100.0)
 # 为 True 时，远程节点任务投递到 NODE_EXECUTE_QUEUE，由 worker 消费并 POST 到节点；否则直接 POST
 USE_NODE_EXECUTION_QUEUE = config.get_bool("use_node_execution_queue", False)
-# 是否在交易所挂 SL/TP 单（False=自管模式，由 position_monitor 监控到价平仓，防止交易所扫损）
-EXCHANGE_SL_TP = config.get_bool("exchange_sl_tp", False)
+# 不在交易所挂 SL/TP 单，一律自管：由 position_monitor 监控到价平仓（防止交易所扫损、与注释一致）
+EXCHANGE_SL_TP = False
 
 # 自动交易器（全局单例）
 auto_trader: Optional[AutoTrader] = None
@@ -937,24 +937,10 @@ async def _execute_signal_for_target(
         ok = order_result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
         filled_qty = order_result.filled_quantity or 0
         filled_price = order_result.filled_price or entry_price
+        # 不自管挂交易所止盈止损单，SL/TP 只写入持仓表，由 position_monitor 到价平仓
         sl_tp_ok = False
         if ok and (stop_loss or take_profit) and filled_qty > 0:
-            if EXCHANGE_SL_TP:
-                # 交易所挂单模式（保留项，默认关闭）
-                try:
-                    await trader.set_sl_tp(
-                        symbol=symbol,
-                        side=order_side,
-                        quantity=filled_qty,
-                        stop_loss=stop_loss,
-                        take_profit=take_profit,
-                    )
-                    sl_tp_ok = True
-                except Exception as e:
-                    log.warning("set_sl_tp failed", account_id=target.account_id, error=str(e))
-            else:
-                # 自管模式：SL/TP 写入持仓表，由 position_monitor 监控到价平仓
-                sl_tp_ok = True  # 标记为已处理（由监控服务接管）
+            sl_tp_ok = True  # 由下方 _write_sl_tp_to_position + position_monitor 接管
         # ── 写入持仓表的 SL/TP + entry_price（自管模式核心）──
         if ok and filled_qty > 0:
             try:

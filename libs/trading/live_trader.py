@@ -418,7 +418,41 @@ class LiveTrader(Trader):
                 self._position_mode_dual = False
                 return False
 
-        # --- Gate：默认双向 ---
+        # --- Gate：必须通过 API 开启双向持仓，否则开空会平掉多仓（单向 net 模式） ---
+        if self.exchange_name == "gateio":
+            try:
+                set_dual_fn = getattr(self.exchange, "set_position_mode", None)
+                if not set_dual_fn:
+                    logger.warning("gate has no set_position_mode, assuming dual")
+                    self._position_mode_dual = True
+                    return True
+                try:
+                    result = set_dual_fn(True, None)
+                    if asyncio.iscoroutine(result):
+                        await result
+                    self._position_mode_dual = True
+                    logger.info("gate position mode set to dual (hedge)")
+                    return True
+                except Exception as sw_err:
+                    err_str = str(sw_err).lower()
+                    if "already" in err_str or "no need" in err_str or "dual" in err_str:
+                        # 已是双向，视为成功
+                        self._position_mode_dual = True
+                        logger.debug("gate already in dual mode", error=str(sw_err))
+                        return True
+                    if "position" in err_str or "order" in err_str or "exist" in err_str or "cannot" in err_str:
+                        logger.warning("gate cannot switch to dual (has position or orders?), using one-way", error=str(sw_err))
+                        self._position_mode_dual = False
+                        return False
+                    logger.warning("gate set dual mode failed, using one-way", error=str(sw_err))
+                    self._position_mode_dual = False
+                    return False
+            except Exception as e:
+                logger.warning("gate ensure_dual failed, assuming dual", error=str(e))
+                self._position_mode_dual = True
+                return True
+
+        # --- 其他（如 bybit）：默认双向 ---
         if self.exchange_name not in ("binanceusdm",):
             self._position_mode_dual = True
             logger.info("position mode assumed dual", exchange=self.exchange_name)
@@ -499,44 +533,61 @@ class LiveTrader(Trader):
         if ccxt_sym in self._margin_isolated_tried:
             return
 
-        # --- Gate：通过 leverage API 设定逐仓模式 ---
-        # Gate 统一账户 leverage > 0 即逐仓模式
+        # --- Gate：优先 CCXT set_margin_mode，失败再试 leverage API ---
+        # Gate 统一账户需显式设为逐仓，否则会以全仓开仓
         if self.exchange_name == "gateio":
+            set_margin = getattr(self.exchange, "set_margin_mode", None)
+            if set_margin:
+                try:
+                    result = set_margin("isolated", ccxt_sym)
+                    if asyncio.iscoroutine(result):
+                        await result
+                    logger.info("gate margin set to isolated via set_margin_mode", symbol=ccxt_sym)
+                    self._margin_isolated_tried.add(ccxt_sym)
+                    return
+                except Exception as e1:
+                    err_str = str(e1).lower()
+                    if "no need" in err_str or "already" in err_str or "same" in err_str:
+                        logger.debug("gate already isolated margin", symbol=ccxt_sym)
+                        self._margin_isolated_tried.add(ccxt_sym)
+                        return
+                    if "position" in err_str or "exist" in err_str or "cannot switch" in err_str:
+                        logger.warning("gate set isolated margin skipped (has position or cannot switch)", symbol=ccxt_sym, error=str(e1))
+                        # 不缓存，平仓后下次开仓可再试
+                        return
+                    logger.warning("gate set_margin_mode failed, try leverage API", symbol=ccxt_sym, error=str(e1))
+
             try:
                 contract = self._gate_contract_name(symbol)
-                # 先查当前持仓杠杆
+                # 先查当前持仓杠杆/模式（无持仓时接口可能返回空）
                 try:
                     positions = await self.exchange.privateFuturesGetSettlePositionsContract({
                         "settle": DEFAULT_SETTLE,
                         "contract": contract,
                     })
-                    # positions 可能是 dict 或 list
                     pos_data = positions if isinstance(positions, dict) else (positions[0] if positions else {})
-                    current_leverage = int(pos_data.get("leverage", 0))
-                    current_mode = pos_data.get("mode", "")
-                    if current_leverage > 0 and current_mode != "cross":
-                        # 已经是逐仓（leverage > 0 且非 cross）
-                        logger.debug("gate already isolated margin", symbol=ccxt_sym, leverage=current_leverage)
+                    current_leverage = int(pos_data.get("leverage", 0) or 0)
+                    current_mode = (pos_data.get("mode") or "").lower()
+                    if current_leverage > 0 and current_mode not in ("cross", "cross_margin"):
+                        logger.debug("gate already isolated margin (leverage>0)", symbol=ccxt_sym, leverage=current_leverage)
                         self._margin_isolated_tried.add(ccxt_sym)
                         return
                 except Exception:
                     pass
 
-                # 设置为逐仓：leverage > 0（用 DEFAULT_LEVERAGE_FALLBACK 兜底）
                 leverage_val = DEFAULT_LEVERAGE_FALLBACK
                 await self.exchange.privateFuturesPostSettlePositions({
                     "settle": DEFAULT_SETTLE,
                     "contract": contract,
                     "leverage": str(leverage_val),
                 })
-                logger.info("gate margin set to isolated via leverage", symbol=ccxt_sym, leverage=leverage_val)
+                logger.info("gate margin set to isolated via leverage API", symbol=ccxt_sym, leverage=leverage_val)
                 self._margin_isolated_tried.add(ccxt_sym)
             except Exception as e:
                 err_str = str(e).lower()
-                # 已有持仓时可能无法切换，但持仓本身可能已经是逐仓
                 if "position" in err_str or "exist" in err_str:
                     logger.warning("gate set isolated margin skipped (has position)", symbol=ccxt_sym, error=str(e))
-                    self._margin_isolated_tried.add(ccxt_sym)
+                    # 不缓存，平仓后下次可再试
                 else:
                     logger.error("gate set isolated margin FAILED", symbol=ccxt_sym, error=str(e))
                     raise RuntimeError(
@@ -720,10 +771,15 @@ class LiveTrader(Trader):
                     params.pop("reduceOnly", None)  # 调用方可能从 kwargs 带入，必须移除
                 else:
                     params["reduceOnly"] = True
+                # Gate 双向（hedge）模式下不允许 close；单向时仅 reduceOnly 亦可减仓，故 Gate 平仓不传 close
+                # （若传 close 且账户已为双向会报：close is not allowed in dual-mode）
             # Binance 非平仓时若误带了 reduceOnly 则移除
             if self.exchange_name == "binanceusdm" and (trade_type or "OPEN") != "CLOSE" and "reduceOnly" in params:
                 params.pop("reduceOnly", None)
-            
+            # OKX 合约：下单必须传 tdMode=isolated 才会以逐仓成交，否则按账户默认（多为全仓）
+            if self.exchange_name == "okx" and self.market_type == "future":
+                params["tdMode"] = "isolated"
+
             logger.info(
                 "creating order",
                 order_id=order_id,
