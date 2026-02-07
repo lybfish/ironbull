@@ -212,6 +212,13 @@ async def _sync_positions_one(task: TaskItem, sandbox: bool) -> Dict[str, Any]:
             qty = float(p.get("contracts", 0) or 0)
             if qty == 0:
                 continue
+            # Gate/OKX 合约张数→币数量：contracts × contractSize
+            contract_size = float(p.get("contractSize") or 0)
+            if contract_size > 0 and contract_size != 1:
+                coin_qty = abs(qty) * contract_size
+                log.debug("position contract→coin", contracts=qty, contract_size=contract_size, coin_qty=coin_qty)
+            else:
+                coin_qty = abs(qty)
             side = (p.get("side") or "long").lower()
             position_side = "LONG" if side == "long" else "SHORT"
             # 统一为规范 symbol（BTC/USDT），便于存储与跨所一致
@@ -220,7 +227,7 @@ async def _sync_positions_one(task: TaskItem, sandbox: bool) -> Dict[str, Any]:
             out.append({
                 "symbol": sym or raw_sym,
                 "position_side": position_side,
-                "quantity": abs(qty),
+                "quantity": coin_qty,
                 "entry_price": float(p.get("entryPrice") or p.get("averagePrice") or 0),
                 "unrealized_pnl": float(p.get("unrealizedPnl") or 0),
                 "leverage": int(p.get("leverage") or 0),
@@ -299,13 +306,28 @@ async def _run_one(
                 )
             except Exception as e:
                 log.warning("set_sl_tp failed", account_id=task.account_id, error=str(e))
+
+        # 张数→币数量转换（Gate/OKX 合约以张为单位，需 × contractSize 得到真实币量）
+        coin_qty = filled_qty
+        if filled_qty > 0 and (task.market_type or "future") == "future":
+            try:
+                ccxt_sym = trader._ccxt_symbol(symbol)
+                # markets 已在 create_order → usdt_to_quantity 中加载
+                market = trader.exchange.markets.get(ccxt_sym, {})
+                cs = float(market.get("contractSize") or 0)
+                if cs > 0 and cs != 1:
+                    coin_qty = filled_qty * cs
+                    log.info("order contract→coin", contracts=filled_qty, contract_size=cs, coin_qty=coin_qty)
+            except Exception as conv_err:
+                log.warning("contract→coin conversion failed, using raw qty", error=str(conv_err))
+
         await trader.close()
         return {
             "account_id": task.account_id,
             "success": ok,
             "order_id": result.order_id,
             "exchange_order_id": exchange_order_id,
-            "filled_quantity": filled_qty,
+            "filled_quantity": coin_qty,
             "filled_price": filled_price,
             "error": None,
         }
@@ -379,20 +401,33 @@ async def _sync_trades_one(task: TaskItem, sandbox: bool, symbols: list = None, 
     try:
         all_trades = []
         target_symbols = symbols or ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"]
+        # 加载市场信息，用于获取 contractSize 做张数→币数量转换
+        await trader.exchange.load_markets()
         for sym in target_symbols:
             try:
+                # 获取该 symbol 的 contractSize（Gate/OKX 合约用张数）
+                market = trader.exchange.markets.get(sym, {})
+                contract_size = float(market.get("contractSize") or 0)
                 trades = await trader.exchange.fetch_my_trades(sym, since=since_ms, limit=100)
                 for t in trades or []:
                     raw_sym = t.get("symbol") or sym
                     canonical = to_canonical_symbol(raw_sym, "future")
                     side = (t.get("side") or "buy").upper()
+                    raw_qty = float(t.get("amount") or 0)
+                    # 张数→币数量转换（contractSize != 1 表示交易所用张为单位）
+                    if contract_size > 0 and contract_size != 1:
+                        coin_qty = raw_qty * contract_size
+                        log.debug("trade contract→coin", symbol=sym, contracts=raw_qty,
+                                  contract_size=contract_size, coin_qty=coin_qty)
+                    else:
+                        coin_qty = raw_qty
                     all_trades.append({
                         "trade_id": str(t.get("id") or ""),
                         "order_id": str(t.get("order") or ""),
                         "symbol": canonical or raw_sym,
                         "side": side,
                         "price": float(t.get("price") or 0),
-                        "quantity": float(t.get("amount") or 0),
+                        "quantity": coin_qty,
                         "cost": float(t.get("cost") or 0),
                         "fee": float((t.get("fee") or {}).get("cost", 0) or 0),
                         "fee_currency": (t.get("fee") or {}).get("currency", "USDT"),

@@ -184,6 +184,34 @@ class LiveTrader(Trader):
         except Exception:
             return price
 
+    # ============ 合约张数 ↔ 币数量 转换 ============
+
+    def _get_contract_size(self, symbol: str) -> float:
+        """
+        获取合约张的大小（contractSize）。
+        - Gate BTC/USDT: 0.0001（1张 = 0.0001 BTC）
+        - OKX BTC/USDT:  0.01  （1张 = 0.01 BTC）
+        - Binance:        1     （以币为单位，contractSize=1）
+        markets 必须已加载（load_markets），否则返回 0。
+        """
+        try:
+            ccxt_sym = self._ccxt_symbol(symbol)
+            market = self.exchange.markets.get(ccxt_sym, {})
+            return float(market.get("contractSize") or 0)
+        except Exception:
+            return 0
+
+    def _contracts_to_coins(self, contracts: float, symbol: str) -> float:
+        """
+        将合约张数转为币数量。
+        - 如果 contractSize > 0 且 ≠ 1 → contracts × contractSize
+        - 否则原样返回（如 Binance 已是币单位）
+        """
+        cs = self._get_contract_size(symbol)
+        if cs > 0 and cs != 1:
+            return contracts * cs
+        return contracts
+
     # ============ USDT → 数量换算（统一处理 contractSize） ============
 
     async def usdt_to_quantity(self, symbol: str, amount_usdt: float, price: float) -> float:
@@ -575,12 +603,14 @@ class LiveTrader(Trader):
                     await self.ensure_leverage(symbol, leverage)
             
             # 如果启用 OrderTradeService，先创建订单记录
+            # 注意：quantity 可能是合约张数（Gate/OKX），DB 应存币数量
+            coin_quantity = self._contracts_to_coins(quantity, symbol)
             if self._order_trade_service and self._tenant_id and self._account_id:
                 db_order_id = await self._create_order_record(
                     symbol=symbol,
                     side=side,
                     order_type=order_type,
-                    quantity=quantity,
+                    quantity=coin_quantity,
                     price=price,
                     position_side=position_side,
                     signal_id=signal_id,
@@ -672,11 +702,16 @@ class LiveTrader(Trader):
             )
             
             # 更新订单状态并结算（支持 settlement_service 或 order_trade_service）
+            # 注意：result.filled_quantity 可能是合约张数，需转为币数量存入 DB
             if (self._settlement_service or self._order_trade_service) and db_order_id:
+                from copy import copy as _copy
+                db_result = _copy(result)
+                db_result.filled_quantity = self._contracts_to_coins(result.filled_quantity, symbol)
+                db_result.requested_quantity = coin_quantity
                 await self._update_order_after_submit(
                     order_id=db_order_id,
                     exchange_order_id=result.exchange_order_id,
-                    result=result,
+                    result=db_result,
                     position_side=params.get("positionSide", "NONE"),
                 )
             
