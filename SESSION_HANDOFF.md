@@ -111,6 +111,18 @@
 - **回测脚本**：`scripts/backtest_trailing_stop.py`（E0–E4 移动止损对比，用 `/tmp/eth_usdt_1y_1h.json`）；`scripts/backtest_optimize.py`（F0–F4 策略优化对比）。
 - **结论**：固定 45% TP / 70% SL 盈亏比 <1，一年略亏；**推荐 F1**：`tp_pct=1.00`、`sl_pct=0.50`（赢 10 亏 5，盈亏比 2:1），一年 ETH/USDT 1h 回测约 +4.3%，回撤 7.9%。移动止损在对冲模式下表现差，不推荐。
 
+### 交易所逐仓与双向（OKX / Gate）
+- **OKX 逐仓**：仅设杠杆/保证金模式不够，**下单必须传 `tdMode=isolated`** 才会按逐仓成交。在 `libs/trading/live_trader.py` 的 `create_order` 里对 OKX 合约增加 `params["tdMode"] = "isolated"`。止盈止损走 `_okx_set_position_sl_tp` 已有 tdMode，无需改。
+- **Gate 双向持仓**：原先只“假设”双向未调 API，导致先开多再开空时卖单被当成平多。现改为在 `ensure_dual_position_mode` 里对 Gate 调用 `set_position_mode(True, None)` 开启 hedge；若报错含 "already"/"no need"/"dual" 视为已是双向并设 `_position_mode_dual = True`。
+- **Gate 平仓**：双向模式下不允许传 `close=True`（报 "close is not allowed in dual-mode"）。Gate 平仓一律**不传 close**，只传 `reduceOnly` + `positionSide`。
+- **测试脚本**：`scripts/test_isolated_open_close.py` 支持 `--delay N`（开仓后等 N 秒再平）、`--dual`（双向单：开多→开空→等→平多→平空）。示例：`PYTHONPATH=. python3 scripts/test_isolated_open_close.py --real --yes --exchange okx --symbol SOL/USDT --amount 100 --dual --delay 30`。Binance/OKX/Gate 逐仓+双向单均已跑通。
+- **子服务器**：execution-node 全部通过 `LiveTrader.create_order`，无需改；清表脚本无需改。
+
+### 线上清订单表
+- **脚本**：`scripts/clear_orders_fills_positions_signals.py` 清 5 张表（fact_fill、fact_order、fact_position_change、fact_position、fact_signal_event）。用法：`PYTHONPATH=. python3 scripts/clear_orders_fills_positions_signals.py [--yes]`。
+- **线上执行**：需加载生产 DB 配置。示例（aigomaster）：  
+  `ssh aigomaster "cd /opt/ironbull && set -a && . deploy/.env.production && set +a && PYTHONPATH=. python3 scripts/clear_orders_fills_positions_signals.py --yes"`
+
 ---
 
 ## 4. 关键文件索引
@@ -128,7 +140,8 @@
 | 配额           | libs/quota/、data-api/routers/quota.py |
 | 监控           | libs/monitor/、scripts/monitor_daemon.py、data-api/routers/monitor.py |
 | Merchant API   | services/merchant-api/app/routers/（user、reward、pointcard、strategy） |
-| 实盘/交易所    | scripts/live_small_test.py、libs/trading/live_trader.py、libs/exchange/ |
+| 实盘/交易所    | scripts/live_small_test.py、scripts/test_isolated_open_close.py（逐仓+双向单测试）、libs/trading/live_trader.py（OKX tdMode、Gate dual/平仓）、libs/exchange/ |
+| 清表/运维      | scripts/clear_orders_fills_positions_signals.py（5 张表）；线上执行需加载 deploy/.env.production，见上文「线上清订单表」|
 | 迁移与测试     | migrations/（014-017）；scripts/run_migrations_014_015.py、test_data_api_all.py、test_full_business.py、test_reward_distribution.py |
 | 部署与发布     | deploy/deploy.sh（chown tmp + sudo -u 属主 start.sh restart）、deploy/start.sh、deploy/push-and-deploy.sh、.deploy.*.env |
 | Merchant API 文档 | docs/api/MERCHANT_API.md、services/merchant-api/README.md |

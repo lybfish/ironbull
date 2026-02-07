@@ -204,15 +204,15 @@
             </el-table-column>
             <el-table-column label="实时价格" width="120" align="right">
               <template slot-scope="{row}">
-                <span v-if="priceMap[row.symbol]" :style="pnlColor(row)">
-                  <b>{{ fmtPrice(priceMap[row.symbol]) }}</b>
+                <span v-if="getPrice(row)" :style="pnlColor(row)">
+                  <b>{{ fmtPrice(getPrice(row)) }}</b>
                 </span>
                 <span v-else class="muted">{{ loadingPrices ? '加载中...' : '未获取' }}</span>
               </template>
             </el-table-column>
             <el-table-column label="浮动盈亏" width="100" align="right">
               <template slot-scope="{row}">
-                <span v-if="priceMap[row.symbol] && row.entry_price" :style="pnlColor(row)">
+                <span v-if="getPrice(row) && row.entry_price" :style="pnlColor(row)">
                   {{ calcPnlPct(row) }}
                 </span>
                 <span v-else class="muted">-</span>
@@ -344,8 +344,17 @@ export default {
       if (n >= 1) return n.toFixed(4)
       return n.toFixed(6)
     },
+    getPrice(row) {
+      // 优先按 exchange:symbol 查找，回退到 symbol
+      const ex = (row.exchange || '').toLowerCase()
+      if (ex) {
+        const key = `${ex}:${row.symbol}`
+        if (this.priceMap[key]) return this.priceMap[key]
+      }
+      return this.priceMap[row.symbol] || null
+    },
     pnlColor(row) {
-      const price = this.priceMap[row.symbol]
+      const price = this.getPrice(row)
       const entry = Number(row.entry_price)
       if (!price || !entry) return ''
       const isLong = row.position_side === 'LONG'
@@ -353,7 +362,7 @@ export default {
       return profit ? 'color:#67C23A;font-weight:600' : 'color:#F56C6C;font-weight:600'
     },
     calcPnlPct(row) {
-      const price = this.priceMap[row.symbol]
+      const price = this.getPrice(row)
       const entry = Number(row.entry_price)
       if (!price || !entry || entry === 0) return '-'
       const isLong = row.position_side === 'LONG'
@@ -452,10 +461,13 @@ export default {
       this.saveHistory()
     },
     saveHistory() {
-      try { localStorage.setItem('sync_history', JSON.stringify(this.syncHistory)) } catch {}
+      try { localStorage.setItem('sync_history', JSON.stringify(this.syncHistory)) } catch (e) { /* ignore */ }
     },
     loadHistory() {
-      try { const s = localStorage.getItem('sync_history'); if (s) this.syncHistory = JSON.parse(s) } catch {}
+      try {
+        const s = localStorage.getItem('sync_history')
+        if (s) { this.syncHistory = JSON.parse(s) }
+      } catch (e) { /* ignore */ }
     },
     clearHistory() {
       this.$confirm('确定清空所有同步历史记录吗？', '提示', { type: 'warning' }).then(() => {
@@ -519,18 +531,39 @@ export default {
       } finally { this.scanning = false }
     },
 
-    // ── 实时价格 ──
+    // ── 实时价格（按交易所区分）──
     async fetchPrices() {
       if (this.monitoredPositions.length === 0) return
       this.loadingPrices = true
       try {
+        // 按 exchange:symbol 去重，确保不同交易所的同币种分别获取价格
+        const seen = new Set()
+        const exchangeSymbolPairs = []
+        this.monitoredPositions.forEach(p => {
+          const ex = (p.exchange || '').toLowerCase()
+          const key = ex ? `${ex}:${p.symbol}` : p.symbol
+          if (!seen.has(key)) {
+            seen.add(key)
+            exchangeSymbolPairs.push(key)
+          }
+        })
         const symbols = [...new Set(this.monitoredPositions.map(p => p.symbol))].join(',')
-        const res = await getRealtimePrices(symbols)
-        const prices = (res.data || {}).prices || {}
+        const exchangeSymbols = exchangeSymbolPairs.join(',')
+        const res = await getRealtimePrices(symbols, exchangeSymbols)
+        // 优先用 exchange_prices（按交易所区分）
+        const exPrices = (res.data || {}).exchange_prices || {}
+        const fallbackPrices = (res.data || {}).prices || {}
         const map = {}
-        Object.keys(prices).forEach(sym => {
-          if (prices[sym] && prices[sym].last) {
-            map[sym] = prices[sym].last
+        // 填充 exchange:symbol → price
+        Object.keys(exPrices).forEach(key => {
+          if (exPrices[key] && exPrices[key].last) {
+            map[key] = exPrices[key].last
+          }
+        })
+        // 回退：symbol → price（兼容旧逻辑）
+        Object.keys(fallbackPrices).forEach(sym => {
+          if (!map[sym] && fallbackPrices[sym] && fallbackPrices[sym].last) {
+            map[sym] = fallbackPrices[sym].last
           }
         })
         this.priceMap = map

@@ -55,6 +55,8 @@ export function getMonitoredPositions() {
 export function triggerPositionMonitorScan() {
   return axios.post('/signal-monitor/trigger-scan')
 }
-export function getRealtimePrices(symbols) {
-  return axios.get('/signal-monitor/realtime-prices', { params: { symbols } })
+export function getRealtimePrices(symbols, exchangeSymbols) {
+  const params = { symbols }
+  if (exchangeSymbols) params.exchange_symbols = exchangeSymbols
+  return axios.get('/signal-monitor/realtime-prices', { params })
 }
