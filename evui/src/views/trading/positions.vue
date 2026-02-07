@@ -560,9 +560,24 @@ export default {
       this.detailVisible = true
       this.detailLoading = true
       try {
+        // 用持仓的开仓/平仓时间限定查询范围，避免拉到其他持仓周期的订单
+        const params = { symbol: row.symbol, account_id: row.account_id, limit: 100 }
+        const fillParams = { symbol: row.symbol, account_id: row.account_id, limit: 200 }
+        if (row.opened_at) {
+          // 开仓前 1 分钟作为起始时间，确保不漏
+          const start = new Date(new Date(row.opened_at).getTime() - 60000).toISOString()
+          params.start_time = start
+          fillParams.start_time = start
+        }
+        if (row.closed_at) {
+          // 平仓后 1 分钟作为结束时间
+          const end = new Date(new Date(row.closed_at).getTime() + 60000).toISOString()
+          params.end_time = end
+          fillParams.end_time = end
+        }
         const [ordersRes, fillsRes] = await Promise.all([
-          getOrders({ symbol: row.symbol, account_id: row.account_id, limit: 100 }),
-          getFills({ symbol: row.symbol, account_id: row.account_id, limit: 200 })
+          getOrders(params),
+          getFills(fillParams)
         ])
         this.detailOrders = (ordersRes.data.data || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
         this.detailFills = (fillsRes.data.data || []).sort((a, b) => new Date(b.filled_at) - new Date(a.filled_at))
