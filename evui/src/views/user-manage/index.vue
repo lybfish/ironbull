@@ -106,6 +106,14 @@
         </el-form-item>
       </el-form>
 
+      <!-- 批量操作栏 -->
+      <div v-if="selectedUsers.length > 0" style="margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
+        <el-tag type="info" size="small">已选 {{ selectedUsers.length }} 个用户</el-tag>
+        <el-button type="success" size="mini" icon="el-icon-check" @click="batchToggle(1)">批量启用</el-button>
+        <el-button type="danger" size="mini" icon="el-icon-close" @click="batchToggle(0)">批量禁用</el-button>
+        <el-button type="warning" size="mini" icon="el-icon-bank-card" @click="batchRechargeVisible = true">批量充值</el-button>
+      </div>
+
       <!-- 数据表格 -->
       <el-table
         v-loading="loading"
@@ -115,7 +123,9 @@
         size="small"
         style="width: 100%"
         :max-height="tableMaxHeight"
-        row-key="id">
+        row-key="id"
+        @selection-change="handleSelectionChange">
+        <el-table-column type="selection" width="45" fixed="left" />
         <el-table-column prop="id" label="ID" width="70" align="center" fixed="left" />
         <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip />
         <el-table-column prop="invite_code" label="邀请码" width="110" align="center" show-overflow-tooltip />
@@ -602,6 +612,28 @@
           @click="submitGift">确认赠送</el-button>
       </span>
     </el-dialog>
+
+    <!-- 批量充值对话框 -->
+    <el-dialog title="批量充值" :visible.sync="batchRechargeVisible" width="400px" append-to-body>
+      <el-form label-width="90px" size="small">
+        <el-form-item label="充值金额">
+          <el-input-number v-model="batchRechargeForm.amount" :min="1" :max="100000" style="width:100%;"/>
+        </el-form-item>
+        <el-form-item label="充值类型">
+          <el-radio-group v-model="batchRechargeForm.card_type">
+            <el-radio label="self">自充点卡</el-radio>
+            <el-radio label="gift">赠送点卡</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item>
+          <el-tag type="info" size="small">将为 {{ selectedUsers.length }} 个用户充值</el-tag>
+        </el-form-item>
+      </el-form>
+      <span slot="footer">
+        <el-button size="small" @click="batchRechargeVisible = false">取消</el-button>
+        <el-button type="primary" size="small" :loading="batchRechargeLoading" @click="submitBatchRecharge">确认充值</el-button>
+      </span>
+    </el-dialog>
   </div>
 </template>
 
@@ -617,6 +649,7 @@ import {
 } from '@/api/admin'
 import { getRewards } from '@/api/finance'
 import { getPositions, getOrders } from '@/api/trading'
+import { batchToggleUsers, batchRechargeUsers } from '@/api/monitor'
 
 const LEVEL_MAP = { 0: '普通', 1: 'V1', 2: 'V2', 3: 'V3', 4: 'V4', 5: 'V5' }
 
@@ -686,6 +719,12 @@ export default {
       giftVisible: false,
       giftLoading: false,
       giftForm: { userId: '', email: '', currentGift: 0, amount: 0 },
+
+      // ---- 批量操作 ----
+      selectedUsers: [],
+      batchRechargeVisible: false,
+      batchRechargeLoading: false,
+      batchRechargeForm: { amount: 100, card_type: 'self' },
 
       // ---- 布局 ----
       tableMaxHeight: 520
@@ -1112,6 +1151,47 @@ export default {
       this.$nextTick(() => {
         this.tableMaxHeight = Math.max(300, window.innerHeight - 380)
       })
+    },
+    // ===================== 批量操作 =====================
+    handleSelectionChange(val) {
+      this.selectedUsers = val
+    },
+    async batchToggle(status) {
+      const label = status === 1 ? '启用' : '禁用'
+      try {
+        await this.$confirm(`确认批量${label} ${this.selectedUsers.length} 个用户？`, '批量操作', {type: 'warning'})
+      } catch { return }
+      try {
+        const ids = this.selectedUsers.map(u => u.id)
+        const res = await batchToggleUsers({user_ids: ids, status: status})
+        this.$message.success((res.data && res.data.message) || '操作成功')
+        this.fetchData()
+        this.loadStats()
+      } catch (e) {
+        this.$message.error('批量操作失败')
+      }
+    },
+    async submitBatchRecharge() {
+      if (!this.batchRechargeForm.amount || this.batchRechargeForm.amount <= 0) {
+        return this.$message.warning('请输入有效金额')
+      }
+      this.batchRechargeLoading = true
+      try {
+        const ids = this.selectedUsers.map(u => u.id)
+        const res = await batchRechargeUsers({
+          user_ids: ids,
+          amount: this.batchRechargeForm.amount,
+          card_type: this.batchRechargeForm.card_type
+        })
+        this.$message.success((res.data && res.data.message) || '充值完成')
+        this.batchRechargeVisible = false
+        this.fetchData()
+        this.loadStats()
+      } catch (e) {
+        this.$message.error('批量充值失败')
+      } finally {
+        this.batchRechargeLoading = false
+      }
     }
   }
 }

@@ -123,6 +123,17 @@
 - **线上执行**：需加载生产 DB 配置。示例（aigomaster）：  
   `ssh aigomaster "cd /opt/ironbull && set -a && . deploy/.env.production && set +a && PYTHONPATH=. python3 scripts/clear_orders_fills_positions_signals.py --yes"`
 
+### 2026-02 管理后台与功能增强（近期）
+- **利润池失败重试**：`fact_profit_pool` 增加 `retry_count`、`last_error`；status 增加 3=分发失败待重试。data-api 新增 `GET/POST /api/profit-pools`、`/api/profit-pools/stats`、`/api/profit-pools/{id}/retry`；evui 财务管理下新增「利润池管理」页（统计卡片、列表、单条/批量重试）。DDL 见 `docs/FEATURE_ROADMAP.md` 末尾。
+- **Dashboard 数据可视化**：data-api `GET /api/dashboard/trends`（近 N 天每日订单量、新增用户、成交额、利润池入池）；evui 仪表盘新增 4 个 ECharts 趋势图（订单量柱状、新增用户折线、成交额/利润池面积图），支持 7/30/60 天切换。
+- **用户行为分析**：data-api `GET /api/user-analytics/overview`、`/ranking`、`/growth`；evui 系统设置下「用户分析」页（概览卡片、增长趋势、用户分层饼图、点卡/奖励/成交排行）。
+- **批量操作**：data-api `POST /api/batch/toggle-users`、`/recharge-users`、`/bind-strategy`；evui 用户管理页表格增加多选，批量启用/禁用、批量充值点卡（弹窗选金额与类型）。
+- **审计日志增强**：data-api 审计日志增加 `success`、`source_service` 筛选；`GET /api/audit-logs/export` 导出 CSV；`GET /api/audit-logs/stats` 按操作类型与每日分布统计。evui 审计日志页增加统计卡片、结果/来源筛选、变更前后列、耗时列、导出 CSV。
+- **系统监控增强**：data-api `GET /api/monitor/metrics`（API 调用量、错误数、错误率、平均延迟、每日趋势、按服务错误分布）。evui 系统监控页增加 API 指标卡片、调用量&错误数图、延迟趋势图、错误按服务分布表。
+- **风控配置 UI**：data-api `GET/PUT /api/risk/rules`（10 条规则开关与参数，存 Redis）、`GET /api/risk/violations`（从审计日志 RISK_ 记录统计）。evui 系统设置下「风控管理」页（规则列表开关与参数编辑、违规趋势与按规则分布、最近违规记录）。
+- **路由与语义修复**：`GET /api/users/{user_id}` 仅在 user_manage 注册，users.py 中重复路由已删；`libs/trading/live_trader.py` 的 `get_balance()` 失败时改为抛 `RuntimeError` 不再静默返回 `{}`。
+- **功能路线图**：`docs/FEATURE_ROADMAP.md` 汇总待开发功能（RBAC、Webhook、手续费、交易对管理等）与已完成清单；上述 5 项已记入「已完成」。
+
 ---
 
 ## 4. 关键文件索引
@@ -147,13 +158,16 @@
 | Merchant API 文档 | docs/api/MERCHANT_API.md、services/merchant-api/README.md |
 | 成交流水同步   | libs/sync_node/service.py（sync_trades_from_nodes）、services/execution-node（/api/sync-trades）、data-api routers/sync.py（POST /api/sync/trades）、fact_transaction |
 | 回测与策略优化 | services/backtest/app/backtest_engine.py（逐仓/杠杆/移动止损）、libs/strategies/market_regime.py（margin_pct/分治/skip_ranging）、scripts/backtest_trailing_stop.py、scripts/backtest_optimize.py |
+| 利润池管理     | libs/reward/models.py（retry_count、last_error）、libs/pointcard/service.py（status=3）、data-api routers/profit_pools.py、evui/views/finance/profit-pools.vue |
+| 用户分析/批量/审计/监控/风控 | data-api routers/user_analytics.py、batch_ops.py、audit_logs.py（export、stats）、monitor.py（metrics）、risk_config.py；evui/views/system/user-analytics.vue、audit-log.vue、risk-config.vue；evui/views/dashboard/monitor.vue；evui/views/user-manage/index.vue（多选+批量操作）；evui/api/monitor.js（新 API） |
+| 功能路线图     | docs/FEATURE_ROADMAP.md（待开发清单与已完成清单、DDL 备忘） |
 
 ---
 
 ## 5. 当前状态
 
-- **evui**：多页管理后台，订单/成交/持仓/资金/流水、绩效/策略/信号、租户/用户/提现/配额/点卡流水/奖励/监控、**租户策略**（按租户管理策略实例、一键复制主策略、新增时自动带出参数）等。租户详情新增**奖励分配区块**（技术累计、未分配累计）。已清理模板残留文件（25 个）。
-- **data-api**：管理接口齐全；响应格式全部统一为 `{"success":true,"data":...}`；所有查询接口加 try/except 错误处理；分页 total 用 count() 真实计数；sync 接口加鉴权；密码用 bcrypt（兼容旧 MD5 自动升级）；公共 utils 提取日期解析。
+- **evui**：多页管理后台，订单/成交/持仓/资金/流水、绩效/策略/信号、租户/用户/提现/配额/点卡流水/奖励/监控、**租户策略**（按租户管理策略实例、一键复制主策略）、**利润池管理**（财务管理下）、**用户分析**（系统设置下）、**风控管理**（系统设置下）等。用户管理支持**多选+批量启用/禁用/充值**。审计日志支持**导出 CSV、结果/来源筛选、变更前后与耗时**。系统监控支持 **API 指标与趋势图**。Dashboard 有**订单量/用户增长/成交额/利润池**趋势图。已清理模板残留文件（25 个）。
+- **data-api**：管理接口齐全；响应格式全部统一为 `{"success":true,"data":...}`；所有查询接口加 try/except 错误处理；分页 total 用 count() 真实计数；sync 接口加鉴权；密码用 bcrypt（兼容旧 MD5 自动升级）；公共 utils 提取日期解析。新增 profit_pools、user_analytics、batch_ops、risk_config；audit_logs 增加 export/stats；monitor 增加 metrics；dashboard 增加 trends。
 - **Merchant API**：策略列表与开通按租户实例；用户已绑定列表展示名用租户实例。
 - **执行节点**：中心-节点联调通过；按租户解析 amount/leverage；子机可独立部署与打包。
 - **数据库**：需执行 014-017 后所有功能才正常。014-015 可用 `scripts/run_migrations_014_015.py`；016-017 直接用 mysql 执行 `migrations/016_*.sql` 和 `migrations/017_*.sql`。
@@ -175,7 +189,12 @@
 
 ## 7. 后续可选
 
-- **部署到生产**：迁移 016-017 已就绪；部署流程已修复（chown + 属主 restart），按 SESSION 中「部署与发布」执行即可。
+- **部署到生产**：迁移 016-017 已就绪；部署流程已修复（chown + 属主 restart），按 SESSION 中「部署与发布」执行即可。利润池重试需执行 FEATURE_ROADMAP.md 末尾 DDL（fact_profit_pool 增加 retry_count、last_error）。
 - **策略参数**：若 market_regime 上线，建议租户策略实例配置 **tp_pct=1.0、sl_pct=0.5**（回测 F1 最优）。
+- **风控配置生效**：管理端规则存 Redis（ironbull:risk:config），但 `libs/risk/engine.py` 的 `create_default_engine()` 仍从代码/配置读；若需「后台改规则即生效」，需在调用风控处从 Redis/API 取配置再构建 engine。
+- **用户分析**：overview 中用户分层（user_tiers）按点卡区间统计，若数据异常可检查 `user_analytics.py` 中相关 SQL。
+- **批量绑定策略**：API `/api/batch/bind-strategy` 已就绪，前端未做入口（如策略绑定页勾选用户后「批量绑定」）。
+- **风控自动化动作**：规则与违规查看已做，未实现触发后自动停策略/发通知等逻辑。
 - 构建体积优化（大 chunk 代码分割、路由懒加载）。
 - 监控告警增强（更多端点、历史告警、邮件/钉钉通道）。
+- 更多待开发见 `docs/FEATURE_ROADMAP.md`（RBAC、Webhook、手续费、交易对管理等）。

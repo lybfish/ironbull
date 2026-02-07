@@ -1,18 +1,23 @@
 """
 Data API - 系统监控端点
 
-GET /api/monitor/status -> 返回所有服务 + 节点 + DB/Redis 的实时状态
+GET /api/monitor/status  -> 返回所有服务 + 节点 + DB/Redis 的实时状态
+GET /api/monitor/metrics -> API 指标（延迟、错误率、请求量统计）
 """
 
+from datetime import datetime, timedelta
 from typing import Dict, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func, cast, Date
 
 from libs.core import get_config
 from libs.monitor.health_checker import HealthChecker
 from libs.monitor.node_checker import NodeChecker
 from libs.monitor.db_checker import DbChecker
+from libs.facts.models import AuditLog
+from libs.order_trade.models import Order, Fill
 
 from ..deps import get_db, get_current_admin
 
@@ -67,5 +72,94 @@ def monitor_status(
             "services": [s.to_dict() for s in svc_statuses],
             "nodes": [n.to_dict() for n in node_statuses],
             "db": db_status.to_dict(),
+        },
+    }
+
+
+@router.get("/metrics")
+def monitor_metrics(
+    days: int = Query(7, ge=1, le=30),
+    _admin: Dict[str, Any] = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    系统指标统计：
+    - 审计日志维度：API 调用量、成功率、平均延迟
+    - 业务维度：每日订单量、成交量
+    - 按服务分组的错误分布
+    """
+    start = datetime.now() - timedelta(days=days)
+    date_list = [(datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days - 1, -1, -1)]
+
+    # 1. 每日 API 调用量（审计日志）
+    api_rows = (
+        db.query(cast(AuditLog.created_at, Date).label("d"), func.count(AuditLog.id))
+        .filter(AuditLog.created_at >= start)
+        .group_by("d")
+        .all()
+    )
+    api_map = {str(r[0]): r[1] for r in api_rows}
+
+    # 2. 每日错误数
+    err_rows = (
+        db.query(cast(AuditLog.created_at, Date).label("d"), func.count(AuditLog.id))
+        .filter(AuditLog.created_at >= start, AuditLog.success == False)  # noqa: E712
+        .group_by("d")
+        .all()
+    )
+    err_map = {str(r[0]): r[1] for r in err_rows}
+
+    # 3. 平均延迟（有 duration_ms 的记录）
+    latency_rows = (
+        db.query(
+            cast(AuditLog.created_at, Date).label("d"),
+            func.avg(AuditLog.duration_ms),
+            func.max(AuditLog.duration_ms),
+        )
+        .filter(AuditLog.created_at >= start, AuditLog.duration_ms.isnot(None))
+        .group_by("d")
+        .all()
+    )
+    latency_avg_map = {str(r[0]): round(float(r[1] or 0), 1) for r in latency_rows}
+    latency_max_map = {str(r[0]): round(float(r[2] or 0), 1) for r in latency_rows}
+
+    # 4. 按服务统计错误数
+    svc_err_rows = (
+        db.query(AuditLog.source_service, func.count(AuditLog.id))
+        .filter(AuditLog.created_at >= start, AuditLog.success == False)  # noqa: E712
+        .group_by(AuditLog.source_service)
+        .order_by(func.count(AuditLog.id).desc())
+        .limit(10)
+        .all()
+    )
+
+    # 5. 总计指标
+    total_calls = db.query(func.count(AuditLog.id)).filter(AuditLog.created_at >= start).scalar() or 0
+    total_errors = db.query(func.count(AuditLog.id)).filter(
+        AuditLog.created_at >= start, AuditLog.success == False  # noqa: E712
+    ).scalar() or 0
+    avg_latency = db.query(func.avg(AuditLog.duration_ms)).filter(
+        AuditLog.created_at >= start, AuditLog.duration_ms.isnot(None)
+    ).scalar()
+
+    return {
+        "success": True,
+        "data": {
+            "summary": {
+                "total_calls": total_calls,
+                "total_errors": total_errors,
+                "error_rate": round(total_errors / total_calls * 100, 2) if total_calls > 0 else 0,
+                "avg_latency_ms": round(float(avg_latency or 0), 1),
+            },
+            "daily": {
+                "dates": date_list,
+                "api_calls": [api_map.get(d, 0) for d in date_list],
+                "errors": [err_map.get(d, 0) for d in date_list],
+                "avg_latency": [latency_avg_map.get(d, 0) for d in date_list],
+                "max_latency": [latency_max_map.get(d, 0) for d in date_list],
+            },
+            "error_by_service": [
+                {"service": r[0] or "unknown", "count": r[1]} for r in svc_err_rows
+            ],
         },
     }

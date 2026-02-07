@@ -93,7 +93,9 @@ const menuRoutes = [
       {path: '/system/quota-plans', component: () => import('@/views/quota/index'), meta: {title: '配额套餐'}},
       {path: '/system/admins', component: () => import('@/views/system/admins'), meta: {title: '管理员'}},
       {path: '/system/monitor', component: () => import('@/views/dashboard/monitor'), meta: {title: '系统监控'}},
-      {path: '/system/audit-log', component: () => import('@/views/system/audit-log'), meta: {title: '审计日志'}}
+      {path: '/system/audit-log', component: () => import('@/views/system/audit-log'), meta: {title: '审计日志'}},
+      {path: '/system/user-analytics', component: () => import('@/views/system/user-analytics'), meta: {title: '用户分析'}},
+      {path: '/system/risk-config', component: () => import('@/views/system/risk-config'), meta: {title: '风控管理'}}
     ]
   }
 ]
