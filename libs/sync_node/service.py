@@ -2,6 +2,7 @@
 中心向执行节点发起同步：POST /api/sync-balance、/api/sync-positions，并写回 fact_account / fact_position。
 """
 
+import time as _time
 from decimal import Decimal
 from typing import List, Optional, Dict, Any
 
@@ -17,6 +18,32 @@ from libs.ledger.repository import generate_transaction_id
 from libs.position import PositionService
 
 log = get_logger("sync-node")
+
+
+def _retry_on_deadlock(session, fn, label: str, max_retries: int = 2):
+    """执行一次数据库写操作，遇到死锁时回滚重试"""
+    for attempt in range(max_retries + 1):
+        try:
+            fn()
+            return True
+        except Exception as e:
+            err_str = str(e)
+            if "Deadlock" in err_str and attempt < max_retries:
+                log.warning(f"{label} 死锁，重试 {attempt + 1}/{max_retries}")
+                try:
+                    session.rollback()
+                except Exception:
+                    pass
+                _time.sleep(0.3 * (attempt + 1))
+                continue
+            # 非死锁错误或重试用尽
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            log.warning(f"{label} 失败", error=err_str)
+            return False
+    return False
 
 
 def _tasks_for_node(accounts: list) -> List[Dict[str, Any]]:
@@ -178,26 +205,30 @@ def sync_positions_from_nodes(
                 upnl = Decimal(str(upnl_raw)) if upnl_raw is not None else None
                 liq_raw = pos.get("liquidation_price")
                 liq = Decimal(str(liq_raw)) if liq_raw is not None else None
-                try:
+
+                def _write_pos(_sym=sym, _ps=ps, _qty=qty, _lev=lev, _upnl=upnl, _liq=liq, _pos=pos):
                     position_svc.sync_position_from_exchange(
                         tenant_id=r["tenant_id"],
                         account_id=r["account_id"],
-                        symbol=sym,
+                        symbol=_sym,
                         exchange=exchange,
                         market_type="future",
-                        position_side=ps,
-                        quantity=qty,
-                        avg_cost=Decimal(str(pos.get("entry_price", 0))),
-                        leverage=lev,
-                        unrealized_pnl=upnl,
-                        liquidation_price=liq,
+                        position_side=_ps,
+                        quantity=_qty,
+                        avg_cost=Decimal(str(_pos.get("entry_price", 0))),
+                        leverage=_lev,
+                        unrealized_pnl=_upnl,
+                        liquidation_price=_liq,
                     )
+                    session.flush()
+
+                ok = _retry_on_deadlock(session, _write_pos,
+                                        f"sync_pos {r.get('account_id')}/{sym}")
+                if ok:
                     if qty > 0:
                         synced_keys.add((sym, ps))
                     total_ok += 1
-                except Exception as e:
-                    log.warning("sync_positions write failed",
-                                account_id=r.get("account_id"), symbol=sym, error=str(e))
+                else:
                     total_fail += 1
 
             # 关闭交易所已无持仓但数据库仍 OPEN 的记录，并记录需要清理条件单的 symbol
@@ -218,17 +249,26 @@ def sync_positions_from_nodes(
                         log.info("关闭幽灵持仓（交易所已无）",
                                  account_id=r["account_id"], symbol=db_pos.symbol,
                                  position_side=db_pos.position_side, exchange=exchange)
-                        position_svc.sync_position_from_exchange(
-                            tenant_id=r["tenant_id"],
-                            account_id=r["account_id"],
-                            symbol=db_pos.symbol,
-                            exchange=exchange,
-                            market_type=db_pos.market_type or "future",
-                            position_side=db_pos.position_side,
-                            quantity=Decimal("0"),
-                            avg_cost=Decimal("0"),
-                        )
-                        closed_symbols.add(db_pos.symbol)
+                        _db_sym = db_pos.symbol
+                        _db_mt = db_pos.market_type or "future"
+                        _db_ps = db_pos.position_side
+
+                        def _close_ghost(_sym=_db_sym, _mt=_db_mt, _ps=_db_ps):
+                            position_svc.sync_position_from_exchange(
+                                tenant_id=r["tenant_id"],
+                                account_id=r["account_id"],
+                                symbol=_sym,
+                                exchange=exchange,
+                                market_type=_mt,
+                                position_side=_ps,
+                                quantity=Decimal("0"),
+                                avg_cost=Decimal("0"),
+                            )
+                            session.flush()
+
+                        if _retry_on_deadlock(session, _close_ghost,
+                                              f"close_ghost {r.get('account_id')}/{_db_sym}"):
+                            closed_symbols.add(_db_sym)
             except Exception as e:
                 log.warning("close stale positions failed",
                             account_id=r.get("account_id"), error=str(e))

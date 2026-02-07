@@ -26,7 +26,7 @@ import time
 import threading
 import httpx
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Any
 
@@ -100,12 +100,32 @@ _FALLBACK_STRATEGY = {
     "cooldown_minutes": config.get_int("signal_cooldown_minutes", 60),
 }
 
-# 信号冷却记录
+# 信号冷却记录（内存缓存 + 数据库持久化双重保障）
 signal_cooldown: Dict[str, datetime] = {}
 
 # 监控线程
 monitor_thread: Optional[threading.Thread] = None
 stop_event = threading.Event()
+
+
+def _load_cooldowns_from_db():
+    """启动时从数据库恢复冷却状态（防止重启丢失）"""
+    try:
+        from libs.core.database import get_session
+        from sqlalchemy import text
+        session = get_session()
+        rows = session.execute(text(
+            "SELECT strategy_code, symbol, cooldown_until FROM dim_signal_cooldown "
+            "WHERE cooldown_until > NOW()"
+        )).fetchall()
+        for row in rows:
+            key = f"{row[0]}:{row[1]}"
+            signal_cooldown[key] = row[2]
+            log.debug("恢复冷却", key=key, until=str(row[2]))
+        session.close()
+        log.info("冷却记录已恢复", count=len(rows))
+    except Exception as e:
+        log.warning("恢复冷却记录失败（表可能不存在）", error=str(e))
 
 
 def fetch_candles(symbol: str, timeframe: str, limit: int = 200) -> List[Dict]:
@@ -162,20 +182,62 @@ def check_signal(strategy_code: str, strategy_config: Dict,
         return None
 
 
+def _timeframe_to_minutes(tf: str) -> int:
+    """将时间周期转换为分钟数，用于计算冷却时间"""
+    units = {"m": 1, "h": 60, "d": 1440, "w": 10080}
+    try:
+        num = int(tf[:-1])
+        unit = tf[-1].lower()
+        return num * units.get(unit, 60)
+    except Exception:
+        return 60
+
+
 def is_in_cooldown(symbol: str, strategy: str, cooldown_minutes: int = 60) -> bool:
     """检查是否在冷却期（cooldown_minutes 来自策略配置）"""
     key = f"{strategy}:{symbol}"
     if key not in signal_cooldown:
         return False
 
-    elapsed = (datetime.now() - signal_cooldown[key]).total_seconds() / 60
+    cooldown_until = signal_cooldown[key]
+    # 支持两种格式：datetime 表示冷却到期时间（新），或 datetime 表示设定时间（旧）
+    now = datetime.now()
+    if cooldown_until > now:
+        # 新格式：cooldown_until 是到期时间
+        return True
+    # 兼容旧格式：cooldown_until 是设定时间
+    elapsed = (now - cooldown_until).total_seconds() / 60
     return elapsed < cooldown_minutes
 
 
-def set_cooldown(symbol: str, strategy: str):
-    """设置冷却"""
+def set_cooldown(symbol: str, strategy: str, timeframe: str = "1h"):
+    """
+    设置冷却 — 冷却时间 = max(策略配置的 cooldown, 当前 K 线剩余时间 × 2)
+    这样确保同一根 K 线内不会重复开仓（即使止损后），至少等下一根 K 线。
+    """
     key = f"{strategy}:{symbol}"
-    signal_cooldown[key] = datetime.now()
+    tf_minutes = _timeframe_to_minutes(timeframe)
+    # 计算当前周期剩余时间：至少等到当前 K 线结束 + 半个周期（避免边界重入）
+    now = datetime.now()
+    minutes_into_period = (now.hour * 60 + now.minute) % tf_minutes
+    remaining = tf_minutes - minutes_into_period + (tf_minutes // 2)
+    cooldown_until = now + timedelta(minutes=max(remaining, tf_minutes))
+    signal_cooldown[key] = cooldown_until
+    log.info("设置冷却", key=key, until=cooldown_until.isoformat(), remaining_min=remaining)
+    # 持久化到数据库（防止重启丢失）
+    try:
+        from libs.core.database import get_session
+        from sqlalchemy import text
+        db = get_session()
+        db.execute(text(
+            "INSERT INTO dim_signal_cooldown (strategy_code, symbol, cooldown_until, created_at) "
+            "VALUES (:code, :sym, :until, NOW()) "
+            "ON DUPLICATE KEY UPDATE cooldown_until = :until"
+        ), {"code": strategy, "sym": symbol, "until": cooldown_until})
+        db.commit()
+        db.close()
+    except Exception as e:
+        log.warning("冷却持久化失败", error=str(e))
 
 
 def _split_hedge_signal(signal: Dict) -> List[Dict]:
@@ -245,16 +307,39 @@ def _load_strategies_from_db():
     return [_FALLBACK_STRATEGY]
 
 
+def _quick_sync_positions():
+    """快速同步持仓（在信号检测前执行，确保数据库持仓状态是最新的）"""
+    try:
+        from libs.sync_node.service import sync_positions_from_nodes
+        session = get_session()
+        try:
+            sync_positions_from_nodes(session)
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            log.warning("信号前快速同步持仓失败", error=str(e))
+        finally:
+            session.close()
+    except Exception as e:
+        log.warning("快速同步 session 失败", error=str(e))
+
+
 def monitor_loop():
     """监控主循环 - 每轮从数据库加载最新策略配置"""
     global monitor_state
 
     log.info("信号监控启动")
 
+    # 启动时从 DB 恢复冷却记录（防止重启丢失）
+    _load_cooldowns_from_db()
+
     while not stop_event.is_set():
         try:
             monitor_state["last_check"] = datetime.now().isoformat()
             monitor_state["total_checks"] += 1
+
+            # ── 关键：信号检测前先同步持仓，确保 DB 是最新状态 ──
+            _quick_sync_positions()
 
             # 每轮动态加载策略（支持运行时增删改策略，无需重启）
             strategies = _load_strategies_from_db()
@@ -322,7 +407,8 @@ def monitor_loop():
                                         log.error(f"推送失败: {result.error}")
 
                             # 冷却：无论单信号还是对冲，一轮只设一次冷却
-                            set_cooldown(symbol, code)
+                            # 传入 timeframe 确保冷却至少覆盖当前 K 线周期
+                            set_cooldown(symbol, code, timeframe)
                         else:
                             log.debug(f"信号置信度不足: {confidence} < {min_conf}")
 
@@ -751,8 +837,35 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
             nid = (t.execution_node_id or 0) or 0
             by_node[nid].append(t)
 
+        def _is_single_mode_exhausted(target) -> bool:
+            """单次模式检查：mode=1 且已有历史成交记录（曾执行过），则不再执行"""
+            if target.mode != 1:
+                return False  # 循环模式，不限制
+            try:
+                from libs.order_trade.models import Order
+                has_order = session.query(Order.id).filter(
+                    Order.account_id == target.account_id,
+                    Order.symbol.in_([symbol, symbol.replace("/", "")]),
+                    Order.status.in_(["FILLED", "PARTIALLY_FILLED"]),
+                ).first()
+                return has_order is not None
+            except Exception:
+                return False
+
         local_targets = by_node.get(0, [])
         for target in local_targets:
+            # 单次模式检查
+            if _is_single_mode_exhausted(target):
+                log.info("单次模式已执行过，跳过",
+                         account_id=target.account_id, symbol=symbol, mode=target.mode)
+                results.append({
+                    "account_id": target.account_id,
+                    "user_id": target.user_id,
+                    "success": False,
+                    "error": f"单次模式已执行过 {symbol}，跳过",
+                    "skipped": True,
+                })
+                continue
             # 持仓去重检查
             if _has_open_position(target):
                 log.info(
@@ -796,6 +909,13 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
             # 每个 target 按租户解析 amount/leverage，再按 ratio 缩放金额；跳过已有持仓的账户
             task_list = []
             for t in remote_targets:
+                if _is_single_mode_exhausted(t):
+                    log.info("单次模式已执行过(远程)", account_id=t.account_id, symbol=symbol, mode=t.mode)
+                    results.append({
+                        "account_id": t.account_id, "user_id": t.user_id,
+                        "success": False, "error": f"单次模式已执行过 {symbol}，跳过", "skipped": True,
+                    })
+                    continue
                 if _has_open_position(t):
                     log.info("跳过已有持仓账户(远程)", account_id=t.account_id, symbol=symbol, position_side=position_side)
                     results.append({
@@ -1200,42 +1320,52 @@ def _sync_loop():
     )
     from libs.exchange.market_service import MarketInfoService
 
+    def _safe_sync(name, fn, max_retries=2):
+        """带死锁重试的安全同步：每次用独立 session，避免一个失败影响全部"""
+        for attempt in range(max_retries + 1):
+            s = get_session()
+            try:
+                fn(s)
+                s.commit()
+                return True
+            except Exception as e:
+                s.rollback()
+                err_str = str(e)
+                if "Deadlock" in err_str and attempt < max_retries:
+                    log.warning(f"同步 {name} 死锁，重试 {attempt + 1}/{max_retries}")
+                    _time.sleep(0.5 * (attempt + 1))
+                    continue
+                log.warning(f"同步 {name} 失败", error=err_str)
+                return False
+            finally:
+                s.close()
+        return False
+
     log.info("自动同步线程启动", interval=SYNC_INTERVAL)
     while not _sync_stop_event.is_set():
         try:
-            session = get_session()
-            try:
-                log.debug("开始自动同步: 余额")
-                sync_balance_from_nodes(session)
-                log.debug("开始自动同步: 持仓")
-                sync_positions_from_nodes(session)
-                log.debug("开始自动同步: 成交")
-                sync_trades_from_nodes(session)
-                session.commit()
+            log.debug("开始自动同步: 余额")
+            _safe_sync("余额", lambda s: sync_balance_from_nodes(s))
+            log.debug("开始自动同步: 持仓")
+            _safe_sync("持仓", lambda s: sync_positions_from_nodes(s))
+            log.debug("开始自动同步: 成交")
+            _safe_sync("成交", lambda s: sync_trades_from_nodes(s))
 
-                # 市场信息刷新（每小时）
-                now = _time.time()
-                if now - _last_market_sync > _MARKET_SYNC_INTERVAL:
-                    log.info("开始同步市场信息 (dim_market_info)")
-                    try:
-                        mkt_svc = MarketInfoService(session)
-                        for ex in ("binance", "gate", "okx"):
-                            mkt_svc.sync_from_ccxt(ex, market_type="swap")
-                        session.commit()
-                        _last_market_sync = now
-                        log.info("市场信息同步完成")
-                    except Exception as me:
-                        session.rollback()
-                        log.warning("市场信息同步失败", error=str(me))
+            # 市场信息刷新（每小时）
+            now = _time.time()
+            if now - _last_market_sync > _MARKET_SYNC_INTERVAL:
+                log.info("开始同步市场信息 (dim_market_info)")
+                def _sync_markets(s):
+                    svc = MarketInfoService(s)
+                    for ex in ("binance", "gate", "okx"):
+                        svc.sync_from_ccxt(ex, market_type="swap")
+                if _safe_sync("市场信息", _sync_markets):
+                    _last_market_sync = now
+                    log.info("市场信息同步完成")
 
-                log.info("自动同步完成")
-            except Exception as e:
-                session.rollback()
-                log.warning("自动同步失败", error=str(e))
-            finally:
-                session.close()
+            log.info("自动同步完成")
         except Exception as e:
-            log.warning("自动同步 session 创建失败", error=str(e))
+            log.warning("自动同步异常", error=str(e))
         _sync_stop_event.wait(SYNC_INTERVAL)
     log.info("自动同步线程已停止")
 

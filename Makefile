@@ -13,7 +13,7 @@ SERVICES := $(ROOT)services
 # 可选：只操作指定服务，多个用空格分隔。例: make start SVC="data-api merchant-api"
 SVC      ?=
 
-.PHONY: help start stop restart status health test admin-install admin-build admin-dev node-bundle migrate migrate-013 migrate-014 clean deploy deploy-pull deploy-build deploy-setup deploy-init push-deploy deploy-child-setup deploy-child deploy-child-restart deploy-child-batch-setup deploy-child-batch deploy-child-batch-restart
+.PHONY: help start stop restart status health test admin-install admin-build admin-dev node-bundle migrate migrate-013 migrate-014 migrate-015 clean deploy deploy-pull deploy-build deploy-setup deploy-init push-deploy deploy-child-setup deploy-child deploy-child-restart deploy-child-batch-setup deploy-child-batch deploy-child-batch-restart
 
 # ---------------------------------------------------------------------------
 # 默认目标
@@ -133,7 +133,10 @@ migrate-013:
 migrate-014:
 	cd $(ROOT) && PYTHONPATH=$(ROOT) python3 scripts/run_migration_014.py
 
-migrate: migrate-013 migrate-014
+migrate-015:
+	cd $(ROOT) && PYTHONPATH=$(ROOT) python3 scripts/run_migration_015.py
+
+migrate: migrate-013 migrate-014 migrate-015
 
 # ---------------------------------------------------------------------------
 # 线上发布

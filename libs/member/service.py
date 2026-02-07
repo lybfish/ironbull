@@ -38,6 +38,7 @@ class ExecutionTarget:
     strategy_code: str
     ratio: int  # 跟单比例 1-100
     execution_node_id: Optional[int] = None  # 执行节点ID，空/0=本机
+    mode: int = 2  # 1=单次执行 2=循环执行
 
 
 def _generate_invite_code() -> str:
@@ -297,5 +298,6 @@ class MemberService:
                 strategy_code=b.strategy_code,
                 ratio=int(b.ratio or 100),
                 execution_node_id=node_id,
+                mode=int(b.mode or 2),
             ))
         return targets

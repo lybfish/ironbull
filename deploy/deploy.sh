@@ -58,9 +58,10 @@ run git pull
 echo ""
 
 if [ "$DO_MIGRATE" = true ]; then
-    echo "[2/5] 执行迁移 (migrate-013 + migrate-014)..."
+    echo "[2/5] 执行迁移 (migrate-013 + migrate-014 + migrate-015)..."
     run make migrate-013
     run make migrate-014
+    run make migrate-015
     echo ""
 else
     echo "[2/5] 跳过迁移 (--no-migrate)"
