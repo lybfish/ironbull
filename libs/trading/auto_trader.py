@@ -498,9 +498,10 @@ class AutoTrader:
         try:
             trader = self._get_trader()
             
-            # 反向平仓
+            # 反向平仓（合约双向持仓必须传 position_side，否则会按开仓推导成反向仓）
             close_side = OrderSide.SELL if trade.side == "BUY" else OrderSide.BUY
-            
+            position_side = "LONG" if trade.side == "BUY" else "SHORT"
+
             order_result = await trader.create_order(
                 symbol=symbol,
                 side=close_side,
@@ -508,6 +509,7 @@ class AutoTrader:
                 quantity=trade.quantity,
                 trade_type="CLOSE",
                 close_reason="SIGNAL",
+                position_side=position_side,
             )
             
             if order_result.status in [OrderStatus.FILLED, OrderStatus.PARTIAL]:
