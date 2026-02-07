@@ -227,6 +227,25 @@ async def _sync_positions_one(task: TaskItem, sandbox: bool) -> Dict[str, Any]:
             _lev = p.get("leverage")
             _liq = p.get("liquidationPrice")
             _upnl = p.get("unrealizedPnl")
+            # Binance 不直接返回 leverage，需从原始数据计算: notional / initialMargin
+            info = p.get("info") or {}
+            if _lev is None and info:
+                try:
+                    notional = float(info.get("notional") or 0)
+                    initial_margin = float(info.get("initialMargin") or 0)
+                    if initial_margin > 0:
+                        _lev = round(notional / initial_margin)
+                except (ValueError, ZeroDivisionError):
+                    pass
+            # Binance 全仓模式下 liquidationPrice='0'，CCXT 映射为 None
+            # 从原始数据回填（0 = 全仓模式，无独立强平价）
+            if _liq is None and info:
+                try:
+                    raw_liq = info.get("liquidationPrice")
+                    if raw_liq is not None:
+                        _liq = float(raw_liq)
+                except (ValueError, TypeError):
+                    pass
             out.append({
                 "symbol": sym or raw_sym,
                 "position_side": position_side,
