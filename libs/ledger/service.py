@@ -427,17 +427,87 @@ class LedgerService:
         balance: Decimal,
         available: Decimal,
         frozen: Decimal,
+        unrealized_pnl: Decimal = Decimal("0"),
+        margin_used: Decimal = Decimal("0"),
+        margin_ratio: Decimal = Decimal("0"),
+        equity: Decimal = Decimal("0"),
     ) -> AccountDTO:
-        """从交易所同步余额到 fact_account（仅更新 balance/available/frozen 快照）"""
-        account, _ = self.account_repo.get_or_create(
+        """
+        从交易所同步余额到 fact_account。
+        
+        除了更新余额/可用/冻结快照，还更新合约扩展字段（未实现盈亏、保证金、权益）。
+        检测余额变化：
+        - 余额增加（排除未实现盈亏波动）视为划转入金，累加 total_deposit 并记录流水
+        - 余额减少视为划转出金，累加 total_withdraw 并记录流水
+        - 小额波动（< 0.01 USDT）忽略，避免浮动盈亏造成误判
+        """
+        account, created = self.account_repo.get_or_create(
             tenant_id=tenant_id,
             account_id=account_id,
             currency=currency,
         )
+        
+        old_balance = Decimal(str(account.balance or 0))
+        diff = balance - old_balance
+        
+        # 更新余额快照 + 合约扩展字段
         account.balance = balance
         account.available = available
         account.frozen = frozen
-        self.account_repo.update(account)
+        # 合约扩展字段（每次同步都从交易所覆盖）
+        account.margin_used = margin_used
+        account.unrealized_pnl = unrealized_pnl
+        account.equity = equity if equity else balance + unrealized_pnl
+        account.margin_ratio = margin_ratio
+        
+        # 检测余额变动（忽略小于 0.01 的浮动）
+        # 首次创建账户且有余额 → 视为初始入金
+        if created and balance > Decimal("0.01"):
+            account.total_deposit = Decimal(str(account.total_deposit or 0)) + balance
+            self.account_repo.update(account)
+            self._record_transaction(
+                account=account,
+                transaction_type=TransactionType.DEPOSIT,
+                amount=balance,
+                fee=Decimal("0"),
+                source_type="SYNC",
+                source_id=None,
+                transaction_at=datetime.now(),
+                remark="交易所余额初始同步",
+            )
+        elif abs(diff) > Decimal("0.01"):
+            if diff > 0:
+                # 余额增加 → 划转入金
+                account.total_deposit = Decimal(str(account.total_deposit or 0)) + diff
+                self.account_repo.update(account)
+                self._record_transaction(
+                    account=account,
+                    transaction_type=TransactionType.DEPOSIT,
+                    amount=diff,
+                    fee=Decimal("0"),
+                    source_type="SYNC",
+                    source_id=None,
+                    transaction_at=datetime.now(),
+                    remark=f"交易所余额同步检测入金 +{float(diff):.4f}",
+                )
+            else:
+                # 余额减少 → 划转出金
+                withdraw_amount = abs(diff)
+                account.total_withdraw = Decimal(str(account.total_withdraw or 0)) + withdraw_amount
+                self.account_repo.update(account)
+                self._record_transaction(
+                    account=account,
+                    transaction_type=TransactionType.WITHDRAW,
+                    amount=-withdraw_amount,
+                    fee=Decimal("0"),
+                    source_type="SYNC",
+                    source_id=None,
+                    transaction_at=datetime.now(),
+                    remark=f"交易所余额同步检测出金 -{float(withdraw_amount):.4f}",
+                )
+        else:
+            self.account_repo.update(account)
+        
         return self._to_account_dto(account)
     
     def list_accounts(self, filter: AccountFilter) -> List[AccountDTO]:
@@ -675,12 +745,15 @@ class LedgerService:
     
     def _to_account_dto(self, account: Account) -> AccountDTO:
         """模型转 DTO"""
+        _balance = float(account.balance) if account.balance else 0
+        _unrealized = float(account.unrealized_pnl) if getattr(account, 'unrealized_pnl', None) else 0
+        _equity = float(account.equity) if getattr(account, 'equity', None) else _balance + _unrealized
         return AccountDTO(
             ledger_account_id=account.ledger_account_id,
             tenant_id=account.tenant_id,
             account_id=account.account_id,
             currency=account.currency,
-            balance=float(account.balance) if account.balance else 0,
+            balance=_balance,
             available=float(account.available) if account.available else 0,
             frozen=float(account.frozen) if account.frozen else 0,
             total_deposit=float(account.total_deposit) if account.total_deposit else 0,
@@ -691,6 +764,8 @@ class LedgerService:
             status=account.status,
             created_at=account.created_at,
             updated_at=account.updated_at,
+            unrealized_pnl=_unrealized,
+            equity=_equity,
         )
     
     def _to_transaction_dto(self, transaction: Transaction) -> TransactionDTO:

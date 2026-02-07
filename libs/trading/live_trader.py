@@ -1393,6 +1393,24 @@ class LiveTrader(Trader):
                 params["type"] = "spot"
             response = await self.exchange.fetch_balance(params)
             
+            # 从 CCXT info 原始数据中提取合约账户扩展字段
+            info = response.get("info") or {}
+            # Binance futures: info 是列表 [{"asset":"USDT","walletBalance":...,"unrealizedProfit":...}]
+            # 或者是 dict: {"totalUnrealizedProfit":..., "totalMarginBalance":..., ...}
+            info_by_asset = {}
+            if isinstance(info, list):
+                for item in info:
+                    a = item.get("asset") or item.get("currency") or ""
+                    info_by_asset[a] = item
+            elif isinstance(info, dict):
+                # Binance futures 有时候在 info 最外层也有汇总字段
+                info_by_asset["_global"] = info
+                # 有些交易所 info.assets 是列表
+                for item in (info.get("assets") or info.get("data") or []):
+                    if isinstance(item, dict):
+                        a = item.get("asset") or item.get("currency") or ""
+                        info_by_asset[a] = item
+            
             balances = {}
             for currency, data in response.get("total", {}).items():
                 if data and data > 0:
@@ -1403,11 +1421,48 @@ class LiveTrader(Trader):
                     if asset and currency != asset:
                         continue
                     
+                    # 提取扩展字段
+                    raw = info_by_asset.get(currency) or info_by_asset.get("_global") or {}
+                    unrealized_pnl = 0
+                    margin_used = 0
+                    equity = total
+                    margin_ratio = 0
+                    
+                    # Binance futures 字段
+                    if raw.get("crossUnPnl") is not None:
+                        unrealized_pnl = float(raw["crossUnPnl"])
+                    elif raw.get("unrealizedProfit") is not None:
+                        unrealized_pnl = float(raw["unrealizedProfit"])
+                    elif raw.get("totalUnrealizedProfit") is not None:
+                        unrealized_pnl = float(raw["totalUnrealizedProfit"])
+                    
+                    if raw.get("initialMargin") is not None:
+                        margin_used = float(raw["initialMargin"])
+                    elif raw.get("totalInitialMargin") is not None:
+                        margin_used = float(raw["totalInitialMargin"])
+                    elif raw.get("positionInitialMargin") is not None:
+                        margin_used = float(raw["positionInitialMargin"])
+                    
+                    if raw.get("marginBalance") is not None:
+                        equity = float(raw["marginBalance"])
+                    elif raw.get("totalMarginBalance") is not None:
+                        equity = float(raw["totalMarginBalance"])
+                    else:
+                        equity = total + unrealized_pnl
+                    
+                    # 保证金使用率 = 占用保证金 / 权益
+                    if equity > 0 and margin_used > 0:
+                        margin_ratio = margin_used / equity
+                    
                     balances[currency] = Balance(
                         asset=currency,
                         free=free,
                         locked=locked,
                         total=total,
+                        unrealized_pnl=unrealized_pnl,
+                        margin_used=margin_used,
+                        margin_ratio=margin_ratio,
+                        equity=equity,
                     )
             
             return balances

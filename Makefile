@@ -13,7 +13,7 @@ SERVICES := $(ROOT)services
 # 可选：只操作指定服务，多个用空格分隔。例: make start SVC="data-api merchant-api"
 SVC      ?=
 
-.PHONY: help start stop restart status health test admin-install admin-build admin-dev node-bundle migrate migrate-013 migrate-014 migrate-015 clean deploy deploy-pull deploy-build deploy-setup deploy-init push-deploy deploy-child-setup deploy-child deploy-child-restart deploy-child-batch-setup deploy-child-batch deploy-child-batch-restart
+.PHONY: help start stop restart status health test admin-install admin-build admin-dev node-bundle migrate migrate-013 migrate-014 migrate-015 migrate-016 clean deploy deploy-pull deploy-build deploy-setup deploy-init push-deploy deploy-child-setup deploy-child deploy-child-restart deploy-child-batch-setup deploy-child-batch deploy-child-batch-restart
 
 # ---------------------------------------------------------------------------
 # 默认目标
@@ -136,7 +136,10 @@ migrate-014:
 migrate-015:
 	cd $(ROOT) && PYTHONPATH=$(ROOT) python3 scripts/run_migration_015.py
 
-migrate: migrate-013 migrate-014 migrate-015
+migrate-016:
+	cd $(ROOT) && PYTHONPATH=$(ROOT) python3 scripts/run_migration_016.py
+
+migrate: migrate-013 migrate-014 migrate-015 migrate-016
 
 # ---------------------------------------------------------------------------
 # 线上发布
@@ -151,7 +154,7 @@ deploy-init:
 
 # 本地一键：push 后 SSH 到线上拉代码并执行 deploy（若线上无代码会先执行 deploy-init）
 push-deploy:
-	@NO_MIGRATE="$(NO_MIGRATE)" BUILD="$(BUILD)" DRY_RUN="$(DRY_RUN)" NAME="$(NAME)" $(DEPLOY)/push-and-deploy.sh $(NAME)
+	@NO_MIGRATE="$(NO_MIGRATE)" BUILD="$(BUILD)" DRY_RUN="$(DRY_RUN)" NAME="$(NAME)" MSG="$(MSG)" MIGRATE="$(MIGRATE)" $(DEPLOY)/push-and-deploy.sh $(NAME)
 
 # 以下在服务器上执行（SSH 登录后 cd 到项目根目录）
 deploy-pull:

@@ -109,6 +109,11 @@ class Balance:
     free: float         # 可用
     locked: float       # 冻结
     total: float        # 总计
+    # 合约账户扩展字段
+    unrealized_pnl: float = 0       # 未实现盈亏
+    margin_used: float = 0          # 占用保证金
+    margin_ratio: float = 0         # 保证金使用率 (0~1)
+    equity: float = 0               # 权益 (total + unrealized_pnl)
 
 
 @dataclass

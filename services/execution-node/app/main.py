@@ -174,6 +174,10 @@ async def _sync_balance_one(task: TaskItem, sandbox: bool) -> Dict[str, Any]:
             "balance": float(usdt.total or 0),
             "available": float(usdt.free or 0),
             "frozen": float(usdt.locked or 0),
+            "unrealized_pnl": float(usdt.unrealized_pnl or 0),
+            "margin_used": float(usdt.margin_used or 0),
+            "margin_ratio": float(usdt.margin_ratio or 0),
+            "equity": float(usdt.equity or usdt.total or 0),
             "error": None,
         }
     except Exception as e:
@@ -189,6 +193,10 @@ async def _sync_balance_one(task: TaskItem, sandbox: bool) -> Dict[str, Any]:
             "balance": 0,
             "available": 0,
             "frozen": 0,
+            "unrealized_pnl": 0,
+            "margin_used": 0,
+            "margin_ratio": 0,
+            "equity": 0,
             "error": str(e),
         }
 

@@ -126,6 +126,10 @@ def sync_balance_from_nodes(
                     balance=Decimal(str(r.get("balance", 0))),
                     available=Decimal(str(r.get("available", 0))),
                     frozen=Decimal(str(r.get("frozen", 0))),
+                    unrealized_pnl=Decimal(str(r.get("unrealized_pnl", 0))),
+                    margin_used=Decimal(str(r.get("margin_used", 0))),
+                    margin_ratio=Decimal(str(r.get("margin_ratio", 0))),
+                    equity=Decimal(str(r.get("equity", 0))),
                 )
                 total_ok += 1
             except Exception as e:

@@ -57,6 +57,9 @@ class Account(Base):
     
     # 合约专用
     margin_used = Column(DECIMAL(20, 8), nullable=False, default=0, comment="已用保证金")
+    unrealized_pnl = Column(DECIMAL(20, 8), nullable=False, default=0, comment="未实现盈亏（从交易所同步）")
+    equity = Column(DECIMAL(20, 8), nullable=False, default=0, comment="权益（余额+未实现盈亏）")
+    margin_ratio = Column(DECIMAL(10, 4), nullable=True, default=0, comment="保证金使用率")
     
     # 状态
     status = Column(String(16), nullable=False, default="ACTIVE", comment="状态: ACTIVE/FROZEN/CLOSED")
@@ -89,6 +92,9 @@ class Account(Base):
             "total_fee": float(self.total_fee) if self.total_fee else 0,
             "realized_pnl": float(self.realized_pnl) if self.realized_pnl else 0,
             "margin_used": float(self.margin_used) if self.margin_used else 0,
+            "unrealized_pnl": float(self.unrealized_pnl) if self.unrealized_pnl else 0,
+            "equity": float(self.equity) if self.equity else 0,
+            "margin_ratio": float(self.margin_ratio) if self.margin_ratio else 0,
             "status": self.status,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
