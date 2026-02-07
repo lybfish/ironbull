@@ -2,9 +2,8 @@
 # ============================================================
 # IronBull 本地一键发布：push 后 SSH 到线上拉代码并执行 deploy（参考 old3 deploy.sh）
 # 用法：
-#   make push-deploy              # 一键：有未提交则自动 add+commit，再 push → 线上 pull + 迁移 + 重启
+#   make push-deploy              # 一键：evui有改动自动build → add+commit → push → 线上 pull + 重启
 #   make push-deploy MSG="fix: xxx"  # 指定提交说明（默认 "deploy"）
-#   make push-deploy BUILD=1      # 含线上构建 admin-web
 #   make push-deploy MIGRATE=1      # 线上执行迁移（默认不跑）
 #   make push-deploy DRY_RUN=1
 # 首次使用请先: make deploy-setup
@@ -77,16 +76,29 @@ echo ""
 
 cd "$ROOT"
 
-# 0. 若有未提交修改：自动 add + commit，再继续 push 与发布（一键完成）
+# 0. 检测 evui/src 是否有改动，有则先本地 build，dist 一起提交（线上无需 build）
+EVUI_DIRTY=""
+if [[ -n "$(git status --porcelain -- evui/src/ evui/public/ evui/package.json 2>/dev/null)" ]]; then
+    EVUI_DIRTY=1
+elif [[ -n "$(git diff --name-only HEAD -- evui/src/ evui/public/ evui/package.json 2>/dev/null)" ]]; then
+    EVUI_DIRTY=1
+fi
+if [[ "$EVUI_DIRTY" = "1" ]]; then
+    echo "[0] 检测到 evui 源码有改动，本地构建前端..."
+    run bash -c "cd $ROOT/evui && npm run build"
+    echo ""
+fi
+
+# 1. 若有未提交修改：自动 add + commit，再继续 push 与发布（一键完成）
 if [[ -n "$(git status --porcelain)" ]]; then
-    echo "[0/4] 存在未提交修改，自动 add + commit..."
+    echo "[1/5] 存在未提交修改，自动 add + commit..."
     run git add -A
     run git commit -m "${MSG}" || true
     echo ""
 fi
 
-# 1. 确保分支并 push
-echo "[1/4] 推送代码..."
+# 2. 确保分支并 push
+echo "[2/5] 推送代码..."
 CUR="$(git rev-parse --abbrev-ref HEAD)"
 if [[ "$CUR" != "$DEPLOY_BRANCH" ]]; then
     echo "当前分支 $CUR，部署分支 $DEPLOY_BRANCH，正在切换..."
@@ -110,8 +122,8 @@ else
     run git push -u "$DEPLOY_REMOTE" "$DEPLOY_BRANCH" || run git push "$DEPLOY_REMOTE" "$DEPLOY_BRANCH" || exit 1
     echo "已推送 $DEPLOY_BRANCH"
 fi
-# 2. 若线上尚无仓库，先执行首次初始化（创建目录并 clone）
-echo "[2/4] 检查线上是否已拉取代码..."
+# 3. 若线上尚无仓库，先执行首次初始化（创建目录并 clone）
+echo "[3/5] 检查线上是否已拉取代码..."
 HAS_REPO=""
 if [[ "$DRY_RUN" = "1" ]]; then
     HAS_REPO="no"
@@ -124,8 +136,8 @@ if [[ "$HAS_REPO" != "yes" ]]; then
     echo ""
 fi
 
-# 3. SSH 到服务器执行 deploy（sudo 时用绝对路径，避免子进程 cwd 不同导致找不到脚本）
-echo "[3/4] 连接服务器并拉代码、发布..."
+# 4. SSH 到服务器执行 deploy（sudo 时用绝对路径，避免子进程 cwd 不同导致找不到脚本）
+echo "[4/5] 连接服务器并拉代码、发布..."
 DEPLOY_SCRIPT="$DEPLOY_PATH/deploy/deploy.sh"
 if [[ -n "$SUDO_CMD" ]]; then
     # deploy.sh 内部会 sudo -i -u 属主执行 start.sh，确保环境完整
@@ -136,7 +148,7 @@ fi
 ssh_cmd "$REMOTE_RUN"
 echo ""
 
-echo "[4/4] 验证远程服务..."
+echo "[5/5] 验证远程服务..."
 if [[ "$DRY_RUN" != "1" ]]; then
     ssh_cmd "cd $DEPLOY_PATH && bash deploy/start.sh status" 2>/dev/null || true
     echo "  若上面有 stopped，请 SSH 登录后执行: cd $DEPLOY_PATH && sudo chown -R \$(stat -c %U $DEPLOY_PATH) tmp && bash deploy/start.sh restart"

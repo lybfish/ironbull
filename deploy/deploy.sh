@@ -2,9 +2,9 @@
 # ============================================================
 # IronBull 线上发布脚本（在服务器上执行）
 # 用法：
-#   ./deploy/deploy.sh              # 拉代码 + 迁移 + 重启服务
-#   ./deploy/deploy.sh --no-migrate # 只拉代码 + 重启，不跑迁移
-#   ./deploy/deploy.sh --build      # 拉代码 + 迁移 + 构建 admin-web + 重启
+#   ./deploy/deploy.sh              # 拉代码 + (evui有变更自动build) + 重启
+#   ./deploy/deploy.sh --no-migrate # 跳过迁移
+#   ./deploy/deploy.sh --build      # 强制构建 evui（即使无变更）
 #   ./deploy/deploy.sh --dry-run    # 仅打印将要执行的步骤
 #   make deploy [NO_MIGRATE=1] [BUILD=1] [DRY_RUN=1]
 # ============================================================
@@ -53,29 +53,31 @@ if [ "$DRY_RUN" = true ]; then
 fi
 echo ""
 
-echo "[1/4] 拉取代码..."
+echo "[1/5] 拉取代码..."
 run git pull
 echo ""
 
 if [ "$DO_MIGRATE" = true ]; then
-    echo "[2/4] 执行迁移 (migrate-013)..."
+    echo "[2/5] 执行迁移 (migrate-013)..."
     run make migrate-013
     echo ""
 else
-    echo "[2/4] 跳过迁移 (--no-migrate)"
+    echo "[2/5] 跳过迁移 (--no-migrate)"
     echo ""
 fi
 
+# 前端构建：通常由本地 push-and-deploy.sh 完成（检测 evui 源码变更 → build → dist 一起提交）
+# 线上仅在手动 --build / BUILD=1 时才构建（应急用途）
 if [ "$DO_BUILD" = true ]; then
-    echo "[3/4] 构建 admin-web..."
-    run make admin-build
+    echo "[3/5] 构建前端 (evui)..."
+    run bash -c "cd $ROOT/evui && npm run build"
     echo ""
 else
-    echo "[3/4] 跳过前端构建"
+    echo "[3/5] 跳过前端构建（dist 已随代码提交）"
     echo ""
 fi
 
-echo "[4/4] 重启服务..."
+echo "[4/5] 重启服务..."
 # 若当前是 root 且项目目录属主非 root，则以属主用户执行 restart（避免 root 下无 uvicorn 等依赖）
 REPO_OWNER=""
 if command -v stat >/dev/null 2>&1; then
@@ -95,8 +97,7 @@ else
 fi
 echo ""
 
-echo "=== 发布完成 ==="
-echo "服务状态："
+echo "[5/5] 发布完成，检查服务状态..."
 if [ "$(id -u)" = "0" ] && [ -n "$REPO_OWNER" ] && [ "$REPO_OWNER" != "root" ]; then
     run sudo -i -u "$REPO_OWNER" bash "$START_SCRIPT" status 2>/dev/null || true
 else
