@@ -6,7 +6,8 @@ import axios from 'axios'
 import setting from '@/config/setting'
 
 function signalApiUrl(path) {
-  const base = typeof window !== 'undefined' ? window.location.origin + '/signal-api' : '/signal-api'
+  const prefix = process.env.NODE_ENV === 'production' ? '/ib/signal-api' : '/signal-api'
+  const base = typeof window !== 'undefined' ? window.location.origin + prefix : prefix
   return base + path
 }
 

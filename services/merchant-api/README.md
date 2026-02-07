@@ -1,23 +1,24 @@
 # Merchant API
 
-代理商 B2B 接口，与 old3 merchant-api 文档兼容。
+代理商 B2B 接口：用户管理、点卡、策略、会员分销与奖励。  
+认证方式：AppKey + 签名（X-App-Key, X-Timestamp, X-Sign）。
 
-## 认证
+## 接口文档
 
-- Header: `X-App-Key`, `X-Timestamp`, `X-Sign`
-- Sign = `md5(AppKey + Timestamp + AppSecret)`，5 分钟有效
+完整接口说明见项目文档：  
+**[docs/api/MERCHANT_API.md](../../docs/api/MERCHANT_API.md)**
 
-## 数据库
+包含：认证、统一响应格式、19 个接口的路径/参数/请求体/响应说明。
 
-执行迁移（在项目根目录）：
+## 认证摘要
 
-```bash
-mysql -u root -p ironbull < migrations/007_platform_layer.sql
-```
+- Header：`X-App-Key`、`X-Timestamp`、`X-Sign`
+- 签名：`Sign = MD5(AppKey + Timestamp + AppSecret)`（小写 hex）
+- 时间戳有效期为 5 分钟
 
 ## 依赖
 
-需安装 `python-multipart`（Form 表单）：`pip install python-multipart`（已写入项目 requirements.txt）
+需安装 `python-multipart`（Form 表单）：已写入项目根目录 `requirements.txt`。
 
 ## 启动
 
@@ -26,11 +27,12 @@ cd services/merchant-api
 PYTHONPATH=../.. python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8010
 ```
 
-若 8010 被占用可改用 8011。
+端口占用时可改用 8011。生产环境由 `deploy/start.sh` 管理。
 
-## 接口
+## 健康检查
 
-- 用户管理: GET/POST /merchant/root-user, /merchant/user/create, /merchant/users, /merchant/user/info, /merchant/user/apikey, /merchant/user/apikey/unbind
-- 点卡: GET /merchant/balance, POST /merchant/user/recharge, GET /merchant/user/balance, GET /merchant/point-card/logs
-- 策略: GET /merchant/strategies, POST /merchant/user/strategy/open, POST /merchant/user/strategy/close, GET /merchant/user/strategies
-- 会员分销: POST /merchant/user/transfer-point-card, GET /merchant/user/level, GET /merchant/user/team, POST /merchant/user/set-market-node, GET /merchant/user/rewards, GET /merchant/user/reward-balance, POST /merchant/user/withdraw, GET /merchant/user/withdrawals
+```bash
+curl http://127.0.0.1:8010/health
+```
+
+返回 `{"status":"ok","service":"merchant-api"}`。

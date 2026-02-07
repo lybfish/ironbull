@@ -131,18 +131,23 @@ def user_info(
         inviter = repo.get_user_by_id(user.inviter_id)
         if inviter:
             inviter_invite_code = inviter.invite_code or ""
-    # 账户
+    # 账户（含完整 API 信息：api_key、api_secret、passphrase，仅限商户端安全环境使用）
     accounts = repo.get_accounts_by_user(user.id)
     # 文档约定：accounts[].status 1=正常 2=禁用（库存 0=禁用 1=正常）
-    acc_list = [{
-        "account_id": a.id,
-        "exchange": a.exchange,
-        "account_type": a.account_type,
-        "balance": float(a.balance or 0),
-        "futures_balance": float(a.futures_balance or 0),
-        "futures_available": float(a.futures_available or 0),
-        "status": 2 if (a.status or 0) == 0 else 1,
-    } for a in accounts]
+    acc_list = []
+    for a in accounts:
+        acc_list.append({
+            "account_id": a.id,
+            "exchange": a.exchange,
+            "account_type": a.account_type,
+            "api_key": a.api_key or "",
+            "api_secret": a.api_secret or "",
+            "passphrase": (a.passphrase or "") if a.passphrase else None,
+            "balance": float(a.balance or 0),
+            "futures_balance": float(a.futures_balance or 0),
+            "futures_available": float(a.futures_available or 0),
+            "status": 2 if (a.status or 0) == 0 else 1,
+        })
     # 策略
     strategies = svc.get_user_strategies(user.id, tenant.id)
     active = sum(1 for s in strategies if s.get("status") == 1)
@@ -174,6 +179,7 @@ def user_info(
         "reward_usdt": float(user.reward_usdt or 0),
         "total_reward": float(user.total_reward or 0),
         "withdrawn_reward": float(user.withdrawn_reward or 0),
+        "bound_exchanges": list({a.exchange for a in accounts}),
         "accounts": acc_list,
         "active_strategies": active,
         "total_profit": total_profit,

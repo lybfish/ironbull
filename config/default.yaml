@@ -103,7 +103,7 @@ signal_cooldown_minutes: 60
 heartbeat_timeout: 10.0              # 心跳 HTTP 超时（秒）
 
 # Monitor Daemon 监控告警
-monitor_enabled: true                # 是否启用监控守护
+monitor_enabled: false               # 是否启用监控守护
 monitor_interval: 60                 # 巡检间隔（秒）
 monitor_services:                    # 要巡检的服务列表
   - name: data-api
