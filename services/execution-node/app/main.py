@@ -327,6 +327,16 @@ async def _run_one(
         exchange_order_id = str(result.exchange_order_id) if result.exchange_order_id else None
         # 不在交易所挂止盈止损单，由中心 position_monitor 自管到价平仓
 
+        # 如果 LiveTrader 返回了非 FILLED 状态（如早期校验失败），提取错误信息
+        error_msg = None
+        if not ok:
+            error_msg = getattr(result, "error_message", None) or getattr(result, "error_code", None)
+            if error_msg:
+                log.warning("order not filled", account_id=task.account_id,
+                            exchange=task.exchange, status=str(result.status),
+                            error_code=getattr(result, "error_code", None),
+                            error_message=getattr(result, "error_message", None))
+
         # 张数→币数量转换（Gate/OKX 合约以张为单位，需 × contractSize 得到真实币量）
         # 统一转换：张数→币数量
         coin_qty = filled_qty
@@ -349,7 +359,7 @@ async def _run_one(
             "exchange_order_id": exchange_order_id,
             "filled_quantity": coin_qty,
             "filled_price": filled_price,
-            "error": None,
+            "error": error_msg,
         }
     except Exception as e:
         try:

@@ -937,6 +937,17 @@ async def _execute_signal_for_target(
         ok = order_result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
         filled_qty = order_result.filled_quantity or 0
         filled_price = order_result.filled_price or entry_price
+
+        # 如果 LiveTrader 返回了非 FILLED 状态（如金额不够 1 张合约），提取错误信息
+        error_msg = None
+        if not ok:
+            error_msg = getattr(order_result, "error_message", None) or getattr(order_result, "error_code", None)
+            if error_msg:
+                log.warning("order not filled", account_id=target.account_id,
+                            exchange=target.exchange, status=str(order_result.status),
+                            error_code=getattr(order_result, "error_code", None),
+                            error_message=getattr(order_result, "error_message", None))
+
         # 不自管挂交易所止盈止损单，SL/TP 只写入持仓表，由 position_monitor 到价平仓
         sl_tp_ok = False
         if ok and (stop_loss or take_profit) and filled_qty > 0:
@@ -960,6 +971,7 @@ async def _execute_signal_for_target(
             "filled_quantity": filled_qty,
             "filled_price": filled_price,
             "sl_tp_set": sl_tp_ok,
+            "error": error_msg,
         }
     except Exception as e:
         try:
