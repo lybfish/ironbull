@@ -8,6 +8,7 @@ Execution Node - 子服务器执行端
 
 import sys
 import os
+import math
 import asyncio
 from contextlib import asynccontextmanager
 from typing import Dict, List, Any, Optional
@@ -614,7 +615,8 @@ class ClosePositionRequest(BaseModel):
     market_type: str = "future"
     symbol: str
     side: str  # "BUY" or "SELL"（反向平仓方向）
-    amount_usdt: float  # 用 USDT 金额（= 币数量 × 当前价），LiveTrader 自动换算合约张数
+    amount_usdt: float = 0  # 用 USDT 金额（回退方案，不推荐平仓使用）
+    close_quantity: Optional[float] = None  # 精确平仓数量（币，如 2.29 SOL），优先于 amount_usdt
     trigger_type: str = "SL"  # "SL" or "TP"
     position_side: Optional[str] = None  # 被平仓位方向 LONG/SHORT，必传否则会按开仓推导成反向
 
@@ -634,28 +636,62 @@ async def _close_position_one(req: ClosePositionRequest, sandbox: bool) -> Dict[
     )
     try:
         await trader.exchange.load_markets()
-        # 获取当前价格作为参考
         ccxt_sym = trader._ccxt_symbol(symbol)
         ticker = await trader.exchange.fetch_ticker(ccxt_sym)
         current_price = float(ticker.get("last") or ticker.get("close") or 0)
 
-        # 用 amount_usdt 让 LiveTrader 内部统一换算（处理合约张数、精度等）
-        # position_side 必传：平的是当前持仓方向，否则 create_order 会按 side 推导成开反向仓
         pos_side = (req.position_side or "").strip().upper() or ("LONG" if order_side == OrderSide.SELL else "SHORT")
-        result = await trader.create_order(
-            symbol=symbol,
-            side=order_side,
-            order_type=OrderType.MARKET,
-            amount_usdt=req.amount_usdt,
-            price=current_price,
-            signal_id=f"PM_{req.trigger_type}",
-            trade_type="CLOSE",
-            close_reason=req.trigger_type,
-            position_side=pos_side,
-        )
+
+        # ── 优先使用精确币数量（close_quantity），避免 qty→USDT→qty 双重转换精度丢失 ──
+        if req.close_quantity and req.close_quantity > 0:
+            coin_qty_requested = req.close_quantity
+            market = trader.exchange.markets.get(ccxt_sym, {})
+            cs = float(market.get("contractSize") or 0)
+            eid = getattr(trader.exchange, "id", "")
+            # Gate/OKX 合约按张计：币数量 / contractSize → 张数（向上取整确保全部平仓）
+            if cs > 0 and eid in ("gateio", "okx") and (req.market_type or "future") == "future":
+                exchange_qty = math.ceil(coin_qty_requested / cs)
+            else:
+                # Binance 等以币为单位：直接用精确数量，仅做精度舍入
+                exchange_qty = float(trader.exchange.amount_to_precision(ccxt_sym, coin_qty_requested))
+            log.info(f"[NODE] {req.trigger_type}平仓(精确数量)",
+                     account_id=req.account_id, symbol=symbol,
+                     coin_qty=coin_qty_requested, exchange_qty=exchange_qty,
+                     contract_size=cs, exchange=eid)
+            result = await trader.create_order(
+                symbol=symbol,
+                side=order_side,
+                order_type=OrderType.MARKET,
+                quantity=exchange_qty,
+                price=current_price,
+                signal_id=f"PM_{req.trigger_type}",
+                trade_type="CLOSE",
+                close_reason=req.trigger_type,
+                position_side=pos_side,
+            )
+        else:
+            # 回退：用 amount_usdt 换算（旧逻辑，可能产生精度偏差）
+            log.info(f"[NODE] {req.trigger_type}平仓(USDT换算,回退)",
+                     account_id=req.account_id, symbol=symbol,
+                     amount_usdt=req.amount_usdt)
+            result = await trader.create_order(
+                symbol=symbol,
+                side=order_side,
+                order_type=OrderType.MARKET,
+                amount_usdt=req.amount_usdt,
+                price=current_price,
+                signal_id=f"PM_{req.trigger_type}",
+                trade_type="CLOSE",
+                close_reason=req.trigger_type,
+                position_side=pos_side,
+            )
+
         ok = result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
         filled_qty = result.filled_quantity or 0
         filled_price = result.filled_price or current_price
+        error_msg = None
+        if not ok:
+            error_msg = getattr(result, "error_message", None) or None
 
         # 张数→币数量转换
         coin_qty = filled_qty
@@ -677,7 +713,7 @@ async def _close_position_one(req: ClosePositionRequest, sandbox: bool) -> Dict[
             "filled_quantity": coin_qty,
             "filled_price": filled_price,
             "trigger_type": req.trigger_type,
-            "error": None,
+            "error": error_msg,
         }
     except Exception as e:
         try:

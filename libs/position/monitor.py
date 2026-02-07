@@ -26,6 +26,7 @@ Position Monitor - 自管止盈止损监控（分布式架构）
 """
 
 import asyncio
+import math
 import time
 import threading
 from collections import defaultdict
@@ -294,9 +295,8 @@ async def _close_position_local(
     if qty <= 0:
         return False
 
-    # DB 存的是币数量（如 0.1 ETH），但 Gate/OKX 合约需要张数。
-    # 用 amount_usdt 让 LiveTrader 内部统一做 币→张 转换，避免单位错误。
-    amount_usdt = qty * current_price
+    # 平仓时直接用精确币数量，避免 qty→USDT→qty 双重转换精度丢失导致残留仓位
+    amount_usdt = qty * current_price  # 仅用于日志
 
     settlement_svc = TradeSettlementService(
         session=session,
@@ -325,11 +325,27 @@ async def _close_position_local(
             tp=float(position.take_profit) if position.take_profit else None,
         )
         pm_signal_id = gen_id("PM")
+
+        # 将币数量转为交易所下单数量（Gate/OKX 需要张数，Binance 直接用币数量）
+        await trader.exchange.load_markets()
+        ccxt_sym = trader._ccxt_symbol(position.symbol)
+        market_info = trader.exchange.markets.get(ccxt_sym, {})
+        cs = float(market_info.get("contractSize") or 0)
+        eid = getattr(trader.exchange, "id", "")
+        if cs > 0 and eid in ("gateio", "okx") and (position.market_type or "future") == "future":
+            exchange_qty = math.ceil(qty / cs)  # 向上取整确保全部平仓
+        else:
+            exchange_qty = float(trader.exchange.amount_to_precision(ccxt_sym, qty))
+
+        log.info(f"[LOCAL] {trigger_type}平仓(精确数量)",
+                 account_id=position.account_id, symbol=position.symbol,
+                 coin_qty=qty, exchange_qty=exchange_qty, contract_size=cs, exchange=eid)
+
         result = await trader.create_order(
             symbol=position.symbol,
             side=close_side,
             order_type=OrderType.MARKET,
-            amount_usdt=amount_usdt,
+            quantity=exchange_qty,  # 直接传精确数量，不走 amount_usdt 换算
             price=current_price,
             signal_id=pm_signal_id,
             trade_type="CLOSE",
@@ -394,7 +410,8 @@ async def _close_position_remote(
     if qty <= 0:
         return False
 
-    # DB 存币数量，传 amount_usdt 让节点侧 LiveTrader 自动做 币→张 转换
+    # 传精确币数量（close_quantity），避免 qty→USDT→qty 双重转换精度丢失导致残留仓位
+    # amount_usdt 仅作回退参考
     amount_usdt = qty * current_price
 
     payload = {
@@ -408,6 +425,7 @@ async def _close_position_remote(
         "symbol": position.symbol,
         "side": close_side,
         "amount_usdt": round(amount_usdt, 2),
+        "close_quantity": qty,  # 精确币数量，节点侧优先使用
         "trigger_type": trigger_type,
         "position_side": side,  # 被平仓位方向 LONG/SHORT，节点侧必传否则会开反向仓
     }
