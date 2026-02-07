@@ -713,9 +713,13 @@ class LiveTrader(Trader):
             pos_side = self._future_position_side(side, position_side)
             if pos_side:
                 params["positionSide"] = pos_side
-            # ★ 平仓单必须传 reduceOnly，否则交易所会当成开反向仓
+            # ★ 平仓单：多数交易所传 reduceOnly 避免开反向仓；Binance 双向持仓模式不允许传 reduceOnly
             if self.market_type == "future" and (trade_type or "OPEN") == "CLOSE":
-                params["reduceOnly"] = True
+                if self.exchange_name == "binanceusdm" and pos_side:
+                    # Binance Hedge Mode: API 禁止传 reduceOnly，用 positionSide + side 已能标识平仓
+                    pass
+                else:
+                    params["reduceOnly"] = True
             # Binance 非平仓时若误带了 reduceOnly 则移除
             if self.exchange_name == "binanceusdm" and (trade_type or "OPEN") != "CLOSE" and "reduceOnly" in params:
                 params.pop("reduceOnly", None)
