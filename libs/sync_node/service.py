@@ -165,23 +165,64 @@ def sync_positions_from_nodes(
                 continue
             acc = acc_by_id.get(r["account_id"])
             exchange = (acc.exchange or "binance") if acc else "binance"
+
+            # 记录本次同步到的持仓 key，用于关闭交易所已无但数据库仍 OPEN 的幽灵持仓
+            synced_keys = set()
+
             for pos in r.get("positions") or []:
+                sym = pos.get("symbol") or ""
+                ps = pos.get("position_side") or "NONE"
+                qty = Decimal(str(pos.get("quantity", 0)))
                 try:
                     position_svc.sync_position_from_exchange(
                         tenant_id=r["tenant_id"],
                         account_id=r["account_id"],
-                        symbol=pos.get("symbol") or "",
+                        symbol=sym,
                         exchange=exchange,
                         market_type="future",
-                        position_side=pos.get("position_side") or "NONE",
-                        quantity=Decimal(str(pos.get("quantity", 0))),
+                        position_side=ps,
+                        quantity=qty,
                         avg_cost=Decimal(str(pos.get("entry_price", 0))),
                     )
+                    if qty > 0:
+                        synced_keys.add((sym, ps))
                     total_ok += 1
                 except Exception as e:
                     log.warning("sync_positions write failed",
-                                account_id=r.get("account_id"), symbol=pos.get("symbol"), error=str(e))
+                                account_id=r.get("account_id"), symbol=sym, error=str(e))
                     total_fail += 1
+
+            # 关闭交易所已无持仓但数据库仍 OPEN 的记录
+            try:
+                from libs.position.repository import PositionRepository
+                pos_repo = PositionRepository(session)
+                open_positions = pos_repo.get_positions_by_account(
+                    tenant_id=r["tenant_id"],
+                    account_id=r["account_id"],
+                    has_position=True,
+                )
+                for db_pos in open_positions:
+                    if db_pos.exchange != exchange:
+                        continue
+                    key = (db_pos.symbol, db_pos.position_side)
+                    if key not in synced_keys:
+                        log.info("关闭幽灵持仓（交易所已无）",
+                                 account_id=r["account_id"], symbol=db_pos.symbol,
+                                 position_side=db_pos.position_side, exchange=exchange)
+                        position_svc.sync_position_from_exchange(
+                            tenant_id=r["tenant_id"],
+                            account_id=r["account_id"],
+                            symbol=db_pos.symbol,
+                            exchange=exchange,
+                            market_type=db_pos.market_type or "future",
+                            position_side=db_pos.position_side,
+                            quantity=Decimal("0"),
+                            avg_cost=Decimal("0"),
+                        )
+            except Exception as e:
+                log.warning("close stale positions failed",
+                            account_id=r.get("account_id"), error=str(e))
+
     return {"ok": total_ok, "fail": total_fail, "errors": errors}
 
 
