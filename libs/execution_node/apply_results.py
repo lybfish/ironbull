@@ -10,6 +10,7 @@ from typing import Dict, List, Any
 from libs.core import get_logger, gen_id
 from libs.member import ExecutionTarget
 from libs.trading.settlement import TradeSettlementService
+from libs.exchange.utils import normalize_symbol
 
 log = get_logger("execution-node-apply")
 
@@ -25,7 +26,8 @@ def apply_remote_results(
     targets_by_account: account_id -> ExecutionTarget（含 tenant_id, account_id, user_id, exchange, market_type）
     """
     outcome = []
-    symbol = (signal or {}).get("symbol", "")
+    # 规范化 symbol（统一为 BTC/USDT 格式，防止 BTCUSDT 与 BTC/USDT 不一致）
+    symbol = normalize_symbol((signal or {}).get("symbol", ""), "binance")
     side = (signal or {}).get("side", "BUY")
     exchange_default = "binance"
     for item in response_results:

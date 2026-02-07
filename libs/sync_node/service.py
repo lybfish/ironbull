@@ -173,6 +173,11 @@ def sync_positions_from_nodes(
                 sym = pos.get("symbol") or ""
                 ps = pos.get("position_side") or "NONE"
                 qty = Decimal(str(pos.get("quantity", 0)))
+                lev = int(pos.get("leverage") or 0) or None
+                upnl_raw = pos.get("unrealized_pnl")
+                upnl = Decimal(str(upnl_raw)) if upnl_raw is not None else None
+                liq_raw = pos.get("liquidation_price")
+                liq = Decimal(str(liq_raw)) if liq_raw is not None else None
                 try:
                     position_svc.sync_position_from_exchange(
                         tenant_id=r["tenant_id"],
@@ -183,6 +188,9 @@ def sync_positions_from_nodes(
                         position_side=ps,
                         quantity=qty,
                         avg_cost=Decimal(str(pos.get("entry_price", 0))),
+                        leverage=lev,
+                        unrealized_pnl=upnl,
+                        liquidation_price=liq,
                     )
                     if qty > 0:
                         synced_keys.add((sym, ps))

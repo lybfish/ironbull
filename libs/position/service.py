@@ -388,6 +388,9 @@ class PositionService:
         position_side: str,
         quantity: Decimal,
         avg_cost: Decimal,
+        leverage: int = None,
+        unrealized_pnl: Decimal = None,
+        liquidation_price: Decimal = None,
     ) -> PositionDTO:
         """从交易所同步单条持仓到 fact_position（按 key 存在则更新）"""
         position, _ = self.position_repo.get_or_create(
@@ -404,6 +407,13 @@ class PositionService:
         position.avg_cost = avg_cost
         position.total_cost = quantity * avg_cost
         position.status = "OPEN" if quantity > 0 else "CLOSED"
+        # 合约附加字段（从交易所同步）
+        if leverage is not None:
+            position.leverage = leverage
+        if unrealized_pnl is not None:
+            position.unrealized_pnl = unrealized_pnl
+        if liquidation_price is not None:
+            position.liquidation_price = liquidation_price
         self.position_repo.update(position)
         return self._to_dto(position)
     
@@ -635,6 +645,7 @@ class PositionService:
             avg_cost=float(position.avg_cost) if position.avg_cost else 0,
             total_cost=float(position.total_cost) if position.total_cost else 0,
             realized_pnl=float(position.realized_pnl) if position.realized_pnl else 0,
+            unrealized_pnl=float(position.unrealized_pnl) if position.unrealized_pnl else 0,
             leverage=position.leverage,
             margin=float(position.margin) if position.margin else None,
             liquidation_price=float(position.liquidation_price) if position.liquidation_price else None,

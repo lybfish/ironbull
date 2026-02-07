@@ -715,24 +715,33 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
 
         # ── 持仓去重：检查每个账户是否已有同向持仓，有则跳过 ──
         from libs.position.repository import PositionRepository
+        from libs.exchange.utils import normalize_symbol
         pos_repo = PositionRepository(session)
-        symbol = (signal or {}).get("symbol", "")
+        raw_symbol = (signal or {}).get("symbol", "")
+        # 规范化 symbol → BTC/USDT 格式（数据库中可能存 BTCUSDT 或 BTC/USDT）
+        canonical_symbol = normalize_symbol(raw_symbol, "binance")
+        # 同步写入信号，保证后续存库也用规范格式
+        signal["symbol"] = canonical_symbol
+        symbol = canonical_symbol
         side_str = (signal or {}).get("side", "BUY").upper()
         # 合约：BUY→LONG, SELL→SHORT
         position_side = "LONG" if side_str == "BUY" else "SHORT"
 
         def _has_open_position(target) -> bool:
-            """检查目标账户是否已有同 symbol+同向 的 OPEN 持仓"""
+            """检查目标账户是否已有同 symbol+同向 的 OPEN 持仓（兼容两种 symbol 格式）"""
             try:
-                pos = pos_repo.get_by_key(
-                    tenant_id=target.tenant_id,
-                    account_id=target.account_id,
-                    symbol=symbol,
-                    exchange=target.exchange or "binance",
-                    position_side=position_side,
-                )
-                if pos and pos.quantity and float(pos.quantity) > 0:
-                    return True
+                # 同时检查规范格式（BTC/USDT）和无斜杠格式（BTCUSDT）
+                variants = set([symbol, symbol.replace("/", "")])
+                for s in variants:
+                    pos = pos_repo.get_by_key(
+                        tenant_id=target.tenant_id,
+                        account_id=target.account_id,
+                        symbol=s,
+                        exchange=target.exchange or "binance",
+                        position_side=position_side,
+                    )
+                    if pos and pos.quantity and float(pos.quantity) > 0:
+                        return True
             except Exception:
                 pass
             return False

@@ -58,6 +58,7 @@ class Position(Base):
     avg_cost = Column(DECIMAL(20, 8), nullable=False, default=0, comment="平均成本价")
     total_cost = Column(DECIMAL(20, 8), nullable=False, default=0, comment="总成本")
     realized_pnl = Column(DECIMAL(20, 8), nullable=False, default=0, comment="已实现盈亏")
+    unrealized_pnl = Column(DECIMAL(20, 8), nullable=True, comment="未实现盈亏（从交易所同步）")
     
     # 合约专用
     leverage = Column(Integer, nullable=True, comment="杠杆倍数")
@@ -103,6 +104,7 @@ class Position(Base):
             "avg_cost": float(self.avg_cost) if self.avg_cost else 0,
             "total_cost": float(self.total_cost) if self.total_cost else 0,
             "realized_pnl": float(self.realized_pnl) if self.realized_pnl else 0,
+            "unrealized_pnl": float(self.unrealized_pnl) if self.unrealized_pnl else 0,
             "leverage": self.leverage,
             "margin": float(self.margin) if self.margin else None,
             "liquidation_price": float(self.liquidation_price) if self.liquidation_price else None,
