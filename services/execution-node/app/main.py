@@ -365,6 +365,87 @@ def api_execute(req: ExecuteRequest, _: None = Depends(verify_center_token)):
     return {"success": True, "results": results}
 
 
+async def _sync_trades_one(task: TaskItem, sandbox: bool, symbols: list = None, since_ms: int = None) -> Dict[str, Any]:
+    """节点侧：查交易所最近成交记录，不写库，返回结果"""
+    trader = LiveTrader(
+        exchange=task.exchange or "binance",
+        api_key=task.api_key,
+        api_secret=task.api_secret,
+        passphrase=task.passphrase,
+        sandbox=sandbox,
+        market_type=task.market_type or "future",
+        settlement_service=None,
+    )
+    try:
+        all_trades = []
+        target_symbols = symbols or ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"]
+        for sym in target_symbols:
+            try:
+                trades = await trader.exchange.fetch_my_trades(sym, since=since_ms, limit=100)
+                for t in trades or []:
+                    raw_sym = t.get("symbol") or sym
+                    canonical = to_canonical_symbol(raw_sym, "future")
+                    side = (t.get("side") or "buy").upper()
+                    all_trades.append({
+                        "trade_id": str(t.get("id") or ""),
+                        "order_id": str(t.get("order") or ""),
+                        "symbol": canonical or raw_sym,
+                        "side": side,
+                        "price": float(t.get("price") or 0),
+                        "quantity": float(t.get("amount") or 0),
+                        "cost": float(t.get("cost") or 0),
+                        "fee": float((t.get("fee") or {}).get("cost", 0) or 0),
+                        "fee_currency": (t.get("fee") or {}).get("currency", "USDT"),
+                        "timestamp": t.get("timestamp"),
+                        "datetime": t.get("datetime"),
+                    })
+            except Exception as e:
+                log.warning("fetch_my_trades skip", symbol=sym, error=str(e))
+        await trader.close()
+        return {
+            "account_id": task.account_id,
+            "tenant_id": task.tenant_id,
+            "success": True,
+            "trades": all_trades,
+            "error": None,
+        }
+    except Exception as e:
+        try:
+            await trader.close()
+        except Exception:
+            pass
+        log.error("sync_trades error", account_id=task.account_id, error=str(e))
+        return {
+            "account_id": task.account_id,
+            "tenant_id": task.tenant_id,
+            "success": False,
+            "trades": [],
+            "error": str(e),
+        }
+
+
+class SyncTradesRequest(BaseModel):
+    tasks: List[TaskItem]
+    sandbox: bool = True
+    symbols: List[str] = None
+    since_ms: int = None
+
+
+@app.post("/api/sync-trades")
+def api_sync_trades(req: SyncTradesRequest, _: None = Depends(verify_center_token)):
+    """同步成交：对 tasks 中每个账户查交易所成交记录，返回 results（不写库）"""
+    if not req.tasks:
+        return {"success": True, "results": []}
+    results = []
+    for task in req.tasks:
+        r = asyncio.run(_sync_trades_one(
+            task=task, sandbox=req.sandbox,
+            symbols=req.symbols, since_ms=req.since_ms
+        ))
+        results.append(r)
+    return {"success": True, "results": results}
+
+
 @app.post("/api/sync-balance")
 def api_sync_balance(req: SyncTasksRequest, _: None = Depends(verify_center_token)):
     """同步余额：对 tasks 中每个账户查交易所余额，返回 results（不写库）"""
