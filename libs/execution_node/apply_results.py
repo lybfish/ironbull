@@ -60,9 +60,24 @@ def apply_remote_results(
                 account_id=target.account_id,
                 currency="USDT",
             )
-            settlement_svc.submit_order(order_id=order_id, exchange_order_id=exchange_order_id)
+            # 1) 先创建订单记录（fact_order），否则 submit_order / settle_fill 找不到订单
+            order_dto = settlement_svc.create_order(
+                symbol=symbol or "BTC/USDT",
+                exchange=target.exchange or exchange_default,
+                side=(side or "BUY").upper(),
+                order_type="MARKET",
+                quantity=Decimal(str(filled_qty)),
+                price=Decimal(str(filled_price)),
+                signal_id=(signal or {}).get("signal_id"),
+                position_side=position_side,
+                market_type=market_type,
+            )
+            db_order_id = order_dto.order_id  # 数据库中的订单ID
+            # 2) 提交订单（写入 exchange_order_id，更新状态）
+            settlement_svc.submit_order(order_id=db_order_id, exchange_order_id=exchange_order_id)
+            # 3) 结算成交（写 fact_fill → fact_position → fact_ledger）
             settlement_svc.settle_fill(
-                order_id=order_id,
+                order_id=db_order_id,
                 symbol=symbol or "BTC/USDT",
                 exchange=target.exchange or exchange_default,
                 side=(side or "BUY").upper(),
@@ -79,7 +94,8 @@ def apply_remote_results(
                 "account_id": account_id,
                 "user_id": target.user_id,
                 "success": True,
-                "order_id": order_id,
+                "order_id": db_order_id,
+                "exchange_order_id": exchange_order_id,
                 "filled_quantity": filled_qty,
                 "filled_price": filled_price,
             })

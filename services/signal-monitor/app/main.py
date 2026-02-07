@@ -713,6 +713,30 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
         sandbox = config.get_bool("exchange_sandbox", True)
         results = []
 
+        # ── 持仓去重：检查每个账户是否已有同向持仓，有则跳过 ──
+        from libs.position.repository import PositionRepository
+        pos_repo = PositionRepository(session)
+        symbol = (signal or {}).get("symbol", "")
+        side_str = (signal or {}).get("side", "BUY").upper()
+        # 合约：BUY→LONG, SELL→SHORT
+        position_side = "LONG" if side_str == "BUY" else "SHORT"
+
+        def _has_open_position(target) -> bool:
+            """检查目标账户是否已有同 symbol+同向 的 OPEN 持仓"""
+            try:
+                pos = pos_repo.get_by_key(
+                    tenant_id=target.tenant_id,
+                    account_id=target.account_id,
+                    symbol=symbol,
+                    exchange=target.exchange or "binance",
+                    position_side=position_side,
+                )
+                if pos and pos.quantity and float(pos.quantity) > 0:
+                    return True
+            except Exception:
+                pass
+            return False
+
         # 按 execution_node_id 分组：None/0=本机，其余=远程节点
         by_node = defaultdict(list)
         for t in targets:
@@ -721,6 +745,22 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
 
         local_targets = by_node.get(0, [])
         for target in local_targets:
+            # 持仓去重检查
+            if _has_open_position(target):
+                log.info(
+                    "跳过已有持仓账户",
+                    account_id=target.account_id,
+                    symbol=symbol,
+                    position_side=position_side,
+                )
+                results.append({
+                    "account_id": target.account_id,
+                    "user_id": target.user_id,
+                    "success": False,
+                    "error": f"已有 {symbol} {position_side} 持仓，跳过",
+                    "skipped": True,
+                })
+                continue
             amount, leverage = _resolve_amount_leverage_for_tenant(repo, strategy, target.tenant_id)
             target_amount = round(amount * (target.ratio / 100), 2) if target.ratio and target.ratio != 100 else amount
             signal_for_target = dict(signal)
@@ -745,9 +785,16 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
                 for t in remote_targets:
                     results.append({"account_id": t.account_id, "user_id": t.user_id, "success": False, "error": "节点 base_url 为空"})
                 continue
-            # 每个 target 按租户解析 amount/leverage，再按 ratio 缩放金额
+            # 每个 target 按租户解析 amount/leverage，再按 ratio 缩放金额；跳过已有持仓的账户
             task_list = []
             for t in remote_targets:
+                if _has_open_position(t):
+                    log.info("跳过已有持仓账户(远程)", account_id=t.account_id, symbol=symbol, position_side=position_side)
+                    results.append({
+                        "account_id": t.account_id, "user_id": t.user_id,
+                        "success": False, "error": f"已有 {symbol} {position_side} 持仓，跳过", "skipped": True,
+                    })
+                    continue
                 amount, leverage = _resolve_amount_leverage_for_tenant(repo, strategy, t.tenant_id)
                 task_amount = round(amount * (t.ratio / 100), 2) if t.ratio and t.ratio != 100 else amount
                 task_list.append({
@@ -1124,5 +1171,80 @@ def trading_history():
     })
 
 
+# ========== 自动同步后台线程 ==========
+
+SYNC_INTERVAL = config.get_int("sync_interval_seconds", 300)  # 默认 5 分钟
+_sync_stop_event = threading.Event()
+
+
+def _sync_loop():
+    """后台定时同步：余额、持仓、成交 → 数据库"""
+    from libs.sync_node.service import (
+        sync_balance_from_nodes,
+        sync_positions_from_nodes,
+        sync_trades_from_nodes,
+    )
+    log.info("自动同步线程启动", interval=SYNC_INTERVAL)
+    while not _sync_stop_event.is_set():
+        try:
+            session = get_session()
+            try:
+                log.debug("开始自动同步: 余额")
+                sync_balance_from_nodes(session)
+                log.debug("开始自动同步: 持仓")
+                sync_positions_from_nodes(session)
+                log.debug("开始自动同步: 成交")
+                sync_trades_from_nodes(session)
+                session.commit()
+                log.info("自动同步完成")
+            except Exception as e:
+                session.rollback()
+                log.warning("自动同步失败", error=str(e))
+            finally:
+                session.close()
+        except Exception as e:
+            log.warning("自动同步 session 创建失败", error=str(e))
+        _sync_stop_event.wait(SYNC_INTERVAL)
+    log.info("自动同步线程已停止")
+
+
+def _auto_start_monitor():
+    """
+    若配置了 auto_trade_enabled=true，Flask 进程启动后自动开启监控循环，
+    无需手动 POST /api/start。同时启动自动同步线程。
+    """
+    global monitor_thread, monitor_state
+    if monitor_state["running"]:
+        return
+    auto_enabled = config.get_bool("auto_trade_enabled", False)
+    if not auto_enabled:
+        log.info("auto_trade_enabled=false，监控不自动启动（可手动 POST /api/start）")
+        return
+    # 启动信号监控
+    stop_event.clear()
+    monitor_state["running"] = True
+    monitor_thread = threading.Thread(target=monitor_loop, daemon=True)
+    monitor_thread.start()
+    log.info("监控已自动启动 (auto_trade_enabled=true)")
+    # 启动自动同步线程
+    _sync_stop_event.clear()
+    sync_thread = threading.Thread(target=_sync_loop, daemon=True)
+    sync_thread.start()
+
+
+# Flask 启动后自动启动监控（仅在非 import 场景执行一次）
+_auto_start_done = False
+
+
+@app.before_request
+def _maybe_auto_start():
+    """利用第一次 HTTP 请求触发自动启动（兼容 flask run / gunicorn / uvicorn）"""
+    global _auto_start_done
+    if not _auto_start_done:
+        _auto_start_done = True
+        _auto_start_monitor()
+
+
 if __name__ == "__main__":
+    _auto_start_monitor()
     app.run(host="0.0.0.0", port=8020, debug=False)

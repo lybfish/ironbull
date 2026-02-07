@@ -1423,7 +1423,7 @@ class LiveTrader(Trader):
                 logger.debug("order record created (settlement)", order_id=order_dto.order_id)
                 return order_dto.order_id
             except Exception as e:
-                logger.warning("failed to create order record (settlement)", error=str(e))
+                logger.error("failed to create order record (settlement)", error=str(e), symbol=symbol, side=side.value)
                 return None
         
         # 旧版：使用 order_trade_service
@@ -1511,7 +1511,7 @@ class LiveTrader(Trader):
                         )
                 
             except Exception as e:
-                logger.warning("settlement service error", order_id=order_id, error=str(e))
+                logger.error("settlement service error", order_id=order_id, error=str(e))
             return
         
         # 旧版：仅使用 order_trade_service
