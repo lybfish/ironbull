@@ -483,7 +483,7 @@ headers = {
 | email          | string | 是   | 用户邮箱 |
 | strategy_id    | int    | 是   | 策略 ID（来自策略列表） |
 | account_id     | int    | 是   | 交易所账户 ID（用户详情中 accounts[].account_id） |
-| mode           | int    | 否   | 默认 2 |
+| mode           | int    | 否   | 执行模式：1=**单次模式**（仅执行一次，触发后不再跟单），2=**循环模式**（每次信号都执行），默认 2 |
 | min_point_card | float  | 否   | 开通所需最小点卡余额，默认 1.0 |
 
 **响应 data**：
@@ -493,7 +493,7 @@ headers = {
 | binding_id  | int  | 绑定记录 ID |
 | strategy_id | int  | 策略 ID |
 | account_id  | int  | 账户 ID |
-| mode        | int  | 模式 |
+| mode        | int  | 执行模式（1=单次，2=循环） |
 
 **错误**：策略未对本租户开放或已下架、用户不存在、点卡不足、账户不存在等。
 
