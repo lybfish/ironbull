@@ -115,6 +115,15 @@
                 :value="ex"/>
             </el-select>
           </el-form-item>
+          <el-form-item label="账户">
+            <el-select v-model="where.account_id" placeholder="全部" clearable style="width: 160px">
+              <el-option
+                v-for="acc in accountOptions"
+                :key="acc.id"
+                :label="'[' + (acc.exchange || '').toUpperCase() + '] #' + acc.id"
+                :value="acc.id"/>
+            </el-select>
+          </el-form-item>
           <el-form-item>
             <el-button type="primary" icon="el-icon-search" @click="fetchData">查询</el-button>
             <el-button icon="el-icon-refresh-left" @click="resetQuery">重置</el-button>
@@ -158,6 +167,11 @@
             <el-tag size="mini" effect="plain">{{ (row.exchange || '').toUpperCase() }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="account_id" label="账户" width="70" align="center">
+          <template slot-scope="{row}">
+            <span class="text-muted">#{{ row.account_id }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="方向" width="70" align="center">
           <template slot-scope="{row}">
             <el-tag
@@ -173,14 +187,14 @@
             {{ formatNum(row.quantity) }}
           </template>
         </el-table-column>
-        <el-table-column prop="entry_price" label="开仓价" width="120" align="right">
+        <el-table-column label="开仓均价" width="120" align="right">
           <template slot-scope="{row}">
-            {{ formatPrice(row.entry_price) }}
+            {{ formatPrice(row.avg_cost) }}
           </template>
         </el-table-column>
-        <el-table-column prop="mark_price" label="标记价" width="120" align="right">
+        <el-table-column label="名义价值" width="130" align="right">
           <template slot-scope="{row}">
-            {{ formatPrice(row.mark_price) }}
+            {{ formatMoney(calcNotional(row)) }}
           </template>
         </el-table-column>
         <el-table-column prop="leverage" label="杠杆" width="75" align="center">
@@ -188,12 +202,7 @@
             <el-tag size="mini" type="warning" effect="plain">{{ row.leverage || '-' }}x</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="margin_mode" label="保证金" width="80" align="center">
-          <template slot-scope="{row}">
-            <span>{{ marginLabel(row.margin_mode) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="未实现盈亏" width="150" align="right">
+        <el-table-column label="未实现盈亏" width="140" align="right">
           <template slot-scope="{row}">
             <div class="pnl-cell">
               <span
@@ -210,15 +219,15 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column prop="notional_value" label="名义价值" width="120" align="right">
-          <template slot-scope="{row}">
-            {{ formatMoney(row.notional_value) }}
-          </template>
-        </el-table-column>
         <el-table-column prop="liquidation_price" label="强平价" width="120" align="right">
           <template slot-scope="{row}">
             <span class="liq-price" v-if="row.liquidation_price">{{ formatPrice(row.liquidation_price) }}</span>
             <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="开仓时间" width="170">
+          <template slot-scope="{row}">
+            {{ formatTime(row.opened_at) }}
           </template>
         </el-table-column>
         <el-table-column prop="updated_at" label="更新时间" min-width="170">
@@ -235,6 +244,7 @@
 
 <script>
 import { getPositions } from '@/api/trading'
+import { getExchangeAccounts } from '@/api/admin'
 
 export default {
   name: 'PositionList',
@@ -246,11 +256,13 @@ export default {
       where: {
         symbol: '',
         position_side: '',
-        exchange: ''
+        exchange: '',
+        account_id: ''
       },
       autoRefresh: false,
       refreshTimer: null,
-      lastUpdateTime: ''
+      lastUpdateTime: '',
+      accountOptions: []
     }
   },
   computed: {
@@ -258,9 +270,11 @@ export default {
     exchangeOptions() {
       const set = new Set()
       this.list.forEach(r => { if (r.exchange) set.add(r.exchange) })
+      // 补充从账户列表中获取的交易所
+      this.accountOptions.forEach(a => { if (a.exchange) set.add(a.exchange) })
       return Array.from(set).sort()
     },
-    /** 前端二次过滤（方向 & 交易所） */
+    /** 前端二次过滤（方向 & 交易所 & 账户） */
     filteredList() {
       return this.list.filter(r => {
         if (this.where.position_side) {
@@ -269,6 +283,9 @@ export default {
         }
         if (this.where.exchange) {
           if ((r.exchange || '').toLowerCase() !== this.where.exchange.toLowerCase()) return false
+        }
+        if (this.where.account_id) {
+          if (r.account_id !== this.where.account_id) return false
         }
         return true
       })
@@ -283,7 +300,7 @@ export default {
       let profitCount = 0
       let lossCount = 0
       data.forEach(r => {
-        totalNotional += Number(r.notional_value) || 0
+        totalNotional += this.calcNotional(r)
         const pnl = Number(r.unrealized_pnl) || 0
         totalPnl += pnl
         if (this.isLong(r)) { longCount++ } else { shortCount++ }
@@ -302,6 +319,7 @@ export default {
   },
   mounted() {
     this.fetchData()
+    this.fetchAccounts()
   },
   beforeDestroy() {
     this.clearTimer()
@@ -311,7 +329,7 @@ export default {
     async fetchData() {
       this.loading = true
       try {
-        const params = {}
+        const params = { has_position: true }
         if (this.where.symbol) { params.symbol = this.where.symbol }
         const res = await getPositions(params)
         this.list = res.data.data || []
@@ -323,9 +341,24 @@ export default {
         this.loading = false
       }
     },
+    async fetchAccounts() {
+      try {
+        const res = await getExchangeAccounts({ status: 1 })
+        this.accountOptions = (res.data.data || res.data || [])
+      } catch (e) {
+        // 静默失败
+      }
+    },
     resetQuery() {
-      this.where = { symbol: '', position_side: '', exchange: '' }
+      this.where = { symbol: '', position_side: '', exchange: '', account_id: '' }
       this.fetchData()
+    },
+
+    /* ---------- 计算字段 ---------- */
+    calcNotional(row) {
+      const qty = Number(row.quantity) || 0
+      const price = Number(row.avg_cost) || 0
+      return qty * price
     },
 
     /* ---------- 自动刷新 ---------- */
@@ -357,7 +390,7 @@ export default {
       return side === 'long'
     },
     formatPrice(val) {
-      if (val === null || val === undefined || val === '') return '-'
+      if (val === null || val === undefined || val === '' || val === 0) return '-'
       const n = Number(val)
       if (isNaN(n)) return val
       if (n >= 1000) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -385,7 +418,7 @@ export default {
     },
     pnlPercent(row) {
       const pnl = Number(row.unrealized_pnl)
-      const notional = Number(row.notional_value)
+      const notional = this.calcNotional(row)
       if (!notional || isNaN(pnl) || isNaN(notional)) return null
       const pct = (pnl / notional) * 100
       const sign = pct >= 0 ? '+' : ''
@@ -395,13 +428,6 @@ export default {
       const n = Number(val)
       if (isNaN(n) || n === 0) return 'text-muted'
       return n > 0 ? 'text-success' : 'text-danger'
-    },
-    marginLabel(mode) {
-      if (!mode) return '-'
-      const m = mode.toLowerCase()
-      if (m === 'cross' || m === 'crossed') return '全仓'
-      if (m === 'isolated') return '逐仓'
-      return mode
     },
     formatTime(val) {
       if (!val) return '-'

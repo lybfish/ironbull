@@ -27,19 +27,28 @@
           <el-form-item label="标的">
             <el-input v-model="where.symbol" placeholder="如 BTC/USDT" clearable style="width:140px" @keyup.enter.native="onSearch"/>
           </el-form-item>
+          <el-form-item label="交易所">
+            <el-select v-model="where.exchange" placeholder="全部" clearable style="width:120px">
+              <el-option
+                v-for="ex in exchangeOptions"
+                :key="ex"
+                :label="ex.toUpperCase()"
+                :value="ex"/>
+            </el-select>
+          </el-form-item>
           <el-form-item label="状态">
             <el-select v-model="where.status" placeholder="全部" clearable style="width:120px">
-              <el-option label="PENDING" value="PENDING"/>
-              <el-option label="FILLED" value="FILLED"/>
-              <el-option label="CANCELLED" value="CANCELLED"/>
-              <el-option label="REJECTED" value="REJECTED"/>
-              <el-option label="PARTIAL" value="PARTIAL"/>
+              <el-option label="待处理" value="PENDING"/>
+              <el-option label="已成交" value="FILLED"/>
+              <el-option label="已取消" value="CANCELLED"/>
+              <el-option label="已拒绝" value="REJECTED"/>
+              <el-option label="部分成交" value="PARTIAL"/>
             </el-select>
           </el-form-item>
           <el-form-item label="方向">
             <el-select v-model="where.side" placeholder="全部" clearable style="width:100px">
-              <el-option label="买入" value="buy"/>
-              <el-option label="卖出" value="sell"/>
+              <el-option label="买入" value="BUY"/>
+              <el-option label="卖出" value="SELL"/>
             </el-select>
           </el-form-item>
           <el-form-item label="日期范围">
@@ -61,7 +70,7 @@
 
       <el-table
         v-loading="loading"
-        :data="list"
+        :data="filteredList"
         stripe
         border
         style="width:100%; margin-top:12px"
@@ -69,37 +78,62 @@
         :header-cell-style="{background:'#fafafa'}">
         <el-table-column prop="order_id" label="订单ID" width="160">
           <template slot-scope="{row}">
-            <span :title="row.order_id">{{ truncateId(row.order_id) }}</span>
+            <el-tooltip :content="row.order_id" placement="top">
+              <span class="id-text copyable" @click="copyId(row.order_id)">{{ truncateId(row.order_id) }}</span>
+            </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column prop="symbol" label="标的" width="110"/>
+        <el-table-column prop="symbol" label="标的" width="110">
+          <template slot-scope="{row}">
+            <span style="font-weight: 600;">{{ row.symbol }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="exchange" label="交易所" width="100" align="center">
           <template slot-scope="{row}">
-            <el-tag size="mini">{{ row.exchange }}</el-tag>
+            <el-tag size="mini" effect="plain">{{ (row.exchange || '').toUpperCase() }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="side" label="方向" width="80" align="center">
           <template slot-scope="{row}">
-            <el-tag :type="row.side === 'buy' || row.side === 'BUY' ? 'success' : 'danger'" size="mini">
-              {{ row.side === 'buy' || row.side === 'BUY' ? '买入' : '卖出' }}
+            <el-tag :type="isBuy(row) ? 'success' : 'danger'" size="mini" effect="dark">
+              {{ isBuy(row) ? '买入' : '卖出' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="order_type" label="类型" width="80"/>
-        <el-table-column prop="quantity" label="数量" width="100" align="right"/>
-        <el-table-column prop="filled_quantity" label="已成交" width="100" align="right"/>
-        <el-table-column prop="price" label="价格" width="100" align="right"/>
-        <el-table-column prop="avg_price" label="均价" width="100" align="right"/>
+        <el-table-column prop="order_type" label="类型" width="90" align="center">
+          <template slot-scope="{row}">
+            <span>{{ row.order_type }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="成交进度" width="140" align="center">
+          <template slot-scope="{row}">
+            <div class="progress-cell">
+              <el-progress
+                :percentage="fillPercent(row)"
+                :stroke-width="14"
+                :text-inside="true"
+                :color="fillPercent(row) >= 100 ? '#67c23a' : '#409eff'"
+                style="width: 100%;"/>
+              <span class="progress-text">{{ formatNum(row.filled_quantity) }} / {{ formatNum(row.quantity) }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="price" label="价格" width="110" align="right">
+          <template slot-scope="{row}">{{ formatPrice(row.price) }}</template>
+        </el-table-column>
+        <el-table-column prop="avg_price" label="成交均价" width="110" align="right">
+          <template slot-scope="{row}">{{ formatPrice(row.avg_price) }}</template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="100" align="center">
           <template slot-scope="{row}">
-            <el-tag :type="statusType(row.status)" size="mini">{{ row.status }}</el-tag>
+            <el-tag :type="statusType(row.status)" size="mini">{{ statusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="created_at" label="创建时间" min-width="170">
           <template slot-scope="{row}">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
       </el-table>
-      <el-empty v-if="!loading && list.length === 0" description="暂无订单"/>
+      <el-empty v-if="!loading && filteredList.length === 0" description="暂无订单"/>
 
       <div v-if="total > 0" class="pagination-wrap">
         <span class="total-tip">共 {{ total }} 条</span>
@@ -119,6 +153,7 @@
 
 <script>
 import { getOrders } from '@/api/trading'
+import { getExchangeAccounts } from '@/api/admin'
 
 export default {
   name: 'OrderList',
@@ -129,13 +164,28 @@ export default {
       total: 0,
       currentPage: 1,
       pageSize: 20,
-      where: { symbol: '', status: '', side: '', dateRange: null }
+      where: { symbol: '', status: '', side: '', exchange: '', dateRange: null },
+      accountOptions: []
     }
   },
   computed: {
+    exchangeOptions() {
+      const set = new Set()
+      this.list.forEach(r => { if (r.exchange) set.add(r.exchange) })
+      this.accountOptions.forEach(a => { if (a.exchange) set.add(a.exchange) })
+      return Array.from(set).sort()
+    },
+    filteredList() {
+      return this.list.filter(r => {
+        if (this.where.exchange) {
+          if ((r.exchange || '').toLowerCase() !== this.where.exchange.toLowerCase()) return false
+        }
+        return true
+      })
+    },
     stats() {
       const s = { filled: 0, cancelled: 0, pending: 0 }
-      this.list.forEach(row => {
+      this.filteredList.forEach(row => {
         const st = (row.status || '').toUpperCase()
         if (st === 'FILLED') s.filled++
         else if (st === 'CANCELLED' || st === 'REJECTED') s.cancelled++
@@ -146,28 +196,73 @@ export default {
   },
   mounted() {
     this.fetchData()
+    this.fetchAccounts()
   },
   methods: {
+    isBuy(row) {
+      return (row.side || '').toUpperCase() === 'BUY'
+    },
     formatTime(t) {
-      return t ? String(t).replace('T', ' ').substring(0, 19) : '-'
+      if (!t) return '-'
+      const d = new Date(t)
+      if (isNaN(d.getTime())) return String(t).replace('T', ' ').substring(0, 19)
+      const pad = n => String(n).padStart(2, '0')
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    },
+    formatPrice(val) {
+      if (val == null || val === '' || val === 0) return '-'
+      const n = Number(val)
+      if (isNaN(n)) return val
+      if (n >= 1000) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      if (n >= 1) return n.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
+      return n.toLocaleString('en-US', { minimumFractionDigits: 6, maximumFractionDigits: 8 })
+    },
+    formatNum(v) {
+      if (v == null || v === '') return '0'
+      const n = parseFloat(v)
+      return isNaN(n) ? '0' : n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 6 })
     },
     truncateId(id) {
       if (!id) return '-'
       const str = String(id)
       return str.length <= 12 ? str : str.slice(0, 8) + '...' + str.slice(-4)
     },
+    copyId(id) {
+      if (!id) return
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(id).then(() => {
+          this.$message.success('已复制: ' + id)
+        })
+      }
+    },
+    fillPercent(row) {
+      const qty = parseFloat(row.quantity) || 0
+      const filled = parseFloat(row.filled_quantity) || 0
+      if (qty <= 0) return 0
+      return Math.min(100, Math.round((filled / qty) * 100))
+    },
     statusType(s) {
       const m = { PENDING: 'warning', FILLED: 'success', CANCELLED: 'info', REJECTED: 'danger', PARTIAL: 'warning' }
       return m[(s || '').toUpperCase()] || 'info'
+    },
+    statusLabel(s) {
+      const m = { PENDING: '待处理', FILLED: '已成交', CANCELLED: '已取消', REJECTED: '已拒绝', PARTIAL: '部分成交' }
+      return m[(s || '').toUpperCase()] || s
     },
     onSearch() {
       this.currentPage = 1
       this.fetchData()
     },
     reset() {
-      this.where = { symbol: '', status: '', side: '', dateRange: null }
+      this.where = { symbol: '', status: '', side: '', exchange: '', dateRange: null }
       this.currentPage = 1
       this.fetchData()
+    },
+    async fetchAccounts() {
+      try {
+        const res = await getExchangeAccounts({ status: 1 })
+        this.accountOptions = (res.data.data || res.data || [])
+      } catch (e) { /* 静默 */ }
     },
     async fetchData() {
       this.loading = true
@@ -205,4 +300,9 @@ export default {
 .search-bar { margin-bottom: 12px; }
 .pagination-wrap { margin-top: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
 .total-tip { color: #909399; font-size: 12px; }
+.id-text { font-family: 'Courier New', monospace; font-size: 12px; color: #606266; }
+.copyable { cursor: pointer; }
+.copyable:hover { color: #409eff; text-decoration: underline; }
+.progress-cell { display: flex; flex-direction: column; gap: 2px; }
+.progress-text { font-size: 11px; color: #909399; text-align: center; }
 </style>

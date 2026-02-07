@@ -78,8 +78,13 @@ def _order_to_dto(order: Order) -> OrderDTO:
     )
 
 
-def _fill_to_dto(fill: Fill) -> FillDTO:
-    """Fill 模型转 DTO"""
+def _fill_to_dto(fill: Fill, order: "Order | None" = None) -> FillDTO:
+    """Fill 模型转 DTO，可选传入关联 Order 以填充 exchange/market_type"""
+    exchange = None
+    market_type = None
+    if order:
+        exchange = order.exchange
+        market_type = order.market_type
     return FillDTO(
         fill_id=fill.fill_id,
         exchange_trade_id=fill.exchange_trade_id,
@@ -94,6 +99,8 @@ def _fill_to_dto(fill: Fill) -> FillDTO:
         fee_currency=fill.fee_currency,
         filled_at=fill.filled_at,
         created_at=fill.created_at,
+        exchange=exchange,
+        market_type=market_type,
     )
 
 
@@ -527,7 +534,18 @@ class OrderTradeService:
         """
         total = self.fill_repo.count_fills(filter)
         fills = self.fill_repo.list_fills(filter)
-        return [_fill_to_dto(f) for f in fills], total
+        # 批量查询关联的订单以获取 exchange / market_type
+        order_ids = list({f.order_id for f in fills if f.order_id})
+        orders_by_id = {}
+        if order_ids:
+            for oid in order_ids:
+                try:
+                    order = self.order_repo.get_by_order_id(oid, filter.tenant_id)
+                    if order:
+                        orders_by_id[oid] = order
+                except Exception:
+                    pass
+        return [_fill_to_dto(f, orders_by_id.get(f.order_id)) for f in fills], total
     
     # ============ 聚合查询 ============
     

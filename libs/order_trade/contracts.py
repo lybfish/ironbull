@@ -188,6 +188,8 @@ class FillDTO:
     fee_currency: Optional[str]
     filled_at: datetime
     created_at: datetime
+    exchange: Optional[str] = None
+    market_type: Optional[str] = None
     
     @property
     def value(self) -> float:
@@ -208,6 +210,8 @@ class FillDTO:
             "price": self.price,
             "fee": self.fee,
             "fee_currency": self.fee_currency,
+            "exchange": self.exchange,
+            "market_type": self.market_type,
             "filled_at": self.filled_at.isoformat() if self.filled_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "value": self.value,

@@ -6,17 +6,17 @@
         <stat-card title="流水条数" :value="total" icon="el-icon-s-order" color="primary" :loading="loading" help-text="当前筛选结果"/>
       </el-col>
       <el-col :span="6">
-        <stat-card title="收入合计" :value="stats.income" icon="el-icon-top" color="success" :loading="loading">
+        <stat-card title="收入合计" icon="el-icon-top" color="success" :loading="loading">
           <template slot="value">{{ formatCurrency(stats.income) }}</template>
         </stat-card>
       </el-col>
       <el-col :span="6">
-        <stat-card title="支出合计" :value="stats.expense" icon="el-icon-bottom" color="danger" :loading="loading">
+        <stat-card title="支出合计" icon="el-icon-bottom" color="danger" :loading="loading">
           <template slot="value">{{ formatCurrency(stats.expense) }}</template>
         </stat-card>
       </el-col>
       <el-col :span="6">
-        <stat-card title="净额" :value="stats.net" icon="el-icon-data-analysis" :color="stats.net >= 0 ? 'success' : 'danger'" :loading="loading">
+        <stat-card title="净额" icon="el-icon-data-analysis" :color="stats.net >= 0 ? 'success' : 'danger'" :loading="loading">
           <template slot="value">
             <span :style="{ color: stats.net >= 0 ? '#67C23A' : '#F56C6C' }">{{ formatCurrency(stats.net) }}</span>
           </template>
@@ -42,8 +42,27 @@
               <el-option label="资金费" value="FUNDING"/>
             </el-select>
           </el-form-item>
+          <el-form-item label="账户">
+            <el-select v-model="filters.account_id" placeholder="全部账户" clearable style="width:160px">
+              <el-option
+                v-for="acc in accountOptions"
+                :key="acc.id"
+                :label="'[' + (acc.exchange || '').toUpperCase() + '] #' + acc.id"
+                :value="acc.id"/>
+            </el-select>
+          </el-form-item>
           <el-form-item label="币种">
             <el-input v-model="filters.currency" placeholder="币种" clearable style="width:100px" @keyup.enter.native="onSearch"/>
+          </el-form-item>
+          <el-form-item label="日期范围">
+            <el-date-picker
+              v-model="filters.dateRange"
+              type="daterange"
+              range-separator="至"
+              start-placeholder="开始"
+              end-placeholder="结束"
+              value-format="yyyy-MM-dd"
+              style="width:240px"/>
           </el-form-item>
           <el-form-item>
             <el-button type="primary" icon="el-icon-search" @click="onSearch">查询</el-button>
@@ -60,26 +79,41 @@
         style="width:100%; margin-top:12px"
         size="small"
         :header-cell-style="{background:'#fafafa'}">
-        <el-table-column prop="tx_id" label="流水ID" width="120"/>
-        <el-table-column prop="account_id" label="账户ID" width="100"/>
+        <el-table-column prop="tx_id" label="流水ID" width="120">
+          <template slot-scope="{row}">
+            <span class="id-text">{{ row.tx_id }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="account_id" label="账户" width="80" align="center">
+          <template slot-scope="{row}">
+            <span>#{{ row.account_id }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="tx_type" label="类型" width="100">
           <template slot-scope="{row}">
             <el-tag :type="getTxTypeTagType(row.tx_type)" size="small">{{ getTxTypeLabel(row.tx_type) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="currency" label="币种" width="80"/>
-        <el-table-column prop="amount" label="金额" width="120" align="right">
+        <el-table-column prop="amount" label="金额" width="130" align="right">
           <template slot-scope="{row}">
-            <span :style="{ color: parseFloat(row.amount) >= 0 ? '#67C23A' : '#F56C6C' }">{{ formatCurrency(row.amount) }}</span>
+            <span :style="{ color: parseFloat(row.amount) >= 0 ? '#67C23A' : '#F56C6C', fontWeight: 600 }">
+              {{ parseFloat(row.amount) >= 0 ? '+' : '' }}{{ formatCurrency(row.amount) }}
+            </span>
           </template>
         </el-table-column>
-        <el-table-column prop="balance_after" label="变动后余额" width="120" align="right">
+        <el-table-column prop="balance_after" label="变动后余额" width="130" align="right">
           <template slot-scope="{row}">{{ formatCurrency(row.balance_after) }}</template>
         </el-table-column>
         <el-table-column prop="description" label="备注" min-width="150" show-overflow-tooltip>
           <template slot-scope="{row}">{{ row.description || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="reference_id" label="参考ID" width="120" show-overflow-tooltip/>
+        <el-table-column prop="reference_id" label="参考ID" width="140" show-overflow-tooltip>
+          <template slot-scope="{row}">
+            <span v-if="row.reference_id" class="id-text">{{ row.reference_id }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="created_at" label="创建时间" width="170">
           <template slot-scope="{row}">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
@@ -105,6 +139,7 @@
 
 <script>
 import { getTransactions } from '@/api/trading'
+import { getExchangeAccounts } from '@/api/admin'
 
 export default {
   name: 'TransactionList',
@@ -113,8 +148,9 @@ export default {
       loading: false,
       list: [],
       total: 0,
-      filters: { tx_type: '', currency: '' },
-      pagination: { page: 1, limit: 50 }
+      filters: { tx_type: '', currency: '', account_id: '', dateRange: null },
+      pagination: { page: 1, limit: 50 },
+      accountOptions: []
     }
   },
   computed: {
@@ -131,22 +167,27 @@ export default {
   },
   mounted() {
     this.fetchData()
+    this.fetchAccounts()
   },
   methods: {
     formatTime(t) {
-      return t ? String(t).replace('T', ' ').substring(0, 19) : '-'
+      if (!t) return '-'
+      const d = new Date(t)
+      if (isNaN(d.getTime())) return String(t).replace('T', ' ').substring(0, 19)
+      const pad = n => String(n).padStart(2, '0')
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
     },
     formatCurrency(value) {
       if (value == null || value === '') return '0.00'
       const num = parseFloat(value)
-      return isNaN(num) ? '0.00' : num.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      return isNaN(num) ? '0.00' : num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     },
     onSearch() {
       this.pagination.page = 1
       this.fetchData()
     },
     handleReset() {
-      this.filters = { tx_type: '', currency: '' }
+      this.filters = { tx_type: '', currency: '', account_id: '', dateRange: null }
       this.pagination.page = 1
       this.fetchData()
     },
@@ -167,6 +208,12 @@ export default {
       const types = { DEPOSIT: 'success', WITHDRAW: 'warning', FEE: 'info', PNL: 'success', TRANSFER: '', FUNDING: 'info' }
       return types[type] || ''
     },
+    async fetchAccounts() {
+      try {
+        const res = await getExchangeAccounts({ status: 1 })
+        this.accountOptions = (res.data.data || res.data || [])
+      } catch (e) { /* 静默 */ }
+    },
     async fetchData() {
       this.loading = true
       try {
@@ -176,6 +223,11 @@ export default {
         }
         if (this.filters.tx_type) params.transaction_type = this.filters.tx_type
         if (this.filters.currency) params.currency = this.filters.currency
+        if (this.filters.account_id) params.account_id = this.filters.account_id
+        if (this.filters.dateRange && this.filters.dateRange.length === 2) {
+          params.start_time = this.filters.dateRange[0] + 'T00:00:00'
+          params.end_time = this.filters.dateRange[1] + 'T23:59:59'
+        }
         const res = await getTransactions(params)
         const data = res.data
         this.list = data.data || []
@@ -196,4 +248,6 @@ export default {
 .search-bar { margin-bottom: 12px; }
 .pagination-wrap { margin-top: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
 .total-tip { color: #909399; font-size: 12px; }
+.id-text { font-family: 'Courier New', monospace; font-size: 12px; color: #606266; }
+.text-muted { color: #C0C4CC; }
 </style>
