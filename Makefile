@@ -54,7 +54,7 @@ help:
 	@echo "    make push-deploy [NAME=xxx]      一键：自动 add+commit（若有）+ push + 线上拉代码并发布"
 	@echo "    make push-deploy MSG=\"说明\"    指定自动提交时的 commit 说明（默认 deploy）"
 	@echo "    make push-deploy BUILD=1         含线上构建 admin-web"
-	@echo "    make push-deploy NO_MIGRATE=1    不跑迁移"
+	@echo "    make push-deploy MIGRATE=1        线上执行迁移（默认不跑）"
 	@echo "  线上发布（仅 SSH 到服务器后执行）："
 	@echo "    make deploy-pull                仅拉取代码"
 	@echo "    make deploy                     拉代码 + 迁移 + 重启"

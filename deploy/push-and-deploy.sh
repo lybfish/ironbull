@@ -5,7 +5,7 @@
 #   make push-deploy              # 一键：有未提交则自动 add+commit，再 push → 线上 pull + 迁移 + 重启
 #   make push-deploy MSG="fix: xxx"  # 指定提交说明（默认 "deploy"）
 #   make push-deploy BUILD=1      # 含线上构建 admin-web
-#   make push-deploy NO_MIGRATE=1  # 不跑迁移
+#   make push-deploy MIGRATE=1      # 线上执行迁移（默认不跑）
 #   make push-deploy DRY_RUN=1
 # 首次使用请先: make deploy-setup
 # ============================================================
@@ -18,11 +18,11 @@ CONFIG_NAME="${1:-default}"
 CONFIG_FILE="$SCRIPT_DIR/.deploy.$CONFIG_NAME.env"
 
 # 从 Make 传入
-NO_MIGRATE="${NO_MIGRATE:-}"
 BUILD="${BUILD:-}"
 DRY_RUN="${DRY_RUN:-}"
 NAME="${NAME:-}"
-MSG="${MSG:-deploy}"   # 自动提交时的 commit message，可覆盖：make push-deploy MSG="fix: xxx"
+MSG="${MSG:-deploy}"   # 自动提交时的 commit message
+MIGRATE="${MIGRATE:-}" # 传 MIGRATE=1 时线上才执行迁移
 
 # 若通过 make push-deploy NAME=prod 调用，CONFIG_NAME 可能是 default，用 NAME
 [[ -n "$NAME" ]] && CONFIG_NAME="$NAME" && CONFIG_FILE="$SCRIPT_DIR/.deploy.$CONFIG_NAME.env"
@@ -43,9 +43,9 @@ source "$CONFIG_FILE"
 # 线上是否用 sudo（未配置则不用）
 [[ "${DEPLOY_SUDO:-}" = "yes" ]] && SUDO_CMD="sudo" || SUDO_CMD=""
 
-# 远程执行参数
-REMOTE_ARGS=""
-[[ "$NO_MIGRATE" = "1" ]] && REMOTE_ARGS="$REMOTE_ARGS --no-migrate"
+# 远程执行参数（默认不跑迁移；需要时用 make push-deploy MIGRATE=1）
+REMOTE_ARGS="--no-migrate"
+[[ "$MIGRATE" = "1" ]]    && REMOTE_ARGS=""
 [[ "$BUILD" = "1" ]]      && REMOTE_ARGS="$REMOTE_ARGS --build"
 [[ "$DRY_RUN" = "1" ]]    && REMOTE_ARGS="$REMOTE_ARGS --dry-run"
 
