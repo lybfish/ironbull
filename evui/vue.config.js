@@ -3,7 +3,7 @@ const CompressionWebpackPlugin = require('compression-webpack-plugin');
 module.exports = {
   assetsDir: 'assets',
   outputDir: 'dist',
-  publicPath: process.env.NODE_ENV === 'production' ? '/' : '/',
+  publicPath: process.env.NODE_ENV === 'production' ? '/ib/' : '/',
   productionSourceMap: false,
   transpileDependencies: ['element-ui', 'ele-admin', 'vue-i18n'],
 

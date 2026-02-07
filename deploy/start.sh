@@ -38,7 +38,7 @@ export PYTHONPATH="$PROJECT_ROOT"
 mkdir -p "$PID_DIR" "$LOG_DIR"
 
 # ---- 服务定义（case 实现，兼容 Bash 3.x / macOS） ----
-ALL_SERVICES="data-provider data-api merchant-api signal-monitor monitor-daemon"
+ALL_SERVICES="data-provider data-api merchant-api signal-monitor monitor-daemon execution-node"
 
 get_service_cmd() {
     case "$1" in
@@ -46,8 +46,9 @@ get_service_cmd() {
         data-api)       echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8026 --workers 2" ;;
         merchant-api)   echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8010 --workers 2" ;;
         signal-monitor) echo "python3 -m flask --app app.main run --host=0.0.0.0 --port=8020" ;;
-        monitor-daemon) echo "python3 scripts/monitor_daemon.py" ;;
-        *)              echo "" ;;
+        monitor-daemon)   echo "python3 scripts/monitor_daemon.py" ;;
+        execution-node)   echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 9101 --workers 1" ;;
+        *)                echo "" ;;
     esac
 }
 
@@ -57,8 +58,9 @@ get_service_dir() {
         data-api)       echo "$PROJECT_ROOT/services/data-api" ;;
         merchant-api)   echo "$PROJECT_ROOT/services/merchant-api" ;;
         signal-monitor) echo "$PROJECT_ROOT/services/signal-monitor" ;;
-        monitor-daemon) echo "$PROJECT_ROOT" ;;
-        *)              echo "" ;;
+        monitor-daemon)   echo "$PROJECT_ROOT" ;;
+        execution-node)   echo "$PROJECT_ROOT/services/execution-node" ;;
+        *)                echo "" ;;
     esac
 }
 

@@ -7,7 +7,7 @@
       :rules="rules"
       class="login-form ele-bg-white"
       @keyup.enter.native="doSubmit">
-      <h4>IronBull 管理后台</h4>
+      <h4>Aigo 管理后台</h4>
       <el-form-item prop="username">
         <el-input
           clearable
@@ -36,7 +36,7 @@
         </el-button>
       </div>
     </el-form>
-    <div class="login-copyright">Copyright &copy; 2026 IronBull. All rights reserved.</div>
+    <div class="login-copyright">Copyright &copy; 2026 Aigo. All rights reserved.</div>
   </div>
 </template>
 

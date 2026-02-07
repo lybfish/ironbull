@@ -6,7 +6,7 @@
         <div class="ele-cell-content ele-cell">
           <el-avatar :size="68" :src="loginUser.avatar || defaultAvatar"/>
           <div class="ele-cell-content">
-            <h4 class="ele-elip">你好，【{{ loginUser.nickname || 'Admin' }}】，欢迎使用 IronBull 管理后台！</h4>
+            <h4 class="ele-elip">你好，【{{ loginUser.nickname || 'Admin' }}】，欢迎使用 Aigo 管理后台！</h4>
             <div class="ele-text-secondary ele-elip" style="margin-top: 8px;">
               <i class="el-icon-sunny"></i>
               <span>祝您交易顺利，收益满满!</span>
