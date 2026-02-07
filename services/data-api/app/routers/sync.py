@@ -5,6 +5,7 @@
 - POST /api/sync/trades    - 同步成交流水（可选 node_id、sandbox）
 - POST /api/sync/markets   - 同步市场信息到 dim_market_info（所有交易所）
 - GET  /api/sync/markets   - 查询已同步的市场信息
+- GET  /api/sync/monitored-positions - 查询当前被 position_monitor 监控的持仓
 """
 
 import logging
@@ -12,9 +13,12 @@ from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 from libs.sync_node import sync_balance_from_nodes, sync_positions_from_nodes, sync_trades_from_nodes
 from libs.exchange.market_service import MarketInfoService
+from libs.position.models import Position
+from libs.member.models import ExchangeAccount
 from ..deps import get_db, get_current_admin
 
 logger = logging.getLogger(__name__)
@@ -131,3 +135,64 @@ def get_markets(
         "data": [m.to_dict() for m in markets],
         "total": len(markets),
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# 持仓监控列表（position_monitor 正在监控的持仓）
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/monitored-positions")
+def get_monitored_positions(
+    _admin: Dict[str, Any] = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    查询 position_monitor 正在监控的持仓列表：
+    条件：status=OPEN, quantity>0, 有 stop_loss 或 take_profit
+    """
+    try:
+        positions = db.query(Position).filter(
+            Position.status == "OPEN",
+            Position.quantity > 0,
+            or_(
+                Position.stop_loss.isnot(None),
+                Position.take_profit.isnot(None),
+            ),
+        ).order_by(Position.updated_at.desc()).all()
+
+        # 批量获取关联的交易所账户信息（用户邮箱）
+        account_ids = list({p.account_id for p in positions})
+        acc_map = {}
+        if account_ids:
+            from libs.member.models import User
+            rows = db.query(ExchangeAccount, User.email).outerjoin(
+                User, ExchangeAccount.user_id == User.id
+            ).filter(ExchangeAccount.id.in_(account_ids)).all()
+            for acc, email in rows:
+                acc_map[acc.id] = {"exchange": acc.exchange, "user_email": email or ""}
+
+        result = []
+        for p in positions:
+            acc_info = acc_map.get(p.account_id, {})
+            result.append({
+                "position_id": p.position_id,
+                "account_id": p.account_id,
+                "user_email": acc_info.get("user_email", ""),
+                "symbol": p.symbol,
+                "exchange": p.exchange,
+                "position_side": p.position_side,
+                "quantity": float(p.quantity) if p.quantity else 0,
+                "entry_price": float(p.entry_price) if p.entry_price else None,
+                "stop_loss": float(p.stop_loss) if p.stop_loss else None,
+                "take_profit": float(p.take_profit) if p.take_profit else None,
+                "leverage": p.leverage,
+                "strategy_code": p.strategy_code,
+                "unrealized_pnl": float(p.unrealized_pnl) if p.unrealized_pnl else None,
+                "opened_at": p.opened_at.isoformat() if p.opened_at else None,
+                "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+            })
+
+        return {"success": True, "data": result, "total": len(result)}
+    except Exception as e:
+        logger.exception("查询监控持仓失败")
+        raise HTTPException(status_code=500, detail=f"查询监控持仓失败: {str(e)}")

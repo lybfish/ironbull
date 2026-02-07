@@ -116,6 +116,150 @@
       </el-col>
     </el-row>
 
+    <!-- 持仓监控(SL/TP) -->
+    <el-row :gutter="16" style="margin-top: 16px;">
+      <el-col :span="24">
+        <el-card shadow="never">
+          <div slot="header">
+            <span>持仓监控 (自管 SL/TP)</span>
+            <el-button style="float: right; padding: 3px 0" type="text" :loading="loadingPM || loadingPositions" @click="refreshPM">
+              刷新状态
+            </el-button>
+          </div>
+
+          <div v-if="pmError" style="margin-bottom:12px">
+            <el-alert :title="pmError" type="error" :closable="false" show-icon />
+          </div>
+
+          <el-row :gutter="24">
+            <!-- 运行状态 -->
+            <el-col :span="6">
+              <div class="pm-stat-card">
+                <div class="pm-stat-label">监控状态</div>
+                <div class="pm-stat-value">
+                  <el-tag v-if="pmStatus.enabled" type="success" size="medium">运行中</el-tag>
+                  <el-tag v-else type="info" size="medium">未启用</el-tag>
+                </div>
+                <div class="pm-stat-desc">
+                  {{ pmStatus.enabled ? '自管模式：不在交易所挂止损单' : '交易所 SL/TP 模式' }}
+                </div>
+              </div>
+            </el-col>
+            <!-- 监控持仓数 -->
+            <el-col :span="6">
+              <div class="pm-stat-card">
+                <div class="pm-stat-label">监控持仓数</div>
+                <div class="pm-stat-value pm-stat-number">{{ pmStats.positions_monitored || 0 }}</div>
+                <div class="pm-stat-desc">当前带 SL/TP 的 OPEN 持仓</div>
+              </div>
+            </el-col>
+            <!-- 触发次数 -->
+            <el-col :span="6">
+              <div class="pm-stat-card">
+                <div class="pm-stat-label">触发总次数</div>
+                <div class="pm-stat-value pm-stat-number">{{ pmStats.triggers_total || 0 }}</div>
+                <div class="pm-stat-desc">
+                  <span style="color:#67C23A">成功 {{ pmStats.closes_success || 0 }}</span>
+                  <span style="margin-left:8px;color:#F56C6C">失败 {{ pmStats.closes_failed || 0 }}</span>
+                </div>
+              </div>
+            </el-col>
+            <!-- 最近扫描 -->
+            <el-col :span="6">
+              <div class="pm-stat-card">
+                <div class="pm-stat-label">最近扫描</div>
+                <div class="pm-stat-value pm-stat-time">{{ pmStats.last_scan_at ? formatPMTime(pmStats.last_scan_at) : '-' }}</div>
+                <div class="pm-stat-desc">每 {{ pmConfig.interval || '?' }} 秒扫描一次</div>
+              </div>
+            </el-col>
+          </el-row>
+
+          <!-- 冷却中的策略 -->
+          <div v-if="pmCooldowns.length > 0" style="margin-top: 16px;">
+            <el-divider content-position="left">止损冷却中的策略</el-divider>
+            <el-table :data="pmCooldowns" stripe border size="small">
+              <el-table-column prop="strategy" label="策略" width="200" />
+              <el-table-column prop="symbol" label="交易对" width="150" />
+              <el-table-column label="剩余冷却" width="120">
+                <template slot-scope="{row}">
+                  <el-tag type="warning" size="mini">{{ row.remaining_minutes }} 分钟</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="cooldown_until" label="冷却截止" />
+            </el-table>
+          </div>
+
+          <!-- 监控持仓明细 -->
+          <div style="margin-top: 16px;">
+            <el-divider content-position="left">
+              监控持仓明细
+              <el-button type="text" size="mini" :loading="loadingPositions" @click="fetchMonitoredPositions" style="margin-left:8px">刷新</el-button>
+            </el-divider>
+            <el-table :data="monitoredPositions" stripe border size="small" v-loading="loadingPositions"
+              :header-cell-style="{background:'#fafafa'}" max-height="500">
+              <el-table-column label="交易对" width="130">
+                <template slot-scope="{row}">
+                  <span style="font-weight:600">{{ row.symbol }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="交易所" width="90" align="center">
+                <template slot-scope="{row}">
+                  <el-tag size="mini" effect="plain">{{ (row.exchange || '').toUpperCase() }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="方向" width="70" align="center">
+                <template slot-scope="{row}">
+                  <el-tag :type="row.position_side === 'LONG' ? 'success' : 'danger'" size="mini">
+                    {{ row.position_side === 'LONG' ? '多' : '空' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="数量" width="110" align="right">
+                <template slot-scope="{row}">{{ row.quantity }}</template>
+              </el-table-column>
+              <el-table-column label="入场价" width="110" align="right">
+                <template slot-scope="{row}">
+                  <span v-if="row.entry_price">{{ row.entry_price }}</span>
+                  <span v-else style="color:#C0C4CC">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="止损价" width="110" align="right">
+                <template slot-scope="{row}">
+                  <span v-if="row.stop_loss" style="color:#F56C6C;font-weight:600">{{ row.stop_loss }}</span>
+                  <span v-else style="color:#C0C4CC">未设置</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="止盈价" width="110" align="right">
+                <template slot-scope="{row}">
+                  <span v-if="row.take_profit" style="color:#67C23A;font-weight:600">{{ row.take_profit }}</span>
+                  <span v-else style="color:#C0C4CC">未设置</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="杠杆" width="60" align="center">
+                <template slot-scope="{row}">{{ row.leverage || '-' }}x</template>
+              </el-table-column>
+              <el-table-column label="策略" width="140">
+                <template slot-scope="{row}">
+                  <span v-if="row.strategy_code">{{ row.strategy_code }}</span>
+                  <span v-else style="color:#C0C4CC">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="用户" width="160">
+                <template slot-scope="{row}">
+                  <span v-if="row.user_email">{{ row.user_email }}</span>
+                  <span v-else style="color:#C0C4CC">账户#{{ row.account_id }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="更新时间" width="160">
+                <template slot-scope="{row}">{{ row.updated_at ? formatPMTime(row.updated_at) : '-' }}</template>
+              </el-table-column>
+            </el-table>
+            <el-empty v-if="!loadingPositions && monitoredPositions.length === 0" description="当前没有被监控的持仓" />
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
     <!-- 同步历史 -->
     <el-card shadow="never" style="margin-top: 16px;">
       <div slot="header">
@@ -151,7 +295,7 @@
 </template>
 
 <script>
-import {getNodes, syncBalance, syncPositions, syncTrades, syncMarkets} from '@/api/node'
+import {getNodes, syncBalance, syncPositions, syncTrades, syncMarkets, getPositionMonitorStatus, getMonitoredPositions} from '@/api/node'
 
 export default {
   name: 'SyncManage',
@@ -171,13 +315,24 @@ export default {
       tradesNodeId: null,
       marketExchange: null,
       marketType: 'swap',
-      syncHistory: []
+      syncHistory: [],
+      // 持仓监控
+      loadingPM: false,
+      pmError: null,
+      pmStatus: { enabled: false },
+      pmStats: {},
+      pmConfig: {},
+      pmCooldowns: [],
+      // 监控持仓列表
+      monitoredPositions: [],
+      loadingPositions: false
     }
   },
   mounted() {
     this.fetchNodes()
-    // 从本地存储加载历史记录
     this.loadHistory()
+    this.fetchPMStatus()
+    this.fetchMonitoredPositions()
   },
   methods: {
     syncTypeLabel(t) {
@@ -350,6 +505,58 @@ export default {
         this.saveHistory()
         this.$message.success('已清空历史记录')
       }).catch(() => {})
+    },
+    refreshPM() {
+      this.fetchPMStatus()
+      this.fetchMonitoredPositions()
+    },
+    async fetchPMStatus() {
+      this.loadingPM = true
+      this.pmError = null
+      try {
+        const res = await getPositionMonitorStatus()
+        const d = res.data || {}
+        const cfg = d.config || {}
+        this.pmStatus = {
+          enabled: cfg.position_monitor === true
+        }
+        this.pmStats = d.position_monitor_stats || {}
+        this.pmConfig = {
+          interval: cfg.interval_seconds || '-',
+          syncInterval: cfg.sync_interval_seconds || '-',
+          strategiesCount: cfg.strategies_count || 0,
+          exchangeSlTp: cfg.exchange_sl_tp || false
+        }
+        this.pmCooldowns = d.cooldowns || []
+      } catch (e) {
+        this.pmError = '无法获取持仓监控状态：' + (e.response?.data?.message || e.message || '服务不可达')
+        this.pmStatus = { enabled: false }
+        this.pmStats = {}
+        this.pmConfig = {}
+        this.pmCooldowns = []
+      } finally {
+        this.loadingPM = false
+      }
+    },
+    formatPMTime(isoStr) {
+      if (!isoStr) return '-'
+      try {
+        return new Date(isoStr).toLocaleString('zh-CN')
+      } catch (e) {
+        return isoStr
+      }
+    },
+    async fetchMonitoredPositions() {
+      this.loadingPositions = true
+      try {
+        const res = await getMonitoredPositions()
+        this.monitoredPositions = (res.data.data || [])
+      } catch (e) {
+        console.error('获取监控持仓失败:', e)
+        this.monitoredPositions = []
+      } finally {
+        this.loadingPositions = false
+      }
     }
   }
 }
@@ -358,5 +565,33 @@ export default {
 <style scoped>
 .result {
   margin-top: 12px;
+}
+.pm-stat-card {
+  text-align: center;
+  padding: 16px 8px;
+  background: #fafafa;
+  border-radius: 6px;
+}
+.pm-stat-label {
+  font-size: 13px;
+  color: #909399;
+  margin-bottom: 8px;
+}
+.pm-stat-value {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.pm-stat-number {
+  color: #409EFF;
+  font-size: 28px;
+}
+.pm-stat-time {
+  font-size: 14px;
+  color: #606266;
+}
+.pm-stat-desc {
+  font-size: 12px;
+  color: #C0C4CC;
 }
 </style>

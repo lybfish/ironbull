@@ -6,7 +6,7 @@
         <el-form-item label="选择账户">
           <el-select v-model="accountId" placeholder="请选择交易账户" @change="handleAccountChange" style="width:280px"
             :loading="accountsLoading">
-            <el-option v-for="acc in accounts" :key="acc.id" :label="`#${acc.id} - ${acc.exchange} (${acc.account_type})`" :value="acc.id"/>
+            <el-option v-for="acc in accounts" :key="acc.id" :label="`#${acc.id} ${acc.user_email ? acc.user_email + ' - ' : ''}${acc.exchange} (${acc.account_type})`" :value="acc.id"/>
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -154,7 +154,7 @@
 
 <script>
 import {getPerformance, getRisk, getStatistics} from '@/api/analytics'
-import {getAccounts} from '@/api/trading'
+import {getExchangeAccounts} from '@/api/node'
 
 export default {
   name: 'Analytics',
@@ -198,7 +198,7 @@ export default {
     async fetchAccounts() {
       this.accountsLoading = true
       try {
-        const res = await getAccounts()
+        const res = await getExchangeAccounts({page_size: 100})
         const data = res.data.data || res.data || []
         this.accounts = Array.isArray(data) ? data : []
         if (this.accounts.length > 0 && !this.accountId) {

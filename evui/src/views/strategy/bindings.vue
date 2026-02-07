@@ -300,7 +300,7 @@ export default {
     goToUser() {
       if (!this.detailRow || !this.detailRow.user_id) return
       this.detailVisible = false
-      this.$router.push({ path: '/operation/users', query: { user_id: this.detailRow.user_id } })
+      this.$router.push({ path: '/user/manage', query: { user_id: this.detailRow.user_id } })
     },
     async fetchData() {
       this.loading = true

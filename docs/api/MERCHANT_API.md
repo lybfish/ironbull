@@ -1,11 +1,11 @@
 # Merchant API 接口文档
 
-> **版本**: v1.1 &nbsp;|&nbsp; **更新日期**: 2026-02-07  
+> **版本**: v2.0 &nbsp;|&nbsp; **更新日期**: 2026-02-07  
 > **服务端口**: 8010  
 > **Base URL**: `https://merchant.aigomsg.com`（生产） / `http://localhost:8010`（开发）
 
 Merchant API 面向代理商/商户 B2B 场景，用于管理租户下的用户、点卡、策略与会员分销。  
-共 **19 个业务接口** + 1 个健康检查。
+共 **20 个业务接口** + 1 个健康检查。
 
 ---
 
@@ -89,15 +89,16 @@ headers = {
 | 8 | 点卡     | POST | `/merchant/user/recharge` | 给用户充值/赠送点卡 |
 | 9 | 点卡     | GET  | `/merchant/point-card/logs` | 点卡流水（分页） |
 | 10 | 策略   | GET  | `/merchant/strategies` | 策略列表（租户已启用） |
-| 11 | 策略   | POST | `/merchant/user/strategy/open` | 为用户开启策略 |
-| 12 | 策略   | POST | `/merchant/user/strategy/close` | 关闭策略 |
-| 13 | 策略   | GET  | `/merchant/user/strategies` | 用户已绑定策略列表 |
-| 14 | 分销   | POST | `/merchant/user/transfer-point-card` | 点卡互转 |
-| 15 | 分销   | GET  | `/merchant/user/team` | 用户团队（直推） |
-| 16 | 分销   | POST | `/merchant/user/set-market-node` | 设置市场节点 |
-| 17 | 分销   | GET  | `/merchant/user/rewards` | 奖励流水 |
-| 18 | 分销   | POST | `/merchant/user/withdraw` | 申请提现 |
-| 19 | 分销   | GET  | `/merchant/user/withdrawals` | 提现记录 |
+| 11 | 策略   | POST | `/merchant/user/strategy/open` | 为用户开启（绑定）策略 |
+| 12 | 策略   | POST | `/merchant/user/strategy/update` | 修改策略参数（本金/杠杆/风险档位） |
+| 13 | 策略   | POST | `/merchant/user/strategy/close` | 关闭策略 |
+| 14 | 策略   | GET  | `/merchant/user/strategies` | 用户已绑定策略列表 |
+| 15 | 分销   | POST | `/merchant/user/transfer-point-card` | 点卡互转 |
+| 16 | 分销   | GET  | `/merchant/user/team` | 用户团队（直推） |
+| 17 | 分销   | POST | `/merchant/user/set-market-node` | 设置市场节点 |
+| 18 | 分销   | GET  | `/merchant/user/rewards` | 奖励流水 |
+| 19 | 分销   | POST | `/merchant/user/withdraw` | 申请提现 |
+| 20 | 分销   | GET  | `/merchant/user/withdrawals` | 提现记录 |
 | -- | 系统   | GET  | `/health` | 健康检查（无需认证） |
 
 ---
@@ -436,20 +437,25 @@ headers = {
 
 `GET /merchant/strategies`
 
-返回当前租户下**已启用**的策略实例列表。
+返回当前租户下**已启用**的策略实例列表。每个策略包含完整的仓位配置参数。
 
 **响应 data**（数组）：
 
-| 字段        | 类型   | 说明 |
-|-------------|--------|------|
-| id          | int    | 策略 ID（等同 strategy_id） |
-| strategy_id | int    | 策略 ID |
-| name        | string | 展示名称（租户实例覆盖优先） |
-| description | string | 策略描述 |
-| symbol      | string | 交易对 (如 BTC/USDT) |
-| timeframe   | string | 周期 |
-| min_capital | float  | 最低资金要求 |
-| status      | int    | 状态 |
+| 字段             | 类型   | 说明 |
+|------------------|--------|------|
+| id               | int    | 策略 ID（等同 strategy_id） |
+| strategy_id      | int    | 策略 ID |
+| name             | string | 展示名称（租户实例覆盖优先） |
+| description      | string | 策略描述 |
+| symbol           | string | 交易对 (如 BTC/USDT) |
+| timeframe        | string | K线周期 (如 1h) |
+| min_capital      | float  | 最低资金要求 (USDT) |
+| capital          | float  | 默认本金 (USDT) |
+| leverage         | int    | 默认杠杆倍数 |
+| risk_mode        | int    | 风险档位：1=稳健(1%) 2=均衡(1.5%) 3=激进(2%) |
+| risk_mode_label  | string | 风险档位中文：稳健 / 均衡 / 激进 |
+| amount_usdt      | float  | 计算后的下单金额 (USDT)，= capital × risk_pct × leverage |
+| status           | int    | 状态 1=启用 |
 
 **响应示例**：
 
@@ -460,49 +466,256 @@ headers = {
     {
       "id": 1,
       "strategy_id": 1,
-      "name": "BTC 趋势策略",
-      "description": "基于均线突破的BTC合约策略",
+      "name": "趋势动量(稳健) 3.0",
+      "description": "趋势动量 3.0 是一套基于人工智能行情识别的稳健型趋势跟随交易系统...",
       "symbol": "BTC/USDT",
-      "timeframe": "4h",
+      "timeframe": "1h",
       "min_capital": 200.0,
+      "capital": 1000.0,
+      "leverage": 20,
+      "risk_mode": 1,
+      "risk_mode_label": "稳健",
+      "amount_usdt": 200.0,
+      "status": 1
+    },
+    {
+      "id": 2,
+      "strategy_id": 2,
+      "name": "趋势动量(均衡) 3.0",
+      "description": "趋势动量 3.0 均衡版...",
+      "symbol": "BTC/USDT",
+      "timeframe": "1h",
+      "min_capital": 200.0,
+      "capital": 1000.0,
+      "leverage": 20,
+      "risk_mode": 2,
+      "risk_mode_label": "均衡",
+      "amount_usdt": 300.0,
+      "status": 1
+    },
+    {
+      "id": 3,
+      "strategy_id": 3,
+      "name": "趋势动量(激进) 3.0",
+      "description": "趋势动量 3.0 激进版...",
+      "symbol": "BTC/USDT",
+      "timeframe": "1h",
+      "min_capital": 200.0,
+      "capital": 1000.0,
+      "leverage": 20,
+      "risk_mode": 3,
+      "risk_mode_label": "激进",
+      "amount_usdt": 400.0,
       "status": 1
     }
   ]
 }
 ```
 
+> **下单金额计算公式**：`amount_usdt = capital × risk_pct × leverage`  
+> 其中 `risk_pct` 由 `risk_mode` 决定：1=1%，2=1.5%，3=2%。
+
 ---
 
-### 6.2 开启策略
+### 6.2 开启（绑定）策略
 
 `POST /merchant/user/strategy/open`  
 **Content-Type**: `application/x-www-form-urlencoded`
 
-| 参数           | 类型   | 必填 | 说明 |
-|----------------|--------|------|------|
-| email          | string | 是   | 用户邮箱 |
-| strategy_id    | int    | 是   | 策略 ID（来自策略列表） |
-| account_id     | int    | 是   | 交易所账户 ID（用户详情中 accounts[].account_id） |
-| mode           | int    | 否   | 执行模式：1=**单次模式**（仅执行一次，触发后不再跟单），2=**循环模式**（每次信号都执行），默认 2 |
-| min_point_card | float  | 否   | 开通所需最小点卡余额，默认 1.0 |
+为用户开启策略绑定，绑定后系统会按策略信号自动为该用户下单交易。
+
+**请求参数**：
+
+| 参数           | 类型   | 必填 | 默认值 | 说明 |
+|----------------|--------|------|--------|------|
+| email          | string | 是   | -      | 用户邮箱 |
+| strategy_id    | int    | 是   | -      | 策略 ID（来自 `GET /merchant/strategies` 返回的 `id`） |
+| account_id     | int    | 是   | -      | 交易所账户 ID（来自用户详情 `accounts[].account_id`） |
+| mode           | int    | 否   | 2      | 执行模式：1=单次模式（仅执行一次），2=循环模式（每次信号都执行） |
+| capital        | float  | 否   | 0      | 本金/最大仓位 (USDT)。如 1000 表示以 1000U 本金参与 |
+| leverage       | int    | 否   | 20     | 杠杆倍数。可选值：5, 10, 20, 50, 75, 100 |
+| risk_mode      | int    | 否   | 1      | 风险档位：**1**=稳健(1%) **2**=均衡(1.5%) **3**=激进(2%) |
+| min_point_card | float  | 否   | 1.0    | 开通所需最低点卡余额 |
+
+**仓位参数说明**：
+
+用户的实际下单金额由 `capital`、`leverage`、`risk_mode` 三者计算而得：
+
+```
+下单金额 = capital × risk_pct × leverage
+```
+
+| risk_mode | 档位名称 | risk_pct | 示例（capital=1000, leverage=20） |
+|-----------|---------|----------|-----------------------------------|
+| 1         | 稳健    | 1%       | 1000 × 1% × 20 = **200 USDT**    |
+| 2         | 均衡    | 1.5%     | 1000 × 1.5% × 20 = **300 USDT**  |
+| 3         | 激进    | 2%       | 1000 × 2% × 20 = **400 USDT**    |
+
+- 若不传 `capital`（默认0），系统会使用策略的默认仓位参数
+- 若传了 `capital > 0`，则使用用户自定义的仓位参数
+- 同一个策略可以绑定到用户的不同交易所账户（account_id 不同）
 
 **响应 data**：
 
-| 字段        | 类型 | 说明 |
-|-------------|------|------|
-| binding_id  | int  | 绑定记录 ID |
-| strategy_id | int  | 策略 ID |
-| account_id  | int  | 账户 ID |
-| mode        | int  | 执行模式（1=单次，2=循环） |
+| 字段            | 类型   | 说明 |
+|-----------------|--------|------|
+| binding_id      | int    | 绑定记录 ID |
+| strategy_id     | int    | 策略 ID |
+| account_id      | int    | 交易所账户 ID |
+| mode            | int    | 执行模式（1=单次，2=循环） |
+| capital         | float  | 本金 (USDT) |
+| leverage        | int    | 杠杆倍数 |
+| risk_mode       | int    | 风险档位 |
+| risk_mode_label | string | 风险档位名称（稳健/均衡/激进） |
+| amount_usdt     | float  | 计算后的下单金额 (USDT) |
 
-**错误**：策略未对本租户开放或已下架、用户不存在、点卡不足、账户不存在等。
+**响应示例**：
+
+```json
+{
+  "code": 0,
+  "msg": "开启成功",
+  "data": {
+    "binding_id": 15,
+    "strategy_id": 1,
+    "account_id": 10,
+    "mode": 2,
+    "capital": 1000.0,
+    "leverage": 20,
+    "risk_mode": 1,
+    "risk_mode_label": "稳健",
+    "amount_usdt": 200.0
+  }
+}
+```
+
+**完整调用示例**（Python）：
+
+```python
+import requests
+
+resp = requests.post(
+    "https://merchant.aigomsg.com/merchant/user/strategy/open",
+    headers=headers,  # 认证头
+    data={
+        "email": "user@example.com",
+        "strategy_id": 1,          # 趋势动量(稳健) 3.0
+        "account_id": 10,          # Binance 合约账户
+        "mode": 2,                 # 循环模式
+        "capital": 1000,           # 本金 1000 USDT
+        "leverage": 20,            # 20 倍杠杆
+        "risk_mode": 1,            # 稳健(1%)
+    }
+)
+print(resp.json())
+# → {"code": 0, "msg": "开启成功", "data": {"binding_id": 15, "capital": 1000.0, "leverage": 20, "risk_mode": 1, "risk_mode_label": "稳健", "amount_usdt": 200.0, ...}}
+```
+
+**错误**：
+
+| 错误信息 | 原因 |
+|---------|------|
+| 该策略未对本租户开放或已下架 | strategy_id 不在本租户的策略实例中 |
+| 用户不存在 | email 不属于本租户 |
+| 点卡不足 | 用户点卡余额 < min_point_card |
+| 交易所账户不存在 | account_id 无效 |
+| 已绑定该策略 | 同一 strategy_id + account_id 已存在绑定 |
 
 ---
 
-### 6.3 关闭策略
+### 6.3 修改策略参数
+
+`POST /merchant/user/strategy/update`  
+**Content-Type**: `application/x-www-form-urlencoded`
+
+修改已绑定策略的仓位参数（本金/杠杆/风险档位），**不影响策略运行状态**。  
+只需传需要修改的字段，未传的保持不变。
+
+**请求参数**：
+
+| 参数        | 类型   | 必填 | 说明 |
+|-------------|--------|------|------|
+| email       | string | 是   | 用户邮箱 |
+| strategy_id | int    | 是   | 策略 ID |
+| account_id  | int    | 是   | 交易所账户 ID |
+| capital     | float  | 否   | 新的本金 (USDT)，不传则不修改 |
+| leverage    | int    | 否   | 新的杠杆倍数，不传则不修改 |
+| risk_mode   | int    | 否   | 新的风险档位（1/2/3），不传则不修改 |
+
+**响应 data**：
+
+| 字段            | 类型   | 说明 |
+|-----------------|--------|------|
+| binding_id      | int    | 绑定记录 ID |
+| capital         | float  | 修改后的本金 (USDT) |
+| leverage        | int    | 修改后的杠杆倍数 |
+| risk_mode       | int    | 修改后的风险档位 |
+| risk_mode_label | string | 风险档位名称（稳健/均衡/激进） |
+| amount_usdt     | float  | 重新计算的下单金额 (USDT) |
+
+**响应示例**：
+
+```json
+{
+  "code": 0,
+  "msg": "修改成功",
+  "data": {
+    "binding_id": 15,
+    "capital": 2000.0,
+    "leverage": 20,
+    "risk_mode": 2,
+    "risk_mode_label": "均衡",
+    "amount_usdt": 600.0
+  }
+}
+```
+
+**完整调用示例**（Python）：
+
+```python
+# 示例1: 只修改本金
+resp = requests.post(
+    "https://merchant.aigomsg.com/merchant/user/strategy/update",
+    headers=headers,
+    data={
+        "email": "user@example.com",
+        "strategy_id": 1,
+        "account_id": 10,
+        "capital": 2000,           # 本金从 1000 改为 2000
+    }
+)
+# → amount_usdt: 2000 × 1% × 20 = 400 USDT
+
+# 示例2: 同时修改杠杆和风险档位
+resp = requests.post(
+    "https://merchant.aigomsg.com/merchant/user/strategy/update",
+    headers=headers,
+    data={
+        "email": "user@example.com",
+        "strategy_id": 1,
+        "account_id": 10,
+        "leverage": 50,            # 杠杆改为 50x
+        "risk_mode": 3,            # 风险档位改为激进(2%)
+    }
+)
+# → amount_usdt: 2000 × 2% × 50 = 2000 USDT
+```
+
+**错误**：
+
+| 错误信息 | 原因 |
+|---------|------|
+| 用户不存在 | email 不属于本租户 |
+| 绑定不存在 | strategy_id + account_id 未找到绑定记录 |
+
+---
+
+### 6.4 关闭策略
 
 `POST /merchant/user/strategy/close`  
 **Content-Type**: `application/x-www-form-urlencoded`
+
+关闭用户的策略绑定，关闭后系统不再为该用户执行该策略的交易信号。
 
 | 参数        | 类型   | 必填 | 说明 |
 |-------------|--------|------|------|
@@ -512,17 +725,77 @@ headers = {
 
 **响应 data**：成功时为 `null`，`msg` 为「关闭成功」。
 
+**完整调用示例**（Python）：
+
+```python
+resp = requests.post(
+    "https://merchant.aigomsg.com/merchant/user/strategy/close",
+    headers=headers,
+    data={
+        "email": "user@example.com",
+        "strategy_id": 1,
+        "account_id": 10,
+    }
+)
+# → {"code": 0, "msg": "关闭成功", "data": null}
+```
+
 ---
 
-### 6.4 用户已绑定策略列表
+### 6.5 用户已绑定策略列表
 
 `GET /merchant/user/strategies?email=xxx`
+
+查询用户当前所有策略绑定记录，包含仓位参数和盈亏统计。
 
 | 参数  | 类型   | 必填 | 说明 |
 |-------|--------|------|------|
 | email | string | 是   | 用户邮箱 |
 
-**响应 data**：数组，每项包含策略信息及绑定状态、收益等。
+**响应 data**（数组）：
+
+| 字段            | 类型   | 说明 |
+|-----------------|--------|------|
+| strategy_id     | int    | 策略 ID |
+| strategy_name   | string | 策略展示名称 |
+| symbol          | string | 交易对 |
+| account_id      | int    | 交易所账户 ID |
+| status          | int    | 绑定状态：1=运行中，0=已停止 |
+| mode            | int    | 执行模式：1=单次，2=循环 |
+| capital         | float  | 本金 (USDT) |
+| leverage        | int    | 杠杆倍数 |
+| risk_mode       | int    | 风险档位 (1/2/3) |
+| risk_mode_label | string | 风险档位名称（稳健/均衡/激进） |
+| amount_usdt     | float  | 下单金额 (USDT) |
+| total_profit    | float  | 累计盈亏 (USDT) |
+| total_trades    | int    | 累计交易笔数 |
+| create_time     | string | 绑定时间 |
+
+**响应示例**：
+
+```json
+{
+  "code": 0, "msg": "success",
+  "data": [
+    {
+      "strategy_id": 1,
+      "strategy_name": "趋势动量(稳健) 3.0",
+      "symbol": "BTC/USDT",
+      "account_id": 10,
+      "status": 1,
+      "mode": 2,
+      "capital": 1000.0,
+      "leverage": 20,
+      "risk_mode": 1,
+      "risk_mode_label": "稳健",
+      "amount_usdt": 200.0,
+      "total_profit": 88.50,
+      "total_trades": 12,
+      "create_time": "2026-02-07 21:49:10"
+    }
+  ]
+}
+```
 
 ---
 
@@ -799,13 +1072,54 @@ headers = {
 | 401         | 认证失败（AppKey 无效/签名错误/时间戳过期） |
 | 429         | 配额超限 |
 
-### 9.2 参考文档
+### 9.2 仓位参数说明
+
+系统采用 **本金 × 风险比例 × 杠杆** 的统一仓位模型：
+
+| 参数      | 说明 | 取值范围 |
+|-----------|------|---------|
+| capital   | 本金/最大仓位 (USDT) | 建议 ≥ min_capital |
+| leverage  | 杠杆倍数 | 5 / 10 / 20 / 50 / 75 / 100 |
+| risk_mode | 风险档位 | 1=稳健(1%) / 2=均衡(1.5%) / 3=激进(2%) |
+
+**计算公式**：
+
+```
+保证金  = capital × risk_pct
+下单金额 = capital × risk_pct × leverage
+```
+
+**示例**：
+
+| 本金 (capital) | 杠杆 (leverage) | 风险档位 (risk_mode) | 保证金 | 下单金额 (amount_usdt) |
+|:-:|:-:|:-:|:-:|:-:|
+| 1000 | 20 | 1 (稳健 1%) | 10 | 200 |
+| 1000 | 20 | 2 (均衡 1.5%) | 15 | 300 |
+| 1000 | 20 | 3 (激进 2%) | 20 | 400 |
+| 2000 | 50 | 1 (稳健 1%) | 20 | 1000 |
+| 5000 | 10 | 3 (激进 2%) | 100 | 1000 |
+
+### 9.3 参考文档
 
 - **点卡/流水备注**：详见 [LEDGER_REMARKS.md](./LEDGER_REMARKS.md)
-- **API Key 绑定说明**：详见 [MERCHANT_BIND_API.md](./MERCHANT_BIND_API.md)（若存在）
+- **API Key 绑定说明**：详见 [MERCHANT_BIND_API.md](./MERCHANT_BIND_API.md)
 
-### 9.3 状态码约定
+### 9.4 状态码约定
 
 - **用户状态**（`users[].status`、`accounts[].status`）：1=正常，2=禁用
 - **提现状态**：0=待审核，1=已通过，2=已拒绝，3=已完成
 - **策略状态**：1=启用
+- **绑定状态**：1=运行中，0=已停止
+
+### 9.5 典型业务流程
+
+```
+1. 创建用户      POST /merchant/user/create
+2. 充值点卡      POST /merchant/user/recharge
+3. 绑定 API Key  POST /merchant/user/apikey
+4. 查看策略列表   GET  /merchant/strategies
+5. 开启策略      POST /merchant/user/strategy/open   (含 capital/leverage/risk_mode)
+6. 查看绑定      GET  /merchant/user/strategies
+7. 修改参数      POST /merchant/user/strategy/update  (可单独改 capital/leverage/risk_mode)
+8. 关闭策略      POST /merchant/user/strategy/close
+```

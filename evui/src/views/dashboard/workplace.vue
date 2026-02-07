@@ -191,7 +191,7 @@
       </el-col>
       <el-col :lg="3" :md="6" :sm="6" :xs="12">
         <el-card shadow="hover" body-style="padding: 0;">
-          <router-link to="/strategy/signal-control" class="app-link-block">
+          <router-link to="/monitor/signal-control" class="app-link-block">
             <i class="app-link-icon el-icon-connection" style="color: #b37feb;"></i>
             <div class="app-link-title">信号监控</div>
           </router-link>
@@ -199,7 +199,7 @@
       </el-col>
       <el-col :lg="3" :md="6" :sm="6" :xs="12">
         <el-card shadow="hover" body-style="padding: 0;">
-          <router-link to="/operation/tenants" class="app-link-block">
+          <router-link to="/system/tenants" class="app-link-block">
             <i class="app-link-icon el-icon-s-custom" style="color: #ffd666;"></i>
             <div class="app-link-title">租户管理</div>
           </router-link>
@@ -207,7 +207,7 @@
       </el-col>
       <el-col :lg="3" :md="6" :sm="6" :xs="12">
         <el-card shadow="hover" body-style="padding: 0;">
-          <router-link to="/operation/exchange-accounts" class="app-link-block">
+          <router-link to="/user/exchange-accounts" class="app-link-block">
             <i class="app-link-icon el-icon-wallet" style="color: #5cdbd3;"></i>
             <div class="app-link-title">交易账户</div>
           </router-link>
@@ -215,7 +215,7 @@
       </el-col>
       <el-col :lg="3" :md="6" :sm="6" :xs="12">
         <el-card shadow="hover" body-style="padding: 0;">
-          <router-link to="/node/list" class="app-link-block">
+          <router-link to="/monitor/nodes" class="app-link-block">
             <i class="app-link-icon el-icon-s-platform" style="color: #ff85c0;"></i>
             <div class="app-link-title">执行节点</div>
           </router-link>

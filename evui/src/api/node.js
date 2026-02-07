@@ -44,3 +44,11 @@ export function syncTrades(data = {}) {
 export function syncMarkets(data = {}) {
   return axios.post('/sync/markets', data)
 }
+
+// ---- 持仓监控(SL/TP) ----
+export function getPositionMonitorStatus() {
+  return axios.get('/signal-monitor/status')
+}
+export function getMonitoredPositions() {
+  return axios.get('/sync/monitored-positions')
+}

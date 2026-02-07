@@ -17,59 +17,62 @@ Vue.use(VueRouter)
  * meta.hide   — true 则不在侧边栏显示
  */
 const menuRoutes = [
-  // ---- 概览 ----
+  // ──────────── 仪表盘 ────────────
   {
     path: '/dashboard',
     component: () => import('@/views/dashboard/workplace'),
-    meta: {title: 'Dashboard', icon: 'el-icon-s-home'}
+    meta: {title: '仪表盘', icon: 'el-icon-s-home'}
   },
-  // ---- 交易管理 ----
+
+  // ──────────── 交易数据（纯数据查看）────────────
   {
     path: '/trading',
-    meta: {title: '交易管理', icon: 'el-icon-s-order'},
+    meta: {title: '交易数据', icon: 'el-icon-s-order'},
     children: [
       {path: '/trading/orders', component: () => import('@/views/trading/orders'), meta: {title: '订单列表'}},
       {path: '/trading/fills', component: () => import('@/views/trading/fills'), meta: {title: '成交记录'}},
-      {path: '/trading/positions', component: () => import('@/views/trading/positions'), meta: {title: '当前持仓'}},
+      {path: '/trading/positions', component: () => import('@/views/trading/positions'), meta: {title: '持仓管理'}},
       {path: '/trading/accounts', component: () => import('@/views/trading/accounts'), meta: {title: '资金账户'}},
       {path: '/trading/transactions', component: () => import('@/views/trading/transactions'), meta: {title: '资金流水'}},
-      {path: '/trading/analytics', component: () => import('@/views/trading/analytics'), meta: {title: '绩效分析'}},
-      {path: '/trading/control', component: () => import('@/views/trading/control'), meta: {title: '交易控制台'}}
+      {path: '/trading/analytics', component: () => import('@/views/trading/analytics'), meta: {title: '绩效分析'}}
     ]
   },
-  // ---- 策略与信号 ----
+
+  // ──────────── 策略管理（策略相关配置集中）────────────
   {
     path: '/strategy',
-    meta: {title: '策略与信号', icon: 'el-icon-s-opportunity'},
+    meta: {title: '策略管理', icon: 'el-icon-s-opportunity'},
     children: [
       {path: '/strategy/list', component: () => import('@/views/strategy/index'), meta: {title: '策略目录'}},
-      {path: '/strategy/bindings', component: () => import('@/views/strategy/bindings'), meta: {title: '策略绑定'}},
-      {path: '/strategy/signal-control', component: () => import('@/views/strategy/signal-control'), meta: {title: '信号监控控制台'}},
-      {path: '/strategy/signal-history', component: () => import('@/views/strategy/signal-history'), meta: {title: '信号历史'}}
+      {path: '/strategy/tenant-strategies', component: () => import('@/views/tenant/tenant-strategies'), meta: {title: '租户策略'}},
+      {path: '/strategy/bindings', component: () => import('@/views/strategy/bindings'), meta: {title: '策略绑定'}}
     ]
   },
-  // ---- 节点管理 ----
+
+  // ──────────── 监控中心（信号 + 持仓监控 + 节点）────────────
   {
-    path: '/node',
-    meta: {title: '节点管理', icon: 'el-icon-s-platform'},
+    path: '/monitor',
+    meta: {title: '监控中心', icon: 'el-icon-data-board'},
     children: [
-      {path: '/node/list', component: () => import('@/views/node/index'), meta: {title: '执行节点'}},
-      {path: '/node/sync', component: () => import('@/views/node/sync'), meta: {title: '同步管理'}}
+      {path: '/monitor/signal-control', component: () => import('@/views/strategy/signal-control'), meta: {title: '信号监控'}},
+      {path: '/monitor/signal-history', component: () => import('@/views/strategy/signal-history'), meta: {title: '信号历史'}},
+      {path: '/monitor/trading-control', component: () => import('@/views/trading/control'), meta: {title: '交易控制台'}},
+      {path: '/monitor/sync', component: () => import('@/views/node/sync'), meta: {title: '同步与持仓监控'}},
+      {path: '/monitor/nodes', component: () => import('@/views/node/index'), meta: {title: '执行节点'}}
     ]
   },
-  // ---- 运营管理 ----
+
+  // ──────────── 用户与账户 ────────────
   {
-    path: '/operation',
-    meta: {title: '运营管理', icon: 'el-icon-s-custom'},
+    path: '/user',
+    meta: {title: '用户与账户', icon: 'el-icon-s-custom'},
     children: [
-      {path: '/operation/tenants', component: () => import('@/views/tenant/index'), meta: {title: '租户管理'}},
-      {path: '/operation/tenant-strategies', component: () => import('@/views/tenant/tenant-strategies'), meta: {title: '租户策略'}},
-      {path: '/operation/users', component: () => import('@/views/user-manage/index'), meta: {title: '用户管理'}},
-      {path: '/operation/exchange-accounts', component: () => import('@/views/exchange/accounts'), meta: {title: '交易所账户'}},
-      {path: '/operation/quota-plans', component: () => import('@/views/quota/index'), meta: {title: '配额套餐'}}
+      {path: '/user/manage', component: () => import('@/views/user-manage/index'), meta: {title: '用户管理'}},
+      {path: '/user/exchange-accounts', component: () => import('@/views/exchange/accounts'), meta: {title: '交易所账户'}}
     ]
   },
-  // ---- 财务管理 ----
+
+  // ──────────── 财务管理 ────────────
   {
     path: '/finance',
     meta: {title: '财务管理', icon: 'el-icon-s-finance'},
@@ -79,11 +82,14 @@ const menuRoutes = [
       {path: '/finance/rewards', component: () => import('@/views/finance/rewards'), meta: {title: '奖励记录'}}
     ]
   },
-  // ---- 系统管理 ----
+
+  // ──────────── 系统设置（平台级配置）────────────
   {
     path: '/system',
-    meta: {title: '系统管理', icon: 'el-icon-s-tools'},
+    meta: {title: '系统设置', icon: 'el-icon-s-tools'},
     children: [
+      {path: '/system/tenants', component: () => import('@/views/tenant/index'), meta: {title: '租户管理'}},
+      {path: '/system/quota-plans', component: () => import('@/views/quota/index'), meta: {title: '配额套餐'}},
       {path: '/system/admins', component: () => import('@/views/system/admins'), meta: {title: '管理员'}},
       {path: '/system/monitor', component: () => import('@/views/dashboard/monitor'), meta: {title: '系统监控'}},
       {path: '/system/audit-log', component: () => import('@/views/system/audit-log'), meta: {title: '审计日志'}}
