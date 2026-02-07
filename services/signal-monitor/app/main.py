@@ -23,6 +23,7 @@ Signal Monitor Service - 信号监控与推送服务
 import sys
 import os
 import time
+import traceback
 import threading
 import httpx
 from collections import defaultdict
@@ -396,7 +397,7 @@ def monitor_loop():
                                             success_count=dispatch_result.get("success_count", 0),
                                         )
                                     except Exception as e:
-                                        log.error(f"strategy dispatch error [{sig.get('side')}]", error=str(e))
+                                        log.error(f"strategy dispatch error [{sig.get('side')}]", error=str(e), traceback=traceback.format_exc())
 
                                 # 推送通知
                                 if NOTIFY_ON_SIGNAL:
@@ -413,7 +414,7 @@ def monitor_loop():
                             log.debug(f"信号置信度不足: {confidence} < {min_conf}")
 
         except Exception as e:
-            log.error(f"监控循环异常: {e}")
+            log.error(f"监控循环异常: {e}", traceback=traceback.format_exc())
             monitor_state["errors"] += 1
 
         # 等待下次检测

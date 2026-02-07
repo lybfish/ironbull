@@ -73,8 +73,15 @@ class StructuredLogger:
     def __init__(self, name: str):
         self._logger = logging.getLogger(name)
     
-    def _log(self, level: int, msg: str, extra: Optional[Dict[str, Any]] = None):
-        """内部日志方法"""
+    def _log(self, level: int, msg: str, args: tuple = (), extra: Optional[Dict[str, Any]] = None):
+        """内部日志方法（兼容标准 logging 的 msg % args 格式）"""
+        # 如果传了 positional args，按标准 logging 格式化
+        if args:
+            try:
+                msg = msg % args
+            except (TypeError, ValueError):
+                # 格式化失败时原样保留
+                msg = f"{msg} {args}"
         record = self._logger.makeRecord(
             self._logger.name,
             level,
@@ -92,20 +99,20 @@ class StructuredLogger:
                 record.request_id = extra["request_id"]
         self._logger.handle(record)
     
-    def debug(self, msg: str, **extra):
-        self._log(logging.DEBUG, msg, extra if extra else None)
+    def debug(self, msg: str, *args, **extra):
+        self._log(logging.DEBUG, msg, args, extra if extra else None)
     
-    def info(self, msg: str, **extra):
-        self._log(logging.INFO, msg, extra if extra else None)
+    def info(self, msg: str, *args, **extra):
+        self._log(logging.INFO, msg, args, extra if extra else None)
     
-    def warning(self, msg: str, **extra):
-        self._log(logging.WARNING, msg, extra if extra else None)
+    def warning(self, msg: str, *args, **extra):
+        self._log(logging.WARNING, msg, args, extra if extra else None)
     
-    def error(self, msg: str, **extra):
-        self._log(logging.ERROR, msg, extra if extra else None)
+    def error(self, msg: str, *args, **extra):
+        self._log(logging.ERROR, msg, args, extra if extra else None)
     
-    def critical(self, msg: str, **extra):
-        self._log(logging.CRITICAL, msg, extra if extra else None)
+    def critical(self, msg: str, *args, **extra):
+        self._log(logging.CRITICAL, msg, args, extra if extra else None)
 
 
 _loggers: Dict[str, StructuredLogger] = {}
