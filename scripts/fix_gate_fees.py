@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from libs.core.database import get_db
 from libs.core.logger import get_logger, setup_logging
-from libs.order_trade.models import Order
+from libs.order_trade.models import Order, Fill
 from libs.member.models import ExchangeAccount
 from libs.trading.live_trader import LiveTrader
 
@@ -26,94 +26,97 @@ setup_logging(level="INFO", structured=False, service_name="fix_gate_fees")
 log = get_logger("fix_gate_fees")
 
 
-async def fix_order_fee(order: Order, api_key: str, api_secret: str, passphrase: Optional[str] = None, dry_run: bool = False):
+async def fix_order_fee(order: Order, fills: list, api_key: str, api_secret: str, passphrase: Optional[str] = None, dry_run: bool = False):
     """修复单个订单的手续费"""
-    if not order.exchange_order_id:
-        log.warning(f"订单 {order.order_id} 无 exchange_order_id，跳过")
-        return False
+    # 优先从成交记录中提取手续费（如果有）
+    total_fee = 0.0
+    fee_currency = order.fee_currency or "USDT"
     
-    # 创建 trader（使用订单关联账户的 API 密钥）
-    trader = LiveTrader(
-        exchange="gate",
-        api_key=api_key,
-        api_secret=api_secret,
-        passphrase=passphrase,
-        market_type="future",
-        sandbox=False,
-    )
+    for fill in fills:
+        if fill.fee and float(fill.fee) > 0:
+            total_fee += float(fill.fee)
+            if fill.fee_currency:
+                fee_currency = fill.fee_currency
     
-    try:
-        await trader.exchange.load_markets()
-        
-        # 等待一下确保成交记录可查
-        await asyncio.sleep(0.5)
-        
-        # 规范化 symbol
-        symbol = order.symbol
-        if "/" not in symbol and "USDT" in symbol:
-            symbol = symbol.replace("USDT", "/USDT")
-        
-        # 获取成交记录
-        trades = await trader.exchange.fetch_order_trades(order.exchange_order_id, symbol)
-        
-        if not trades:
-            log.warning(f"订单 {order.order_id} 无成交记录")
-            return False
-        
-        total_fee = 0.0
-        fee_currency = order.fee_currency or "USDT"
-        
-        for t in trades:
-            # 提取手续费
-            t_fee = t.get("fee", {})
-            if t_fee and isinstance(t_fee, dict) and t_fee.get("cost") is not None:
-                total_fee += abs(float(t_fee["cost"]))
-                if not fee_currency:
-                    fee_currency = t_fee.get("currency", "")
+    # 如果成交记录中也没有手续费，尝试从 Gate API 查询
+    if total_fee == 0 and order.exchange_order_id:
+        try:
+            # 创建 trader（使用订单关联账户的 API 密钥）
+            trader = LiveTrader(
+                exchange="gate",
+                api_key=api_key,
+                api_secret=api_secret,
+                passphrase=passphrase,
+                market_type="future",
+                sandbox=False,
+            )
             
-            # 检查 info 中的原始手续费字段（Gate 特有）
-            if total_fee == 0:
-                t_info = t.get("info", {})
-                if isinstance(t_info, dict):
-                    raw_c = (
-                        t_info.get("commission") or 
-                        t_info.get("fee") or 
-                        t_info.get("fill_fee") or
-                        t_info.get("taker_fee") or
-                        t_info.get("maker_fee") or
-                        t_info.get("n")
-                    )
-                    if raw_c is not None:
-                        try:
-                            total_fee += abs(float(raw_c))
-                        except (ValueError, TypeError):
-                            pass
-                    if not fee_currency:
-                        fee_currency = (
-                            t_info.get("commissionAsset") or 
-                            t_info.get("fee_currency") or 
-                            t_info.get("feeCurrency") or
-                            "USDT"
-                        )
-        
-        if total_fee > 0:
-            log.info(f"订单 {order.order_id}: 找到手续费 {total_fee} {fee_currency}")
-            if not dry_run:
-                order.total_fee = Decimal(str(total_fee))
-                order.fee_currency = fee_currency
-                return True
-            else:
-                log.info(f"[DRY-RUN] 将更新订单 {order.order_id}: total_fee={total_fee}, fee_currency={fee_currency}")
-                return True
+            try:
+                await trader.exchange.load_markets()
+                
+                # 等待一下确保成交记录可查
+                await asyncio.sleep(0.5)
+                
+                # 规范化 symbol
+                symbol = order.symbol
+                if "/" not in symbol and "USDT" in symbol:
+                    symbol = symbol.replace("USDT", "/USDT")
+                
+                # 获取成交记录
+                trades = await trader.exchange.fetch_order_trades(order.exchange_order_id, symbol)
+                
+                if trades:
+                    for t in trades:
+                        # 提取手续费
+                        t_fee = t.get("fee", {})
+                        if t_fee and isinstance(t_fee, dict) and t_fee.get("cost") is not None:
+                            total_fee += abs(float(t_fee["cost"]))
+                            if not fee_currency:
+                                fee_currency = t_fee.get("currency", "")
+                        
+                        # 检查 info 中的原始手续费字段（Gate 特有）
+                        if total_fee == 0:
+                            t_info = t.get("info", {})
+                            if isinstance(t_info, dict):
+                                raw_c = (
+                                    t_info.get("commission") or 
+                                    t_info.get("fee") or 
+                                    t_info.get("fill_fee") or
+                                    t_info.get("taker_fee") or
+                                    t_info.get("maker_fee") or
+                                    t_info.get("n")
+                                )
+                                if raw_c is not None:
+                                    try:
+                                        total_fee += abs(float(raw_c))
+                                    except (ValueError, TypeError):
+                                        pass
+                                if not fee_currency:
+                                    fee_currency = (
+                                        t_info.get("commissionAsset") or 
+                                        t_info.get("fee_currency") or 
+                                        t_info.get("feeCurrency") or
+                                        "USDT"
+                                    )
+            except Exception as e:
+                log.debug(f"订单 {order.order_id} 从 API 查询失败: {e}")
+            finally:
+                await trader.close()
+        except Exception as e:
+            log.debug(f"订单 {order.order_id} 创建 trader 失败: {e}")
+    
+    if total_fee > 0:
+        log.info(f"订单 {order.order_id}: 找到手续费 {total_fee} {fee_currency}")
+        if not dry_run:
+            order.total_fee = Decimal(str(total_fee))
+            order.fee_currency = fee_currency
+            return True
         else:
-            log.warning(f"订单 {order.order_id}: 未找到手续费")
-            return False
-            
-    except Exception as e:
-        log.error(f"订单 {order.order_id} 修复失败: {e}")
+            log.info(f"[DRY-RUN] 将更新订单 {order.order_id}: total_fee={total_fee}, fee_currency={fee_currency}")
+            return True
+    else:
+        log.warning(f"订单 {order.order_id}: 未找到手续费")
         return False
-    finally:
-        await trader.close()
 
 
 async def main():
@@ -168,8 +171,13 @@ async def main():
             
             for order in account_orders:
                 log.info(f"  订单 {order.order_id} ({order.symbol}, {order.created_at})")
+                
+                # 获取订单的成交记录
+                fills = db.query(Fill).filter(Fill.order_id == order.order_id).all()
+                
                 success = await fix_order_fee(
-                    order, 
+                    order,
+                    fills,
                     account.api_key, 
                     account.api_secret, 
                     account.passphrase,
