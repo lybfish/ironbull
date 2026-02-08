@@ -91,6 +91,9 @@ def apply_remote_results(
         exchange_order_id = item.get("exchange_order_id") or ""
         filled_qty = float(item.get("filled_quantity") or 0)
         filled_price = float(item.get("filled_price") or 0)
+        # ★ 从响应结果中提取手续费（如果存在）
+        fee = float(item.get("fee") or item.get("commission") or 0)
+        fee_currency = item.get("fee_currency") or item.get("commission_asset") or "USDT"
         if filled_qty <= 0 or filled_price <= 0:
             outcome.append({"account_id": account_id, "user_id": target.user_id, "success": False, "error": "no fill"})
             continue
@@ -130,8 +133,8 @@ def apply_remote_results(
                 side=(side or "BUY").upper(),
                 quantity=Decimal(str(filled_qty)),
                 price=Decimal(str(filled_price)),
-                fee=Decimal("0"),
-                fee_currency="USDT",
+                fee=Decimal(str(fee)),  # ★ 使用从响应中提取的手续费
+                fee_currency=fee_currency,
                 exchange_trade_id=exchange_order_id,
                 filled_at=datetime.now(),
                 position_side=position_side,
