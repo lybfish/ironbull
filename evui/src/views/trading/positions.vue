@@ -604,8 +604,9 @@ export default {
         // 用持仓的开仓/平仓时间限定查询范围，避免拉到其他持仓周期的订单
         // ★ 根据持仓的 position_side 过滤订单，避免多空订单混淆
         const params = { symbol: row.symbol, account_id: row.account_id, limit: 100 }
-        if (row.position_side && row.position_side !== 'NONE') {
-          params.position_side = row.position_side
+        // 确保 position_side 正确传递（统一转为大写，匹配数据库值）
+        if (row.position_side && row.position_side.toUpperCase() !== 'NONE') {
+          params.position_side = row.position_side.toUpperCase()
         }
         const fillParams = { symbol: row.symbol, account_id: row.account_id, limit: 200 }
         if (row.opened_at) {
