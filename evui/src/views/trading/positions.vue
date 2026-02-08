@@ -605,8 +605,9 @@ export default {
         // ★ 根据持仓的 position_side 过滤订单，避免多空订单混淆
         const params = { symbol: row.symbol, account_id: row.account_id, limit: 100 }
         // 确保 position_side 正确传递（统一转为大写，匹配数据库值）
-        const posSide = (row.position_side || '').toString().toUpperCase().trim()
-        if (posSide && posSide !== 'NONE') {
+        // 从多个可能的字段名获取 position_side（兼容不同数据格式）
+        const posSide = (row.position_side || row.positionSide || '').toString().toUpperCase().trim()
+        if (posSide && posSide !== 'NONE' && posSide !== '') {
           params.position_side = posSide
         }
         const fillParams = { symbol: row.symbol, account_id: row.account_id, limit: 200 }
