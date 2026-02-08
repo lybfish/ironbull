@@ -273,7 +273,10 @@ class OrderRepository:
         if filter.close_reason:
             conditions.append(Order.close_reason == filter.close_reason)
         if filter.position_side:
-            conditions.append(Order.position_side == filter.position_side)
+            # 确保 position_side 过滤正确应用（统一转为大写）
+            pos_side = str(filter.position_side).upper().strip()
+            if pos_side and pos_side != 'NONE':
+                conditions.append(Order.position_side == pos_side)
         if filter.start_time:
             conditions.append(Order.created_at >= filter.start_time)
         if filter.end_time:
@@ -314,7 +317,10 @@ class OrderRepository:
         if filter.close_reason:
             conditions.append(Order.close_reason == filter.close_reason)
         if filter.position_side:
-            conditions.append(Order.position_side == filter.position_side)
+            # 确保 position_side 过滤正确应用（统一转为大写）
+            pos_side = str(filter.position_side).upper().strip()
+            if pos_side and pos_side != 'NONE':
+                conditions.append(Order.position_side == pos_side)
         if filter.start_time:
             conditions.append(Order.created_at >= filter.start_time)
         if filter.end_time:
