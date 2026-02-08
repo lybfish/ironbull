@@ -900,29 +900,36 @@ class LiveTrader(Trader):
                                     if not fee_currency:
                                         fee_currency = t_fee.get("currency", "")
                             
-                            # 检查 info 中的原始手续费字段（Gate 特有）
+                            # 检查 info 中的原始手续费字段（所有交易所）
                             if need_fee and total_fee == 0:
                                 t_info = t.get("info", {})
                                 if isinstance(t_info, dict):
-                                    # Gate 可能的手续费字段
+                                    # 通用手续费字段（Binance/OKX/Gate 都支持）
                                     raw_c = (
-                                        t_info.get("commission") or 
-                                        t_info.get("fee") or 
-                                        t_info.get("fill_fee") or
-                                        t_info.get("taker_fee") or
-                                        t_info.get("maker_fee") or
-                                        t_info.get("n")
+                                        t_info.get("commission") or      # Binance futures
+                                        t_info.get("fee") or             # 通用
+                                        t_info.get("fill_fee") or        # Gate 特有
+                                        t_info.get("taker_fee") or       # Gate 特有
+                                        t_info.get("maker_fee") or       # Gate 特有
+                                        t_info.get("feeAmt") or          # OKX 可能
+                                        t_info.get("fee_amt") or         # OKX 可能
+                                        t_info.get("n")                  # Gate 可能
                                     )
                                     if raw_c is not None:
                                         try:
                                             total_fee += abs(float(raw_c))
                                         except (ValueError, TypeError):
-                                            pass
+                                            # 尝试字符串转换
+                                            try:
+                                                total_fee += abs(float(str(raw_c).strip()))
+                                            except (ValueError, TypeError):
+                                                pass
                                     if not fee_currency:
                                         fee_currency = (
-                                            t_info.get("commissionAsset") or 
-                                            t_info.get("fee_currency") or 
-                                            t_info.get("feeCurrency") or
+                                            t_info.get("commissionAsset") or      # Binance
+                                            t_info.get("feeCurrency") or          # 通用
+                                            t_info.get("fee_currency") or         # Gate
+                                            t_info.get("feeCcy") or               # OKX 可能
                                             ""
                                         )
                             
