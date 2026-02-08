@@ -12,6 +12,7 @@ import os
 import asyncio
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import Optional
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
