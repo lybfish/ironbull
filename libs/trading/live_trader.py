@@ -873,38 +873,76 @@ class LiveTrader(Trader):
                         raw_response=result.raw_response,
                     )
 
-            # ★ 手续费补偿：如果 commission 仍为 0 且已成交，通过 fetch_my_trades 获取真实手续费
+            # ★ 价格和手续费补偿：如果已成交但价格或手续费为 0，通过 fetch_order_trades 获取真实数据
             if (
                 result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
                 and (result.filled_quantity or 0) > 0
-                and (result.commission or 0) == 0
                 and result.exchange_order_id
+                and ((result.commission or 0) == 0 or (result.filled_price or 0) == 0)
             ):
                 try:
-                    await asyncio.sleep(0.3)  # 短暂等待确保成交记录可查
+                    await asyncio.sleep(0.5)  # 等待成交记录可查（Gate 可能需要更长时间）
                     trades = await self.exchange.fetch_order_trades(result.exchange_order_id, ccxt_sym)
                     if trades:
-                        total_fee = 0.0
-                        fee_currency = ""
+                        # 如果原手续费为0，才从成交记录中提取
+                        need_fee = (result.commission or 0) == 0
+                        total_fee = result.commission or 0.0
+                        fee_currency = result.commission_asset or ""
+                        total_cost = 0.0
+                        total_qty = 0.0
+                        
                         for t in trades:
-                            t_fee = t.get("fee", {})
-                            if t_fee and isinstance(t_fee, dict) and t_fee.get("cost") is not None:
-                                total_fee += abs(float(t_fee["cost"]))
-                                if not fee_currency:
-                                    fee_currency = t_fee.get("currency", "")
-                            # 检查 info 中的原始手续费字段
-                            if total_fee == 0:
+                            # 提取手续费（仅在需要时）
+                            if need_fee:
+                                t_fee = t.get("fee", {})
+                                if t_fee and isinstance(t_fee, dict) and t_fee.get("cost") is not None:
+                                    total_fee += abs(float(t_fee["cost"]))
+                                    if not fee_currency:
+                                        fee_currency = t_fee.get("currency", "")
+                            
+                            # 检查 info 中的原始手续费字段（Gate 特有）
+                            if need_fee and total_fee == 0:
                                 t_info = t.get("info", {})
                                 if isinstance(t_info, dict):
-                                    raw_c = t_info.get("commission") or t_info.get("fee") or t_info.get("n")
+                                    # Gate 可能的手续费字段
+                                    raw_c = (
+                                        t_info.get("commission") or 
+                                        t_info.get("fee") or 
+                                        t_info.get("fill_fee") or
+                                        t_info.get("taker_fee") or
+                                        t_info.get("maker_fee") or
+                                        t_info.get("n")
+                                    )
                                     if raw_c is not None:
                                         try:
                                             total_fee += abs(float(raw_c))
                                         except (ValueError, TypeError):
                                             pass
                                     if not fee_currency:
-                                        fee_currency = t_info.get("commissionAsset") or t_info.get("fee_currency") or ""
-                        if total_fee > 0:
+                                        fee_currency = (
+                                            t_info.get("commissionAsset") or 
+                                            t_info.get("fee_currency") or 
+                                            t_info.get("feeCurrency") or
+                                            ""
+                                        )
+                            
+                            # 提取价格（用于计算加权平均价）
+                            trade_price = t.get("price")
+                            trade_qty = t.get("amount") or t.get("quantity")
+                            if trade_price and trade_qty:
+                                try:
+                                    total_cost += float(trade_price) * float(trade_qty)
+                                    total_qty += float(trade_qty)
+                                except (ValueError, TypeError):
+                                    pass
+                        
+                        # 计算加权平均价（如果原价格为 0）
+                        new_filled_price = result.filled_price
+                        if (result.filled_price or 0) == 0 and total_qty > 0:
+                            new_filled_price = total_cost / total_qty
+                        
+                        # 更新结果
+                        if total_fee > 0 or new_filled_price > 0:
                             result = OrderResult(
                                 order_id=result.order_id,
                                 exchange_order_id=result.exchange_order_id,
@@ -915,14 +953,17 @@ class LiveTrader(Trader):
                                 requested_quantity=result.requested_quantity,
                                 requested_price=result.requested_price,
                                 filled_quantity=result.filled_quantity,
-                                filled_price=result.filled_price,
-                                commission=total_fee,
+                                filled_price=new_filled_price if new_filled_price > 0 else result.filled_price,
+                                commission=total_fee if total_fee > 0 else result.commission,
                                 commission_asset=fee_currency or result.commission_asset,
                                 raw_response=result.raw_response,
                             )
-                            logger.info("fee fetched from trades", commission=total_fee, currency=fee_currency)
+                            if total_fee > 0:
+                                logger.info("fee fetched from trades", commission=total_fee, currency=fee_currency)
+                            if new_filled_price > 0:
+                                logger.info("price fetched from trades", filled_price=new_filled_price)
                 except Exception as e:
-                    logger.debug("fetch_order_trades for fee failed (non-critical)", error=str(e))
+                    logger.debug("fetch_order_trades for price/fee failed (non-critical)", error=str(e))
 
             logger.info(
                 "order created",
@@ -1773,14 +1814,62 @@ class LiveTrader(Trader):
             info = response.get("info", {})
             if isinstance(info, dict):
                 # Binance futures: commission 字段
-                raw_comm = info.get("commission") or info.get("totalFee") or info.get("fee")
+                # Gate: fill_fee, taker_fee, maker_fee, fee, total_fee
+                raw_comm = (
+                    info.get("commission") or 
+                    info.get("totalFee") or 
+                    info.get("total_fee") or
+                    info.get("fee") or
+                    info.get("fill_fee") or      # Gate 特有
+                    info.get("taker_fee") or     # Gate 特有
+                    info.get("maker_fee") or     # Gate 特有
+                    info.get("fee_amount") or     # Gate 可能
+                    info.get("commission_amount") # Gate 可能
+                )
                 if raw_comm is not None:
                     try:
                         commission = abs(float(raw_comm))
                     except (ValueError, TypeError):
-                        pass
+                        # 尝试字符串转换（Gate 可能返回字符串）
+                        try:
+                            commission = abs(float(str(raw_comm).strip()))
+                        except (ValueError, TypeError):
+                            pass
                 if not commission_asset:
-                    commission_asset = info.get("commissionAsset") or info.get("feeCurrency") or ""
+                    commission_asset = (
+                        info.get("commissionAsset") or 
+                        info.get("feeCurrency") or 
+                        info.get("fee_currency") or  # Gate 特有
+                        info.get("fee_currency_code") or  # Gate 可能
+                        ""
+                    )
+
+        # ★ 增强价格提取（Gate 等交易所可能不返回 average 字段）
+        filled_price = response.get("average") or response.get("price") or 0
+        if filled_price == 0:
+            info = response.get("info", {})
+            if isinstance(info, dict):
+                # Gate: avgPrice, fill_price, avg_price, average_price, avg_price_str
+                raw_price = (
+                    info.get("avgPrice") or 
+                    info.get("fill_price") or 
+                    info.get("avg_price") or
+                    info.get("averagePrice") or
+                    info.get("average_price") or
+                    info.get("avg_price_str") or  # Gate 可能返回字符串
+                    info.get("price") or
+                    info.get("executed_price") or
+                    info.get("exec_price")
+                )
+                if raw_price is not None:
+                    try:
+                        filled_price = float(raw_price)
+                    except (ValueError, TypeError):
+                        # 尝试字符串转换（Gate 可能返回 "50000.5"）
+                        try:
+                            filled_price = float(str(raw_price).strip())
+                        except (ValueError, TypeError):
+                            pass
 
         return OrderResult(
             order_id=order_id,
@@ -1792,7 +1881,7 @@ class LiveTrader(Trader):
             requested_quantity=quantity,
             requested_price=price,
             filled_quantity=filled,
-            filled_price=response.get("average", response.get("price", 0)) or 0,
+            filled_price=filled_price,
             commission=commission,
             commission_asset=commission_asset,
             raw_response=response,

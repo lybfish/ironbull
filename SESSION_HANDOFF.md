@@ -132,7 +132,7 @@
 - **系统监控增强**：data-api `GET /api/monitor/metrics`（API 调用量、错误数、错误率、平均延迟、每日趋势、按服务错误分布）。evui 系统监控页增加 API 指标卡片、调用量&错误数图、延迟趋势图、错误按服务分布表。
 - **风控配置 UI**：data-api `GET/PUT /api/risk/rules`（10 条规则开关与参数，存 Redis）、`GET /api/risk/violations`（从审计日志 RISK_ 记录统计）。evui 系统设置下「风控管理」页（规则列表开关与参数编辑、违规趋势与按规则分布、最近违规记录）。
 - **路由与语义修复**：`GET /api/users/{user_id}` 仅在 user_manage 注册，users.py 中重复路由已删；`libs/trading/live_trader.py` 的 `get_balance()` 失败时改为抛 `RuntimeError` 不再静默返回 `{}`。
-- **功能路线图**：`docs/FEATURE_ROADMAP.md` 汇总待开发功能（RBAC、Webhook、手续费、交易对管理等）与已完成清单；上述 5 项已记入「已完成」。
+- **功能路线图**：`docs/FEATURE_ROADMAP.md` 汇总待开发功能（RBAC、Webhook、手续费、交易对管理等）与已完成清单；上述 7 项已记入「已完成」。
 
 ---
 
