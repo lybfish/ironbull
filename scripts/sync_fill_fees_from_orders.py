@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from libs.core.database import get_db
 from libs.core.logger import get_logger, setup_logging
+from sqlalchemy import text
 
 setup_logging(level="INFO", structured=False, service_name="sync_fill_fees")
 log = get_logger("sync_fill_fees")
@@ -52,7 +53,7 @@ def main():
             ORDER BY f.created_at DESC
         """
         
-        result = db.execute(sql, {"since": since})
+        result = db.execute(text(sql), {"since": since})
         fills = result.fetchall()
         
         log.info(f"找到 {len(fills)} 个需要同步手续费的成交记录")
@@ -87,7 +88,7 @@ def main():
                         SET fee = :fee, fee_currency = :fee_currency
                         WHERE fill_id = :fill_id
                     """
-                    db.execute(update_sql, {
+                    db.execute(text(update_sql), {
                         "fee": Decimal(str(order_fee)),
                         "fee_currency": order_fee_currency,
                         "fill_id": fill_id,
