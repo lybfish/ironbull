@@ -573,13 +573,22 @@ async def get_ticker(
     
     try:
         ticker = await client.fetch_ticker(symbol)
+        # 处理 timestamp：可能为 None 或毫秒时间戳
+        ticker_timestamp = ticker.timestamp
+        if ticker_timestamp is None:
+            import time
+            ticker_timestamp = int(time.time() * 1000)  # 使用当前时间
+        elif ticker_timestamp > 1e10:  # 如果是毫秒时间戳（> 10位数字）
+            ticker_timestamp = ticker_timestamp // 1000  # 转换为秒
+        # 如果已经是秒级时间戳，直接使用
+        
         return TickerResponse(
             symbol=ticker.symbol,
             last=ticker.last,
             bid=ticker.bid,
             ask=ticker.ask,
             volume_24h=ticker.volume_24h,
-            timestamp=ticker.timestamp // 1000,  # 转换为秒
+            timestamp=int(ticker_timestamp),
             exchange=exchange or DEFAULT_EXCHANGE,
         )
     except Exception as e:

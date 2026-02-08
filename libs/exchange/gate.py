@@ -132,13 +132,21 @@ class GateClient(ExchangeClient):
         try:
             ticker = await self._exchange.fetch_ticker(symbol)
 
+            # 处理 timestamp：Gate 可能返回 None
+            ticker_timestamp = ticker.get("timestamp")
+            if ticker_timestamp is None:
+                import time
+                ticker_timestamp = int(time.time() * 1000)  # 使用当前时间（毫秒）
+            else:
+                ticker_timestamp = int(ticker_timestamp)
+
             return Ticker(
                 symbol=symbol,
                 last=float(ticker.get("last", 0)),
                 bid=float(ticker.get("bid", 0)),
                 ask=float(ticker.get("ask", 0)),
                 volume_24h=float(ticker.get("quoteVolume", 0)),
-                timestamp=int(ticker.get("timestamp", 0)),
+                timestamp=ticker_timestamp,
             )
 
         except Exception as e:
