@@ -47,6 +47,10 @@ def list_orders(
 ):
     """订单列表（支持按租户、账户、标的、状态、交易类型、时间范围过滤）"""
     try:
+        # 调试日志：记录 position_side 过滤参数
+        if position_side:
+            logger.info(f"订单查询 position_side 过滤: {position_side}, symbol={symbol}, account_id={account_id}")
+        
         filt = OrderFilter(
             tenant_id=tenant_id,
             account_id=account_id,
@@ -65,6 +69,11 @@ def list_orders(
         )
         svc = OrderTradeService(db)
         orders, total = svc.list_orders(filt)
+        
+        # 调试日志：记录实际返回的订单数量
+        if position_side:
+            logger.info(f"订单查询结果: position_side={position_side}, 返回 {len(orders)} 个订单")
+        
         return {"success": True, "data": [dto_to_dict(o) for o in orders], "total": total}
     except Exception as e:
         logger.exception("订单查询失败")

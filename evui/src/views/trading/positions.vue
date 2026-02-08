@@ -605,12 +605,9 @@ export default {
         // ★ 根据持仓的 position_side 过滤订单，避免多空订单混淆
         const params = { symbol: row.symbol, account_id: row.account_id, limit: 100 }
         // 确保 position_side 正确传递（统一转为大写，匹配数据库值）
-        const posSide = (row.position_side || '').toString().toUpperCase()
+        const posSide = (row.position_side || '').toString().toUpperCase().trim()
         if (posSide && posSide !== 'NONE') {
           params.position_side = posSide
-          console.log('[持仓详情] 过滤订单 position_side:', posSide, 'params:', params)
-        } else {
-          console.warn('[持仓详情] position_side 为空或NONE，不过滤:', row.position_side)
         }
         const fillParams = { symbol: row.symbol, account_id: row.account_id, limit: 200 }
         if (row.opened_at) {
