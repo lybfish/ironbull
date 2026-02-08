@@ -20,7 +20,6 @@ from libs.core.logger import get_logger, setup_logging
 from libs.core.config import get_config
 from libs.order_trade.models import Order
 from libs.trading.live_trader import LiveTrader
-from libs.contracts import OrderSide, OrderType
 
 setup_logging(level="INFO", structured=False, service_name="fix_gate_fees")
 log = get_logger("fix_gate_fees")
