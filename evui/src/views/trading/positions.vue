@@ -606,7 +606,12 @@ export default {
         const params = { symbol: row.symbol, account_id: row.account_id, limit: 100 }
         // 确保 position_side 正确传递（统一转为大写，匹配数据库值）
         // 从多个可能的字段名获取 position_side（兼容不同数据格式）
-        const posSide = (row.position_side || row.positionSide || '').toString().toUpperCase().trim()
+        let posSide = (row.position_side || row.positionSide || '').toString().toUpperCase().trim()
+        // 如果 position_side 为空，根据 isLong 判断（备用方案）
+        if (!posSide || posSide === 'NONE' || posSide === '') {
+          const isLongPos = this.isLong(row)
+          posSide = isLongPos ? 'LONG' : 'SHORT'
+        }
         if (posSide && posSide !== 'NONE' && posSide !== '') {
           params.position_side = posSide
         }
