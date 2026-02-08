@@ -153,6 +153,7 @@ class OrderFilter:
     signal_id: Optional[str] = None
     trade_type: Optional[str] = None        # OPEN/CLOSE/ADD/REDUCE
     close_reason: Optional[str] = None      # SL/TP/SIGNAL/MANUAL/LIQUIDATION
+    position_side: Optional[str] = None     # LONG/SHORT（合约双向持仓）
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     limit: int = 100

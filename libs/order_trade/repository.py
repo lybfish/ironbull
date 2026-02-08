@@ -272,6 +272,8 @@ class OrderRepository:
             conditions.append(Order.trade_type == filter.trade_type)
         if filter.close_reason:
             conditions.append(Order.close_reason == filter.close_reason)
+        if filter.position_side:
+            conditions.append(Order.position_side == filter.position_side)
         if filter.start_time:
             conditions.append(Order.created_at >= filter.start_time)
         if filter.end_time:
@@ -311,6 +313,8 @@ class OrderRepository:
             conditions.append(Order.trade_type == filter.trade_type)
         if filter.close_reason:
             conditions.append(Order.close_reason == filter.close_reason)
+        if filter.position_side:
+            conditions.append(Order.position_side == filter.position_side)
         if filter.start_time:
             conditions.append(Order.created_at >= filter.start_time)
         if filter.end_time:
