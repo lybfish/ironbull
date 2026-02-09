@@ -360,6 +360,8 @@ async def _run_one(
             "exchange_order_id": exchange_order_id,
             "filled_quantity": coin_qty,
             "filled_price": filled_price,
+            "commission": result.commission or 0.0,
+            "commission_asset": result.commission_asset or "",
             "error": error_msg,
         }
     except Exception as e:
@@ -375,6 +377,8 @@ async def _run_one(
             "exchange_order_id": None,
             "filled_quantity": 0,
             "filled_price": 0,
+            "commission": 0.0,
+            "commission_asset": "",
             "error": str(e),
         }
 
