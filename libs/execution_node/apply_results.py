@@ -94,6 +94,13 @@ def apply_remote_results(
         # ★ 从响应结果中提取手续费（如果存在）
         fee = float(item.get("fee") or item.get("commission") or 0)
         fee_currency = item.get("fee_currency") or item.get("commission_asset") or "USDT"
+        # 调试日志：记录手续费提取情况
+        if fee > 0:
+            log.info("手续费已从执行节点提取", order_id=order_id, account_id=account_id, fee=fee, fee_currency=fee_currency, 
+                    raw_commission=item.get("commission"), raw_fee=item.get("fee"))
+        elif item.get("commission") or item.get("fee"):
+            log.warning("执行节点返回了手续费但值为0", order_id=order_id, account_id=account_id,
+                       commission=item.get("commission"), fee=item.get("fee"))
         if filled_qty <= 0 or filled_price <= 0:
             outcome.append({"account_id": account_id, "user_id": target.user_id, "success": False, "error": "no fill"})
             continue
