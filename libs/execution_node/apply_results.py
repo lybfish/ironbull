@@ -14,6 +14,54 @@ from libs.exchange.utils import normalize_symbol
 
 log = get_logger("execution-node-apply")
 
+# 各交易所默认 taker 费率（用于手续费fallback）
+EXCHANGE_FEE_RATES = {
+    "binance": 0.0004,  # 0.04%
+    "binanceusdm": 0.0004,  # Binance USD-M 合约
+    "okx": 0.0005,      # 0.05%
+    "gate": 0.0005,     # 0.05%
+    "gateio": 0.0005,   # Gate.io 别名
+}
+
+
+def _estimate_fee_by_exchange(exchange: str, filled_qty: float, filled_price: float) -> tuple[float, str]:
+    """
+    根据交易所默认费率估算手续费（fallback机制）
+    
+    Args:
+        exchange: 交易所名称
+        filled_qty: 成交数量
+        filled_price: 成交价格
+        
+    Returns:
+        (估算手续费, 手续费币种)
+    """
+    if filled_qty <= 0 or filled_price <= 0:
+        return 0.0, "USDT"
+    
+    # 获取交易所费率
+    fee_rate = EXCHANGE_FEE_RATES.get(exchange.lower())
+    if not fee_rate:
+        # 未知交易所，尝试匹配部分名称
+        exchange_lower = exchange.lower()
+        if "binance" in exchange_lower:
+            fee_rate = 0.0004
+        elif "okx" in exchange_lower or "okex" in exchange_lower:
+            fee_rate = 0.0005
+        elif "gate" in exchange_lower:
+            fee_rate = 0.0005
+        else:
+            log.warning("未知交易所费率，使用默认0.05%", exchange=exchange)
+            fee_rate = 0.0005  # 默认费率
+    
+    # 成交金额 = 价格 × 数量
+    trade_value = filled_qty * filled_price
+    
+    # 手续费 = 成交金额 × 费率
+    estimated_fee = trade_value * fee_rate
+    
+    return estimated_fee, "USDT"
+
 
 def _write_sl_tp_to_position_remote(
     session,
@@ -94,6 +142,18 @@ def apply_remote_results(
         # ★ 从响应结果中提取手续费（如果存在）
         fee = float(item.get("fee") or item.get("commission") or 0)
         fee_currency = item.get("fee_currency") or item.get("commission_asset") or "USDT"
+        
+        # ★ Fallback机制：如果手续费为0，根据交易所默认费率自动估算
+        if fee <= 0 and filled_qty > 0 and filled_price > 0:
+            exchange_name = target.exchange or exchange_default
+            estimated_fee, estimated_currency = _estimate_fee_by_exchange(exchange_name, filled_qty, filled_price)
+            if estimated_fee > 0:
+                fee = estimated_fee
+                fee_currency = estimated_currency
+                log.info("手续费已通过fallback估算", order_id=order_id, account_id=account_id, 
+                        exchange=exchange_name, fee=fee, fee_currency=fee_currency,
+                        trade_value=filled_qty * filled_price)
+        
         # 调试日志：记录手续费提取情况
         if fee > 0:
             log.info("手续费已从执行节点提取", order_id=order_id, account_id=account_id, fee=fee, fee_currency=fee_currency, 
