@@ -105,6 +105,8 @@ class BacktestEngine:
         margin_mode: str = "isolated",   # 保证金模式: isolated=逐仓(默认), cross=全仓
         trailing_stop_pct: float = 0.0,  # 移动止损回撤距离（基于保证金百分比，0=不启用）
         trailing_activation_pct: float = 0.0,  # 移动止损激活阈值（浮盈达到保证金的X%后激活，0=立即激活）
+        max_drawdown_pct: float = 0.0,  # 最大回撤保护（百分比，0=不启用，例如 25.0 表示回撤 25% 后停止交易）
+        max_consecutive_losses: int = 0,  # 连续亏损保护（0=不启用，例如 5 表示连续亏 5 笔后暂停）
     ):
         self.initial_balance = initial_balance
         self.commission_rate = commission_rate
@@ -117,6 +119,10 @@ class BacktestEngine:
         self.margin_mode = margin_mode        # 保证金模式
         self.trailing_stop_pct = trailing_stop_pct          # 移动止损距离
         self.trailing_activation_pct = trailing_activation_pct  # 激活阈值
+        self.max_drawdown_pct = max_drawdown_pct            # 最大回撤保护
+        self.max_consecutive_losses = max_consecutive_losses  # 连续亏损保护
+        self._consecutive_losses = 0                         # 当前连续亏损计数
+        self._dd_halted = False                              # 回撤保护已触发
         
         # 账户状态
         self.balance = initial_balance
@@ -129,6 +135,9 @@ class BacktestEngine:
         
         # 单向模式兼容
         self.position: Optional[Trade] = None
+        
+        # 限价单（pending orders）
+        self.pending_orders: List[Dict] = []  # {signal, entry_price, side, stop_loss, take_profit, created_at}
         
         # 交易记录
         self.trades: List[Trade] = []
@@ -215,6 +224,11 @@ class BacktestEngine:
     ) -> BacktestResult:
         """运行回测"""
         
+        # 如果策略声明了 min_lookback，使用较大值确保足够的历史数据
+        strategy_min = getattr(strategy, "min_lookback", 0)
+        if strategy_min > lookback:
+            lookback = strategy_min
+        
         if len(candles) < lookback + 1:
             raise ValueError(f"K线数据不足：需要至少 {lookback + 1} 根，实际 {len(candles)} 根")
         
@@ -227,12 +241,22 @@ class BacktestEngine:
         # 重置状态
         self._reset()
         
+        # 保存完整candles引用，供_check_pending使用
+        self._full_candles = candles
+        
+        # 保存策略引用，供_check_pending_orders使用
+        self._strategy = strategy
+        
         # 逐根K线回放
         for i in range(lookback, len(candles)):
-            history = candles[i - lookback : i + 1]
+            if getattr(strategy, "requires_full_history", False):
+                history = candles[: i + 1]
+            else:
+                history = candles[i - lookback : i + 1]
             current_candle = candles[i]
             current_price = current_candle["close"]
             current_time = self._parse_time(current_candle["timestamp"])
+            self._current_index = i  # 保存当前索引，供_check_pending使用
             
             # 检查止损止盈
             self._check_all_stop_loss_take_profit(
@@ -240,6 +264,19 @@ class BacktestEngine:
                 current_candle["low"],
                 current_price,
                 current_time,
+            )
+            
+            # 检查限价单是否触达（在策略分析之前）
+            prev_candle = candles[i - 1] if i > 0 else None
+            prev2_candle = candles[i - 2] if i > 1 else None
+            self._check_pending_orders(
+                current_candle["high"],
+                current_candle["low"],
+                current_price,
+                current_time,
+                current_candle,
+                prev_candle,
+                prev2_candle,
             )
             
             # 构建持仓信息传给策略
@@ -253,8 +290,8 @@ class BacktestEngine:
                 positions=positions,
             )
             
-            # 处理信号
-            if signal:
+            # 处理信号（含回撤保护 + 连续亏损保护）
+            if signal and not self._is_risk_halted():
                 self._handle_signal(signal, current_price, current_time)
             
             # 更新权益曲线
@@ -274,6 +311,18 @@ class BacktestEngine:
             start_time=self._parse_time(candles[lookback]["timestamp"]),
             end_time=self._parse_time(candles[-1]["timestamp"]),
         )
+    
+    def _is_risk_halted(self) -> bool:
+        """检查是否触发风控保护（最大回撤 / 连续亏损）"""
+        # 最大回撤保护
+        if self.max_drawdown_pct > 0 and self.peak_equity > 0:
+            current_dd = (self.peak_equity - self.equity) / self.peak_equity * 100
+            if current_dd >= self.max_drawdown_pct:
+                return True
+        # 连续亏损保护
+        if self.max_consecutive_losses > 0 and self._consecutive_losses >= self.max_consecutive_losses:
+            return True
+        return False
     
     def _detect_hedge_mode(self, strategy):
         """检测策略是否需要对冲模式"""
@@ -295,6 +344,8 @@ class BacktestEngine:
         self.equity_curve = []
         self.rr_filtered = 0
         self.liquidated_count = 0  # 逐仓爆仓计数
+        self._consecutive_losses = 0
+        self._dd_halted = False
     
     def _build_positions_info(self) -> Dict:
         """构建持仓信息传给策略"""
@@ -310,6 +361,7 @@ class BacktestEngine:
                 "has_position": self.position is not None,
                 "side": self.position.side if self.position else None,
                 "entry_price": self.position.entry_price if self.position else None,
+                "has_pending": len(self.pending_orders) > 0,
             }
 
     def _parse_time(self, value) -> datetime:
@@ -427,15 +479,188 @@ class BacktestEngine:
                 self._open_short(signal, current_price, current_time)
     
     def _handle_single_open(self, signal, current_price: float, current_time: datetime):
-        """单向模式下处理开仓"""
+        """单向模式下处理开仓（支持限价单）"""
         
+        # 获取信号中的entry_price（如果存在且不等于current_price，则创建限价单）
+        entry_price = getattr(signal, "entry_price", current_price)
+        
+        # 如果entry_price与current_price不同，或者require_retest=True，创建限价单
+        require_retest = getattr(signal, "indicators", {}).get("require_retest", False) if hasattr(signal, "indicators") else False
+        if abs(entry_price - current_price) / current_price > 0.0001 or require_retest:  # 0.01%的容差或需要回踩确认
+            # 检查是否已有限价单（同方向只保留一个，但允许创建新的限价单即使已有持仓）
+            existing_order = None
+            for o in self.pending_orders:
+                if o["signal"].side == signal.side:
+                    existing_order = o
+                    break
+            
+            if existing_order:
+                # 更新现有订单（使用更优的entry_price）
+                if abs(entry_price - current_price) < abs(existing_order["entry_price"] - current_price):
+                    existing_order["entry_price"] = entry_price
+                    existing_order["signal"] = signal
+                    existing_order["stop_loss"] = getattr(signal, "stop_loss", None)
+                    existing_order["take_profit"] = getattr(signal, "take_profit", None)
+            else:
+                # 创建新订单（即使已有持仓，也允许创建限价单，像old1一样）
+                retest_bars = getattr(signal, "indicators", {}).get("retest_bars", 20) if hasattr(signal, "indicators") else 20
+                self.pending_orders.append({
+                    "signal": signal,
+                    "entry_price": entry_price,
+                    "side": signal.side,
+                    "stop_loss": getattr(signal, "stop_loss", None),
+                    "take_profit": getattr(signal, "take_profit", None),
+                    "created_at": len(self.equity_curve),
+                    "retest_bars": retest_bars,
+                    "touched": False,
+                })
+            return
+        
+        # 如果entry_price等于current_price，直接开仓
         if self.position:
             # 反向信号 → 先平仓再开新仓
             if signal.side != self.position.side:
                 self._close_position(current_price, current_time, "SIGNAL")
-                self._open_position(signal, current_price, current_time)
+                self._open_position(signal, entry_price, current_time)
         else:
-            self._open_position(signal, current_price, current_time)
+            self._open_position(signal, entry_price, current_time)
+    
+    # ========== 限价单处理 ==========
+    
+    def _check_pending_orders(self, high: float, low: float, current_price: float, current_time: datetime, current_candle: Dict, prev_candle: Optional[Dict] = None, prev2_candle: Optional[Dict] = None):
+        """检查限价单是否触达（与old1一致：需要回踩确认）"""
+        if not self.pending_orders:
+            return
+        
+        # 获取完整的K线历史（用于策略的_check_pending方法）
+        # 从_full_candles中获取，或者从当前history中获取
+        if hasattr(self, '_full_candles') and self._full_candles:
+            # 使用_full_candles，取到当前索引
+            if hasattr(self, '_current_index'):
+                full_history = self._full_candles[:self._current_index + 1]
+            else:
+                full_history = self._full_candles
+        else:
+            # 如果没有_full_candles，使用传入的candles片段
+            full_history = [prev2_candle, prev_candle, current_candle] if prev2_candle and prev_candle else [prev_candle, current_candle] if prev_candle else [current_candle]
+        
+        # 从后往前遍历，避免删除时索引问题
+        for i in range(len(self.pending_orders) - 1, -1, -1):
+            order = self.pending_orders[i]
+            entry_price = order["entry_price"]
+            signal = order["signal"]
+            side = order["side"]
+            stop_loss = order.get("stop_loss")
+            created_at = order.get("created_at", 0)
+            retest_bars = order.get("retest_bars", 20)
+            
+            # 检查是否超时
+            if len(self.equity_curve) - created_at > retest_bars:
+                self.pending_orders.pop(i)
+                continue
+            
+            # 检查是否触及止损（如果配置了retest_ignore_stop_touch=False）
+            retest_ignore_stop_touch = getattr(signal, "indicators", {}).get("retest_ignore_stop_touch", False) if hasattr(signal, "indicators") else False
+            if stop_loss and not retest_ignore_stop_touch:
+                if side == "BUY" and low <= stop_loss:
+                    self.pending_orders.pop(i)
+                    continue
+                elif side == "SELL" and high >= stop_loss:
+                    self.pending_orders.pop(i)
+                    continue
+            
+            # 计算zone范围（entry和stop之间的区间）
+            zone_low = min(entry_price, stop_loss) if stop_loss else entry_price
+            zone_high = max(entry_price, stop_loss) if stop_loss else entry_price
+            
+            # 检查价格是否触达zone（old1逻辑：bar["l"] <= zone_high and bar["h"] >= zone_low）
+            # 但是，对于限价单，应该检查entry_price是否被触达
+            # 对于SELL限价单，如果K线的high >= entry_price，就认为触达了
+            # 对于BUY限价单，如果K线的low <= entry_price，就认为触达了
+            if side == "BUY":
+                # BUY限价单：价格下跌到entry_price或以下
+                touched = low <= entry_price
+            else:
+                # SELL限价单：价格上涨到entry_price或以上
+                touched = high >= entry_price
+            
+            # 如果使用zone逻辑（兼容old1），也检查zone
+            zone_touched = low <= zone_high and high >= zone_low
+            touched = touched or zone_touched
+            
+            if not touched:
+                continue
+            
+            # 标记为已触达
+            if "touched" not in order:
+                order["touched"] = False
+            if not order["touched"]:
+                order["touched"] = True
+                order["touch_i"] = len(self.equity_curve)
+            
+            # 如果已触达，检查回踩拒绝形态（old1逻辑）
+            if order["touched"]:
+                # 调用策略的回踩确认方法
+                # 传入完整的K线历史（从_full_candles中取，确保策略有足够的数据）
+                if hasattr(self._strategy, "_check_pending"):
+                    # 使用完整的K线历史
+                    confirm_result = self._strategy._check_pending(
+                        signal.symbol,
+                        full_history  # 传入完整的K线历史
+                    )
+                    
+                    # 调试：记录_check_pending的返回值
+                    # print(f"[DEBUG] 限价单触达，_check_pending返回: {confirm_result}, type: {type(confirm_result)}")
+                    
+                    # 如果确认成功，开仓（像old1一样：限价单触达确认后直接开仓，不检查持仓）
+                    if isinstance(confirm_result, object) and hasattr(confirm_result, "signal_type"):
+                        # 回踩确认成功，开仓
+                        self.pending_orders.pop(i)
+                        if self.position:
+                            # 反向信号 → 先平仓再开新仓
+                            if signal.side != self.position.side:
+                                self._close_position(entry_price, current_time, "SIGNAL")
+                                self._open_position(signal, entry_price, current_time)
+                            # 同方向信号 → 先平仓再开新仓（像old1一样，允许替换持仓）
+                            else:
+                                self._close_position(entry_price, current_time, "SIGNAL")
+                                self._open_position(signal, entry_price, current_time)
+                        else:
+                            self._open_position(signal, entry_price, current_time)
+                    # 如果返回None（require_retest=False），直接开仓
+                    elif confirm_result is None:
+                        # 调试：记录None的情况
+                        # print(f"[DEBUG] 限价单触达，require_retest=False，直接开仓")
+                        self.pending_orders.pop(i)
+                        if self.position:
+                            # 反向信号 → 先平仓再开新仓
+                            if signal.side != self.position.side:
+                                self._close_position(entry_price, current_time, "SIGNAL")
+                                self._open_position(signal, entry_price, current_time)
+                            # 同方向信号 → 先平仓再开新仓（像old1一样，允许替换持仓）
+                            else:
+                                self._close_position(entry_price, current_time, "SIGNAL")
+                                self._open_position(signal, entry_price, current_time)
+                        else:
+                            self._open_position(signal, entry_price, current_time)
+                    # 如果返回其他值（如"no_pending", "expired", "stop_touched"），处理
+                    else:
+                        # 调试：记录其他返回值
+                        # print(f"[DEBUG] 限价单触达，_check_pending返回其他值: {confirm_result}，处理")
+                        # 如果返回"waiting"，继续等待
+                        # 如果返回其他状态（expired/stop_touched等），移除订单
+                        if confirm_result in ("expired", "stop_touched", "rr_insufficient", "no_pending"):
+                            self.pending_orders.pop(i)
+                        # 如果返回"waiting"，继续等待（不做任何处理）
+                else:
+                    # 如果没有_check_pending方法，或者策略没有设置_pending（require_retest=False），直接开仓
+                    self.pending_orders.pop(i)
+                    if self.position:
+                        if signal.side != self.position.side:
+                            self._close_position(entry_price, current_time, "SIGNAL")
+                            self._open_position(signal, entry_price, current_time)
+                    else:
+                        self._open_position(signal, entry_price, current_time)
     
     # ========== 开仓方法 ==========
     
@@ -593,6 +818,12 @@ class BacktestEngine:
         
         # 更新账户余额
         self.balance += pnl
+        
+        # 更新连续亏损计数（用于风控保护）
+        if pnl < 0:
+            self._consecutive_losses += 1
+        else:
+            self._consecutive_losses = 0
     
     # ========== 止损止盈检查 ==========
     

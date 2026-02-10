@@ -1,0 +1,28 @@
+{
+  "strategy_code": "smc_fibo_flex",
+  "preset_profile": "forex_specific",
+  "strategy_config": {
+    "max_loss": 100,
+    "min_rr": 2.0,
+    "fibo_levels": [0.5, 0.618, 0.705],
+    "structure": "both",
+    "bias": "with_trend",
+    "stop_buffer_pct": 0.05,
+    "tp_mode": "swing",
+    "use_ob": "auto",
+    "use_fvg": "auto",
+    "use_sweep": "auto",
+    "liquidity": "external",
+    "htf_multiplier": 4,
+    "require_htf_filter": true,
+    "enable_session_filter": true,
+    "allowed_sessions": ["london", "ny"],
+    "enable_news_filter": true,
+    "news_impact_levels": ["high"],
+    "news_blackout_minutes": 30,
+    "amd_entry_mode": "basic",
+    "direction_htf_timeframe": "4h",
+    "direction_mtf_confirm": true,
+    "auto_profile": "medium"
+  }
+}

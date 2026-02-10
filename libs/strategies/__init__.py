@@ -35,6 +35,7 @@ from .reversal_hedge import ReversalHedgeStrategy
 # 高级策略
 from .smc import SMCStrategy
 from .smc_fibo import SMCFiboStrategy
+from .smc_fibo_flex import SMCFiboFlexStrategy
 from .mtf import MTFStrategy
 from .sr_break import SRBreakStrategy
 from .grid import GridStrategy
@@ -79,6 +80,7 @@ __all__ = [
     # 高级策略
     "SMCStrategy",
     "SMCFiboStrategy",
+    "SMCFiboFlexStrategy",
     "MTFStrategy",
     "SRBreakStrategy",
     "GridStrategy",
@@ -121,6 +123,7 @@ STRATEGY_REGISTRY = {
     # 高级策略
     "smc": SMCStrategy,
     "smc_fibo": SMCFiboStrategy,
+    "smc_fibo_flex": SMCFiboFlexStrategy,
     "mtf": MTFStrategy,
     "sr_break": SRBreakStrategy,
     "grid": GridStrategy,

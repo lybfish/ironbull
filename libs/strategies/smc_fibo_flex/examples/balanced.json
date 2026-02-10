@@ -1,0 +1,26 @@
+{
+  "strategy_code": "smc_fibo_flex",
+  "preset_profile": "balanced",
+  "strategy_config": {
+    "max_loss": 100,
+    "min_rr": 1.8,
+    "fibo_levels": [0.382, 0.5, 0.618, 0.705],
+    "fibo_tolerance": 0.005,
+    "structure": "both",
+    "bias": "with_trend",
+    "stop_buffer_pct": 0.05,
+    "tp_mode": "swing",
+    "require_retest": true,
+    "retest_bars": 20,
+    "pinbar_ratio": 2.0,
+    "allow_engulf": true,
+    "use_ob": true,
+    "use_fvg": true,
+    "use_sweep": "auto",
+    "htf_multiplier": 4,
+    "require_htf_filter": true,
+    "auto_profile": "medium",
+    "enable_signal_score": true,
+    "min_signal_score": 1.0
+  }
+}

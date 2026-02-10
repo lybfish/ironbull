@@ -1,0 +1,29 @@
+{
+  "symbol": "ETHUSDT",
+  "timeframe": "15m",
+  "strategy": "smc_fibo",
+  "entry_mode": "retest",
+  "order_type": "limit",
+  "rr": 2,
+  "tif_bars": 20,
+  "initial_cash": 10000,
+  "fee_bps": 4,
+  "risk_cash": 100,
+  "smc": {
+    "fiboLevels": [0.5, 0.618, 0.705],
+    "retestBars": 20,
+    "minRr": 2,
+    "pinbarRatio": 1.5,
+    "allowEngulf": true,
+    "stopBufferPct": 0.05,
+    "stopSource": "auto",
+    "tpMode": "swing",
+    "bias": "with_trend",
+    "structure": "both",
+    "entry": "auto",
+    "session": "all",
+    "htfTimeframe": "1h",
+    "fiboFallback": true,
+    "retestIgnoreStopTouch": false
+  }
+}
