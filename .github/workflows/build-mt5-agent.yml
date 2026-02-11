@@ -1,0 +1,82 @@
+name: Build MT5 Agent
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.0)'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    defaults:
+      run:
+        shell: powershell
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r nodes/mt5-node-agent/requirements.txt
+          pip install pyinstaller
+      
+      - name: Build executable
+        run: |
+          cd nodes/mt5-node-agent
+          pyinstaller --onefile --windowed --name mt5-node-agent pyinstaller.spec
+      
+      - name: Prepare release files
+        run: |
+          # Create release directory
+          $releaseDir = "release"
+          New-Item -ItemType Directory -Force -Path $releaseDir
+          
+          # Copy executable
+          Copy-Item "dist/mt5-node-agent.exe" "$releaseDir/"
+          
+          # Copy config template
+          Copy-Item "config.yaml.sample" "$releaseDir/"
+          
+          # Copy README
+          Copy-Item "README.md" "$releaseDir/"
+          
+          # Create version info
+          $version = if ("${{ github.event.release.tag_name }}") { "${{ github.event.release.tag_name }}" } else { "dev" }
+          "$version" | Out-File -FilePath "$releaseDir/VERSION.txt" -Encoding UTF8
+          
+          # List files
+          Get-ChildItem -Path $releaseDir -Recurse
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mt5-node-agent-release
+          path: release/
+          retention-days: 7
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            release/mt5-node-agent.exe
+            release/config.yaml.sample
+            release/README.md
+            release/VERSION.txt
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

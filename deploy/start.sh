@@ -13,7 +13,7 @@
 #      ./deploy/start.sh start data-api merchant-api
 #      ./deploy/start.sh stop signal-monitor
 #      ./deploy/start.sh restart data-api
-# 服务名：data-api | merchant-api | signal-monitor | monitor-daemon
+# 服务名：data-api | merchant-api | signal-monitor | monitor-daemon | execution-node | mt5-node
 # ============================================================
 
 set -euo pipefail
@@ -56,7 +56,7 @@ if ! python3 -c "import uvicorn" 2>/dev/null; then
 fi
 
 # ---- 服务定义（case 实现，兼容 Bash 3.x / macOS） ----
-ALL_SERVICES="data-provider data-api merchant-api signal-monitor monitor-daemon execution-node"
+ALL_SERVICES="data-provider data-api merchant-api signal-monitor monitor-daemon execution-node mt5-node"
 
 get_service_cmd() {
     case "$1" in
@@ -66,6 +66,7 @@ get_service_cmd() {
         signal-monitor) echo "python3 -m flask --app app.main run --host=0.0.0.0 --port=8020" ;;
         monitor-daemon)   echo "python3 scripts/monitor_daemon.py" ;;
         execution-node)   echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 9101 --workers 1" ;;
+        mt5-node)       echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 9102 --workers 1" ;;
         *)                echo "" ;;
     esac
 }
@@ -78,6 +79,7 @@ get_service_dir() {
         signal-monitor) echo "$PROJECT_ROOT/services/signal-monitor" ;;
         monitor-daemon)   echo "$PROJECT_ROOT" ;;
         execution-node)   echo "$PROJECT_ROOT/services/execution-node" ;;
+        mt5-node)       echo "$PROJECT_ROOT/nodes/mt5-node" ;;
         *)                echo "" ;;
     esac
 }

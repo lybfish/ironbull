@@ -1,0 +1,34 @@
+# MT5 Node Agent 配置
+# 复制此文件为 config.yaml 并修改配置
+
+# 服务器配置
+server_url: "your-server.com:9102"  # Linux 服务器地址 (IP 或域名)
+node_id: "node_001"                 # 节点 ID (唯一标识，同一服务器下不能重复)
+
+# MT5 配置
+mt5:
+  login: 123456                     # MT5 账户登录名
+  password: "your_password"         # MT5 账户密码
+  server: "ICMarkets-Demo"          # MT5 服务器名称
+  # path: "C:/Program Files/MetaTrader 5/terminal64.exe"  # MT5 终端路径 (可选，默认使用系统安装版本)
+
+# 监控品种 (K 线采集)
+symbols:
+  - "EURUSD"
+  - "XAUUSD"
+  - "GBPUSD"
+  - "AUDUSD"
+  - "USDJPY"
+
+# K 线时间周期
+# 可选值: M1, M5, M15, M30, H1, H4, D1, W1, MN1
+timeframe: "H1"
+
+# 采集间隔 (秒)
+heartbeat_interval: 30              # 心跳间隔
+kline_interval: 60                  # K 线上报间隔
+balance_interval: 300               # 余额/持仓上报间隔 (5分钟)
+
+# 日志级别
+# 可选值: DEBUG, INFO, WARNING, ERROR, CRITICAL
+log_level: "INFO"
