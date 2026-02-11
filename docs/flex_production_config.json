@@ -34,6 +34,7 @@
     
     "confirm_after_fill": false,
     "signal_cooldown": 20,
+    "risk_based_sizing": true,
     
     "fibo_fallback": false,
     "require_htf_filter": false,
@@ -56,7 +57,8 @@
     "signal_cooldown=20": "每20根K线(15m周期=5小时)最多1个信号,控制交易频率",
     "strict_single_position": "严格单仓,有持仓不开新仓",
     "min_rr=1.5": "最低盈亏比1.5:1",
-    "slippage_pct=0.05": "止损单滑点0.05%"
+    "slippage_pct=0.05": "止损单滑点0.05%",
+    "risk_based_sizing=true": "以损定仓模式:根据止损距离反推仓位,每笔最大亏损=capital×risk_pct"
   },
 
   "_实盘信号流程": {

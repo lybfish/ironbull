@@ -124,6 +124,7 @@ INSERT INTO `dim_strategy` (
         "entry_source": "auto",
         "confirm_after_fill": false,
         "signal_cooldown": 20,
+        "risk_based_sizing": true,
         "fibo_fallback": false,
         "require_htf_filter": false,
         "enable_signal_score": false,

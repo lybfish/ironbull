@@ -47,6 +47,7 @@ class ExecutionTarget:
     binding_capital: float = 0  # 用户本金
     binding_leverage: int = 0   # 用户杠杆
     binding_amount_usdt: float = 0  # 用户计算后的下单金额
+    binding_risk_mode: int = 1  # 风险档位 1=稳健 2=均衡 3=激进
 
 
 def _generate_invite_code() -> str:
@@ -377,5 +378,6 @@ class MemberService:
                 binding_capital=b_capital,
                 binding_leverage=b_leverage,
                 binding_amount_usdt=b_amount,
+                binding_risk_mode=int(b.risk_mode or 1),
             ))
         return targets
