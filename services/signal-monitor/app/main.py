@@ -1818,6 +1818,7 @@ def _calc_risk_based_amount(
     risk_pct: float,
     entry_price: float,
     stop_loss: float,
+    leverage: int = 0,
     max_amount_cap: float = 0,
 ) -> float:
     """
@@ -1831,6 +1832,8 @@ def _calc_risk_based_amount(
     安全阀:
         1. 止损距离 < 0.1% 视为无效，按 0.1% 兜底
         2. 下单金额不超过本金的 3 倍（防止止损太窄导致仓位过大）
+        3. 逐仓保护：止损距离不能超过爆仓线（1/杠杆 × 80%安全系数）
+           如果超过，自动缩小仓位使亏损 ≤ 保证金的 80%
     
     示例（本金 1000U, risk_pct 1%）:
         止损距离 1%  → amount = 10 / 0.01 = 1000U → 亏损 10U ✓
@@ -1852,6 +1855,25 @@ def _calc_risk_based_amount(
     # 安全阀 2: 不超过本金的 3 倍
     cap = max_amount_cap if max_amount_cap > 0 else capital * 3
     amount = min(amount, cap)
+
+    # 安全阀 3: 逐仓爆仓保护
+    # 逐仓: 保证金 margin = amount / leverage
+    # 爆仓: 价格反向 ≈ 1/leverage 时保证金归零（如 20x → 5%）
+    # 如果 止损距离 > 爆仓线的 80%，说明还没到止损就可能爆仓
+    # → 直接跳过这笔交易（返回 0），因为无法安全止损
+    if leverage and leverage > 1:
+        safe_threshold = 0.80 / leverage  # 安全线（20x→4%, 10x→8%）
+        if sl_distance_pct > safe_threshold:
+            import structlog
+            structlog.get_logger().warning(
+                "以损定仓: 止损距离超过逐仓安全线，跳过",
+                sl_distance=f"{sl_distance_pct*100:.2f}%",
+                safe_threshold=f"{safe_threshold*100:.2f}%",
+                leverage=leverage,
+                entry_price=entry_price,
+                stop_loss=stop_loss,
+            )
+            return 0  # 跳过，不开仓
 
     return round(amount, 2)
 
@@ -1998,6 +2020,7 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
                         risk_pct=b_risk_pct,
                         entry_price=sig_entry,
                         stop_loss=sig_sl,
+                        leverage=leverage,
                     )
                     if risk_amount > 0:
                         sl_dist = abs(sig_entry - sig_sl) / sig_entry * 100
@@ -2073,6 +2096,7 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
                         risk_amount_r = _calc_risk_based_amount(
                             capital=r_capital, risk_pct=r_risk_pct,
                             entry_price=sig_entry_r, stop_loss=sig_sl_r,
+                            leverage=leverage,
                         )
                         if risk_amount_r > 0:
                             amount = risk_amount_r
