@@ -16,10 +16,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from main import MT5Client, AgentConfig, MT5Config, setup_logging
 
-# 测试配置
-TEST_CONFIG = AgentConfig(
-    server_url="localhost:9102",
-    node_id="test_win_node",
+# ============ 测试配置选择 ============
+# 修改 USE_ONLINE_SERVER 为 True 则测试线上服务器
+USE_ONLINE_SERVER = False  # True = 线上测试, False = 本地测试
+
+# 线上服务器配置
+ONLINE_CONFIG = AgentConfig(
+    server_url="54.255.160.210:9102",
+    node_id="test_online_node",
     mt5=MT5Config(
         login=0,  # Mock 模式不需要真实账户
         password="",
@@ -32,6 +36,38 @@ TEST_CONFIG = AgentConfig(
     balance_interval=300,
     log_level="DEBUG"
 )
+
+# 本地服务器配置
+LOCAL_CONFIG = AgentConfig(
+    server_url="localhost:9102",
+    node_id="test_local_node",
+    mt5=MT5Config(
+        login=0,  # Mock 模式不需要真实账户
+        password="",
+        server=""
+    ),
+    symbols=["EURUSD", "XAUUSD"],
+    timeframe="H1",
+    heartbeat_interval=30,
+    kline_interval=60,
+    balance_interval=300,
+    log_level="DEBUG"
+)
+
+# 根据选择使用对应配置
+TEST_CONFIG = ONLINE_CONFIG if USE_ONLINE_SERVER else LOCAL_CONFIG
+
+# 获取 WebSocket 地址
+def get_ws_url():
+    """获取 WebSocket 连接地址"""
+    host = "54.255.160.210" if USE_ONLINE_SERVER else "localhost"
+    port = "9102"
+    node_id = TEST_CONFIG.node_id
+    if USE_ONLINE_SERVER:
+        # 通过 Nginx 代理
+        return f"ws://{host}/ib/mt5-ws/ws/node/{node_id}"
+    else:
+        return f"ws://{host}:{port}/ws/node/{node_id}"
 
 
 async def test_mt5_client():
@@ -98,15 +134,14 @@ async def test_websocket_connection():
     print("\n" + "=" * 50)
     print("测试 2: WebSocket 连接测试")
     print("=" * 50)
-    
+
     try:
         import websockets
-        
-        print("\n尝试连接服务器: ws://localhost:9102/ws/node/test_win_node")
-        
-        async with websockets.connect(
-            f"ws://localhost:9102/ws/node/{TEST_CONFIG.node_id}"
-        ) as ws:
+
+        ws_url = get_ws_url()
+        print(f"\n尝试连接服务器: {ws_url}")
+
+        async with websockets.connect(ws_url) as ws:
             print("连接成功!")
             
             # 发送注册
@@ -148,13 +183,14 @@ async def test_full_flow():
     print("\n" + "=" * 50)
     print("测试 3: 完整流程测试")
     print("=" * 50)
-    
+
     try:
         import websockets
-        
-        async with websockets.connect(
-            f"ws://localhost:9102/ws/node/flow_test_node"
-        ) as ws:
+
+        ws_url = get_ws_url()
+        print(f"\n连接服务器: {ws_url}")
+
+        async with websockets.connect(ws_url) as ws:
             # 注册
             await ws.send(json.dumps({
                 "type": "REGISTER",
@@ -210,7 +246,14 @@ async def main():
     print("=" * 50)
     print("MT5 Node Agent - Windows 本地测试")
     print("=" * 50)
-    
+
+    # 显示当前配置
+    mode = "线上测试" if USE_ONLINE_SERVER else "本地测试"
+    print(f"模式: {mode}")
+    print(f"服务器: {TEST_CONFIG.server_url}")
+    print(f"节点ID: {TEST_CONFIG.node_id}")
+    print("-" * 50)
+
     # 配置日志
     logger = setup_logging("DEBUG")
     
