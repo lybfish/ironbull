@@ -57,8 +57,18 @@
               <span v-else class="text-placeholder">继承</span>
             </template>
           </el-table-column>
-          <el-table-column label="下单金额(U)" width="100" align="right">
-            <template slot-scope="{row}">{{ row.amount_usdt > 0 ? row.amount_usdt : '继承' }}</template>
+          <el-table-column label="单笔仓位/风控" width="140" align="right">
+            <template slot-scope="{row}">
+              <template v-if="row.risk_based_sizing">
+                <div style="line-height:1.5">
+                  <span style="color:#E6A23C;font-weight:500">以损定仓</span><br/>
+                  <span style="font-size:11px;color:#909399">每笔最大亏损: {{ row.max_loss_per_trade }}U</span>
+                </div>
+              </template>
+              <template v-else>
+                <span>{{ row.amount_usdt > 0 ? row.amount_usdt + 'U' : '继承' }}</span>
+              </template>
+            </template>
           </el-table-column>
           <el-table-column prop="min_capital" label="最低资金" width="90" align="right">
             <template slot-scope="{row}">{{ row.min_capital != null ? row.min_capital : '继承' }}</template>
@@ -131,10 +141,17 @@
             <el-radio-button :label="3">激进(2%)</el-radio-button>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="下单金额(U)" v-if="addForm.capital > 0">
+        <el-form-item v-if="addForm.capital > 0" :label="addStrategyIsRiskBased ? '每笔最大亏损' : '下单金额(U)'">
           <div style="line-height:32px;">
-            <span style="font-size:16px;font-weight:600;color:#409EFF">{{ calcAddAmountUsdt }}</span>
-            <span style="color:#909399;font-size:12px;margin-left:4px">USDT (自动计算)</span>
+            <template v-if="addStrategyIsRiskBased">
+              <span style="font-size:16px;font-weight:600;color:#E6A23C">{{ calcAddMaxLoss }}</span>
+              <span style="color:#909399;font-size:12px;margin-left:4px">USDT (capital × risk%)</span>
+              <div style="font-size:12px;color:#909399;margin-top:2px">仓位按止损距离自动调整（以损定仓）</div>
+            </template>
+            <template v-else>
+              <span style="font-size:16px;font-weight:600;color:#409EFF">{{ calcAddAmountUsdt }}</span>
+              <span style="color:#909399;font-size:12px;margin-left:4px">USDT (自动计算)</span>
+            </template>
           </div>
         </el-form-item>
         <el-form-item label="最低资金(USDT)">
@@ -188,10 +205,17 @@
             <el-radio-button :label="3">激进(2%)</el-radio-button>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="下单金额(U)" v-if="editForm.capital > 0">
+        <el-form-item v-if="editForm.capital > 0" :label="editStrategyIsRiskBased ? '每笔最大亏损' : '下单金额(U)'">
           <div style="line-height:32px;">
-            <span style="font-size:16px;font-weight:600;color:#409EFF">{{ calcEditAmountUsdt }}</span>
-            <span style="color:#909399;font-size:12px;margin-left:4px">USDT (自动计算)</span>
+            <template v-if="editStrategyIsRiskBased">
+              <span style="font-size:16px;font-weight:600;color:#E6A23C">{{ calcEditMaxLoss }}</span>
+              <span style="color:#909399;font-size:12px;margin-left:4px">USDT (capital × risk%)</span>
+              <div style="font-size:12px;color:#909399;margin-top:2px">仓位按止损距离自动调整（以损定仓）</div>
+            </template>
+            <template v-else>
+              <span style="font-size:16px;font-weight:600;color:#409EFF">{{ calcEditAmountUsdt }}</span>
+              <span style="color:#909399;font-size:12px;margin-left:4px">USDT (自动计算)</span>
+            </template>
           </div>
         </el-form-item>
         <el-form-item label="最低资金(USDT)">
@@ -260,6 +284,16 @@ export default {
     }
   },
   computed: {
+    addStrategyIsRiskBased() {
+      if (!this.addForm.strategy_id) return false
+      const s = this.masterStrategies.find(x => x.id === this.addForm.strategy_id)
+      if (!s) return false
+      const cfg = s.config || {}
+      return !!cfg.risk_based_sizing
+    },
+    editStrategyIsRiskBased() {
+      return !!this.editForm.risk_based_sizing
+    },
     calcAddAmountUsdt() {
       const cap = Number(this.addForm.capital) || 0
       const lev = Number(this.addForm.leverage) || 20
@@ -267,12 +301,24 @@ export default {
       const pct = {1: 0.01, 2: 0.015, 3: 0.02}[mode] || 0.01
       return cap > 0 ? (cap * pct * lev).toFixed(2) : '0.00'
     },
+    calcAddMaxLoss() {
+      const cap = Number(this.addForm.capital) || 0
+      const mode = Number(this.addForm.risk_mode) || 1
+      const pct = {1: 0.01, 2: 0.015, 3: 0.02}[mode] || 0.01
+      return cap > 0 ? (cap * pct).toFixed(2) : '0.00'
+    },
     calcEditAmountUsdt() {
       const cap = Number(this.editForm.capital) || 0
       const lev = Number(this.editForm.leverage) || 20
       const mode = Number(this.editForm.risk_mode) || 1
       const pct = {1: 0.01, 2: 0.015, 3: 0.02}[mode] || 0.01
       return cap > 0 ? (cap * pct * lev).toFixed(2) : '0.00'
+    },
+    calcEditMaxLoss() {
+      const cap = Number(this.editForm.capital) || 0
+      const mode = Number(this.editForm.risk_mode) || 1
+      const pct = {1: 0.01, 2: 0.015, 3: 0.02}[mode] || 0.01
+      return cap > 0 ? (cap * pct).toFixed(2) : '0.00'
     }
   },
   mounted() {
@@ -395,6 +441,7 @@ export default {
         id: row.id,
         strategy_code: row.strategy_code,
         strategy_name: row.strategy_name,
+        risk_based_sizing: !!row.risk_based_sizing,
         display_name: row.display_name || '',
         display_description: row.display_description || '',
         capital: row.capital != null ? Number(row.capital) : null,

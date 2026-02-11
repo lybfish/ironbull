@@ -56,6 +56,15 @@ def _instance_to_dict(ts: TenantStrategy, strategy: Optional[Strategy] = None) -
     lev = int(leverage or 0)
     pct = RISK_MODE_PCT.get(risk_mode, 0.01)
     amount_usdt = round(capital * pct * lev, 2) if capital > 0 and lev > 0 else (float(ts.amount_usdt) if ts.amount_usdt is not None else (float(getattr(s, "amount_usdt", 0) or 0) if s else 0))
+    # 是否以损定仓（从主策略 config 获取）
+    risk_based_sizing = False
+    if s:
+        try:
+            cfg = s.get_config() if hasattr(s, "get_config") else {}
+            risk_based_sizing = bool(cfg.get("risk_based_sizing", False))
+        except Exception:
+            pass
+    max_loss_per_trade = round(capital * pct, 2) if capital > 0 else 0
     return {
         "id": ts.id,
         "tenant_id": ts.tenant_id,
@@ -69,6 +78,8 @@ def _instance_to_dict(ts: TenantStrategy, strategy: Optional[Strategy] = None) -
         "risk_mode": risk_mode,
         "risk_mode_label": {1: "稳健", 2: "均衡", 3: "激进"}.get(risk_mode, "稳健"),
         "amount_usdt": amount_usdt,
+        "risk_based_sizing": risk_based_sizing,
+        "max_loss_per_trade": max_loss_per_trade,
         "min_capital": float(ts.min_capital) if ts.min_capital is not None else (float(getattr(s, "min_capital", 200) or 200) if s else None),
         "status": int(ts.status or 0),
         "sort_order": int(ts.sort_order or 0),
