@@ -1,7 +1,7 @@
 """
 Position Module - 数据模型定义
 
-Position（持仓）和 PositionChange（持仓变动）表
+Position（持仓）、PositionChange（持仓变动）、PendingLimitOrder（限价挂单追踪）表
 遵循"变动有来源"原则，PositionChange 为 append-only
 """
 
@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     DateTime,
+    Boolean,
     Index,
     UniqueConstraint,
 )
@@ -222,4 +223,105 @@ class PositionChange(Base):
             "changed_at": self.changed_at.isoformat() if self.changed_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "remark": self.remark,
+        }
+
+
+class PendingLimitOrder(Base):
+    """
+    限价挂单追踪表 - 跟踪已在交易所挂出但尚未成交的限价单
+
+    生命周期：
+      1. 挂单 → status=PENDING（策略产生信号，限价单提交到交易所）
+      2a. 成交 → status=FILLED（交易所确认成交，写入 SL/TP 到持仓）
+      2b. 超时 → status=EXPIRED（超过 retest_bars 仍未成交，撤单）
+      2c. 撤单 → status=CANCELLED（手动撤单或程序重启清理）
+      2d. 确认中 → status=CONFIRMING（成交后等待确认形态，仅 confirm_after_fill=True）
+
+    作用：
+      - 程序重启后可从 DB 恢复 pending 状态，不丢单
+      - 后台可查看当前限价单状态
+      - 防止重复挂单（同策略+同交易对只能有一个 PENDING）
+    """
+    __tablename__ = "fact_pending_limit_order"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+
+    # 关联键：strategy_code + symbol 组合唯一标识一个挂单
+    pending_key = Column(String(128), nullable=False, unique=True, index=True,
+                         comment="唯一键 strategy_code:symbol")
+
+    # 订单信息
+    order_id = Column(String(64), nullable=True, comment="系统订单号")
+    exchange_order_id = Column(String(128), nullable=True, index=True, comment="交易所订单号")
+    symbol = Column(String(32), nullable=False, comment="交易对")
+    side = Column(String(8), nullable=False, comment="BUY/SELL")
+    entry_price = Column(DECIMAL(20, 8), nullable=False, comment="挂单价格")
+    stop_loss = Column(DECIMAL(20, 8), nullable=True, comment="止损价")
+    take_profit = Column(DECIMAL(20, 8), nullable=True, comment="止盈价")
+
+    # 策略 & 账户
+    strategy_code = Column(String(64), nullable=False, index=True, comment="策略代码")
+    account_id = Column(Integer, nullable=False, index=True, comment="交易所账户ID")
+    tenant_id = Column(Integer, nullable=False, comment="租户ID")
+    amount_usdt = Column(DECIMAL(20, 2), nullable=True, comment="下单金额 USDT")
+    leverage = Column(Integer, nullable=True, comment="杠杆倍数")
+
+    # 超时 & 确认参数
+    timeframe = Column(String(8), nullable=False, default="15m", comment="K线周期")
+    retest_bars = Column(Integer, nullable=False, default=20, comment="最大等待K线数")
+    confirm_after_fill = Column(Boolean, nullable=False, default=False,
+                                comment="成交后是否需要确认")
+    post_fill_confirm_bars = Column(Integer, nullable=False, default=3,
+                                    comment="确认等待K线数")
+
+    # 成交信息（FILLED/CONFIRMING 时填充）
+    filled_price = Column(DECIMAL(20, 8), nullable=True, comment="成交价")
+    filled_qty = Column(DECIMAL(20, 8), nullable=True, comment="成交数量")
+    filled_at = Column(DateTime, nullable=True, comment="成交时间")
+    candles_checked = Column(Integer, nullable=False, default=0, comment="已检查确认K线数")
+
+    # 状态
+    status = Column(String(16), nullable=False, default="PENDING",
+                    comment="PENDING/FILLED/CONFIRMING/EXPIRED/CANCELLED")
+
+    # 时间
+    placed_at = Column(DateTime, nullable=False, default=datetime.now, comment="挂单时间")
+    closed_at = Column(DateTime, nullable=True, comment="结束时间（成交/撤单/超时）")
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+
+    __table_args__ = (
+        Index("idx_pending_strategy_symbol", "strategy_code", "symbol"),
+        Index("idx_pending_status", "status"),
+        Index("idx_pending_account", "account_id"),
+        {"mysql_engine": "InnoDB", "mysql_charset": "utf8mb4"},
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "pending_key": self.pending_key,
+            "order_id": self.order_id,
+            "exchange_order_id": self.exchange_order_id,
+            "symbol": self.symbol,
+            "side": self.side,
+            "entry_price": float(self.entry_price) if self.entry_price else None,
+            "stop_loss": float(self.stop_loss) if self.stop_loss else None,
+            "take_profit": float(self.take_profit) if self.take_profit else None,
+            "strategy_code": self.strategy_code,
+            "account_id": self.account_id,
+            "tenant_id": self.tenant_id,
+            "amount_usdt": float(self.amount_usdt) if self.amount_usdt else None,
+            "leverage": self.leverage,
+            "timeframe": self.timeframe,
+            "retest_bars": self.retest_bars,
+            "confirm_after_fill": self.confirm_after_fill,
+            "post_fill_confirm_bars": self.post_fill_confirm_bars,
+            "filled_price": float(self.filled_price) if self.filled_price else None,
+            "filled_qty": float(self.filled_qty) if self.filled_qty else None,
+            "filled_at": self.filled_at.isoformat() if self.filled_at else None,
+            "candles_checked": self.candles_checked,
+            "status": self.status,
+            "placed_at": self.placed_at.isoformat() if self.placed_at else None,
+            "closed_at": self.closed_at.isoformat() if self.closed_at else None,
         }

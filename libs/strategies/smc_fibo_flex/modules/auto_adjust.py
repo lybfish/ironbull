@@ -42,7 +42,7 @@ def apply_auto_profile(
     Returns:
         调整后的配置字典
     """
-    auto_profile = config.get("auto_profile", "medium")
+    auto_profile = config.get("auto_profile", "off")
     if auto_profile not in ("conservative", "medium", "aggressive"):
         return config
     

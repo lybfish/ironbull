@@ -14,7 +14,7 @@ from libs.indicators import atr
 from .config.validator import validate_config
 from .config.presets import merge_preset
 from .utils.swing_points import find_swing_points
-from .utils.trend_detection import detect_trend, get_htf_trend
+from .utils.trend_detection import detect_trend, get_htf_trend, get_htf_structure_trend
 from .modules.structure import detect_bos, detect_choch, filter_by_structure, filter_by_bias
 from .modules.fibonacci import calculate_fibo_levels, price_in_fibo_zone, calculate_fibo_extension, apply_fibo_fallback
 from .modules.rejection_patterns import detect_rejection
@@ -25,7 +25,7 @@ from .modules.risk_manager import (
     ensure_min_rr,
     calculate_rr_ratio
 )
-from .modules.order_blocks import find_order_blocks, find_nearest_order_block
+from .modules.order_blocks import find_order_blocks, find_nearest_order_block, find_breaker_blocks, BreakerBlock
 from .modules.fvg import find_fvgs, find_nearest_fvg
 from .modules.liquidity import detect_liquidity_sweep, detect_fake_break
 from .modules.session_filter import check_session_filter, check_news_filter, get_session_risk_factor
@@ -81,8 +81,19 @@ class SMCFiboFlexStrategy(StrategyBase):
         self._last_signal_index = -1
         self._signal_cooldown = self.config.get("signal_cooldown", 5)  # 默认5根K线冷却期
         
+        # 方案C: 限价先成交 → 确认后决定去留
+        self._post_fill_state = None  # {side, zone_low, zone_high, fill_step, confirm_bars}
+        
         # 统计计数
         self.signal_count = 0
+        self._debug_bos_count = 0
+        self._debug_choch_count = 0
+        self._debug_fallback_count = 0
+        self._debug_limit_fill_count = 0
+        self._debug_limit_expire_count = 0
+        self._debug_limit_stop_count = 0
+        self._debug_post_fill_confirmed = 0   # 方案C: 成交后确认成功
+        self._debug_post_fill_unconfirmed = 0 # 方案C: 成交后未确认→平仓
 
         
         # 像old1一样：持久化趋势状态
@@ -130,21 +141,29 @@ class SMCFiboFlexStrategy(StrategyBase):
         if len(candles) < 50:
             return None
         
-        # ─── 持仓感知（与 old1 对齐）───
-        # old1: `if not open_order and not open_trade and pos == 0 and not pending`
-        # 有持仓时不产生新信号，避免频繁翻转导致过度交易
+        # 递增步骤计数器（必须在所有逻辑之前，确保方案C的计时正确）
+        self._step_counter += 1
+        
+        # ─── 持仓感知（严格对齐 old1）───
+        # old1 line 1537: `if not open_order and not open_trade and pos == 0 and not pending`
+        # old1 有持仓时绝不产生新信号，也不处理 pending
+        # 这是 old1 回撤仅 6.9% 的核心原因：严格一次只做一笔交易
         if positions:
             has_pos = positions.get("has_position", False)
             has_long = positions.get("has_long", False)
             has_short = positions.get("has_short", False)
             if has_pos or has_long or has_short:
-                # 已有持仓 → 仅处理回踩确认（pending），不产生新信号
-                if self.config.get("require_retest", True) and self._pending:
-                    return self._check_pending_result(symbol, candles)
+                # 方案C: 持仓中但需要确认 → 检查是否有拒绝形态
+                if self._post_fill_state:
+                    return self._check_post_fill_confirmation(symbol, candles)
+                # 已有持仓 → 取消 pending，直接返回（对齐 old1 严格单仓）
+                # old1 的 pending retest 也要求 `not open_trade and pos == 0`
+                self._pending = None
                 return None
         
-        # 递增步骤计数器（绝对位置标记，不依赖 len(candles)）
-        self._step_counter += 1
+        # 持仓已清（SL/TP/手动平仓） → 清除方案C状态
+        if self._post_fill_state:
+            self._post_fill_state = None
         
         # 应用自适应参数调整（性能优化：每 50 步才重算，波动率不会逐根K线剧变）
         if self._step_counter - self._cache["auto_profile_step"] >= 50 or self._cache["auto_profile_config"] is None:
@@ -194,62 +213,52 @@ class SMCFiboFlexStrategy(StrategyBase):
             ):
                 return None
         
-        # 检查回踩确认状态
-        if self.config.get("require_retest", True) and self._pending:
-            result = self._check_pending(symbol, candles, current_timestamp)
+        # 检查待确认订单（限价单 / 回踩确认）
+        entry_mode = self.config.get("entry_mode", "retest")
+        if self._pending:
+            if entry_mode == "limit":
+                result = self._check_pending_limit(symbol, candles)
+            else:
+                result = self._check_pending(symbol, candles, current_timestamp)
             if isinstance(result, StrategyOutput):
                 return result
             if result == "waiting":
                 return None
         
-        # 识别摆动点（性能优化：增量更新）
+        # ====== 对齐 old1 的延迟 swing 更新机制 ======
+        # old1 流程：1) 找到包含当前 bar 的 swing candidate
+        #            2) 用**旧的** swing_high/low 做 BOS 检测
+        #            3) 生成信号
+        #            4) 才更新 swing_high/low = candidate
+        # 所以 BOS 检测用的是上一根 K 线时的 swing 点
         candle_count = len(candles)
         last_candle_hash = candles[-1].get("timestamp") if candles else None
-        swing = self.config.get("swing", 5)  # 默认改为5，对齐old1
+        swing = self.config.get("swing", 5)
         
-        # 如果只是新增了一根K线且swing参数未变，增量更新
+        # 保存"旧的"swing 点用于 BOS 检测（对齐 old1 的延迟更新）
+        bos_swing_highs = list(self._cache["swing_highs"]) if self._cache["swing_highs"] else None
+        bos_swing_lows = list(self._cache["swing_lows"]) if self._cache["swing_lows"] else None
+        
+        # 更新 swing 点（包含当前 K 线）
         if (self._cache["last_candle_count"] == candle_count - 1 and 
             self._cache["swing_highs"] is not None and 
             self._cache["swing_lows"] is not None and
             self._cache["last_swing_param"] == swing and
             candle_count > swing * 2):
-            # 增量更新：检查最后swing*2+1根K线（因为新K线可能影响之前的摆动点）
-            swing_highs = self._cache["swing_highs"].copy()
-            swing_lows = self._cache["swing_lows"].copy()
+            # 增量更新：realtime 模式只需检查新增的最后一根K线
+            swing_highs = self._cache["swing_highs"]
+            swing_lows = self._cache["swing_lows"]
             
-            # 需要重新检查的范围：从倒数swing*2+1根K线开始
-            check_start = max(swing, candle_count - swing * 2 - 1)
-            
-            # 移除受影响的旧摆动点（保留 index < check_start 的部分，已有序）
-            # 用截断代替 listcomp：因为列表按 index 排序，找到分界点直接切片
-            cut_h = len(swing_highs)
-            for k in range(len(swing_highs) - 1, -1, -1):
-                if swing_highs[k].index < check_start:
-                    break
-                cut_h = k
-            swing_highs = swing_highs[:cut_h]
-            
-            cut_l = len(swing_lows)
-            for k in range(len(swing_lows) - 1, -1, -1):
-                if swing_lows[k].index < check_start:
-                    break
-                cut_l = k
-            swing_lows = swing_lows[:cut_l]
-            
-            # 重新检查这个范围内的所有K线（按 index 递增，结果天然有序，无需排序）
             from .utils.swing_points import SwingPoint
-            for i in range(check_start, candle_count - swing):
+            i = candle_count - 1
+            if i >= swing:
                 hi = candles[i]["high"]
                 lo = candles[i]["low"]
                 
-                # 检查高点（回测模式：检查左右两侧）
-                is_swing_high = all(hi >= candles[j]["high"] for j in range(i - swing, i + swing + 1))
-                if is_swing_high:
+                if all(hi >= candles[j]["high"] for j in range(i - swing, i + 1)):
                     swing_highs.append(SwingPoint(index=i, price=hi, type="high", timestamp=candles[i].get("timestamp")))
                 
-                # 检查低点
-                is_swing_low = all(lo <= candles[j]["low"] for j in range(i - swing, i + swing + 1))
-                if is_swing_low:
+                if all(lo <= candles[j]["low"] for j in range(i - swing, i + 1)):
                     swing_lows.append(SwingPoint(index=i, price=lo, type="low", timestamp=candles[i].get("timestamp")))
             
             self._cache["swing_highs"] = swing_highs
@@ -258,17 +267,30 @@ class SMCFiboFlexStrategy(StrategyBase):
             self._cache["last_candle_hash"] = last_candle_hash
             self._cache["last_swing_param"] = swing
         else:
-            # 完全重新计算（确保正确性）
+            # 完全重新计算
             swing_highs, swing_lows = find_swing_points(
                 candles,
                 swing,
-                realtime_mode=False
+                realtime_mode=True
             )
             self._cache["swing_highs"] = swing_highs
             self._cache["swing_lows"] = swing_lows
             self._cache["last_candle_count"] = candle_count
             self._cache["last_candle_hash"] = last_candle_hash
             self._cache["last_swing_param"] = swing
+            
+            # 首次计算时，"旧"swing 也用当前（不含最后一个可能的 swing）
+            if swing_highs:
+                bos_swing_highs = swing_highs[:-1] if swing_highs[-1].index == candle_count - 1 else list(swing_highs)
+            if swing_lows:
+                bos_swing_lows = swing_lows[:-1] if swing_lows[-1].index == candle_count - 1 else list(swing_lows)
+        
+        # 用于 BOS 检测的 swing 点：不含当前 bar 可能新增的 swing
+        # 对齐 old1：BOS 检测在 swing 更新之前
+        if bos_swing_highs is None:
+            bos_swing_highs = swing_highs
+        if bos_swing_lows is None:
+            bos_swing_lows = swing_lows
         
         if len(swing_highs) < 2 or len(swing_lows) < 2:
             return None
@@ -284,12 +306,21 @@ class SMCFiboFlexStrategy(StrategyBase):
         if self._cache["htf_trend"] is not None and self._step_counter % 20 != 0:
             htf_trend = self._cache["htf_trend"]
         else:
-            htf_trend = get_htf_trend(
+            # Step 2 升级：优先使用大周期 K 线结构 (Swing Structure) 判断方向
+            # 对应文档："大周期定方向 → 看 K 线结构（HH/HL 或 LH/LL）"
+            htf_trend = get_htf_structure_trend(
                 candles,
                 self.config.get("htf_multiplier", 4),
-                self.config.get("htf_ema_fast", 20),
-                self.config.get("htf_ema_slow", 50)
+                self.config.get("htf_swing_count", 3)
             )
+            # 如果结构判断为 neutral（数据不足或无明确结构），回退到 EMA
+            if htf_trend == "neutral":
+                htf_trend = get_htf_trend(
+                    candles,
+                    self.config.get("htf_multiplier", 4),
+                    self.config.get("htf_ema_fast", 20),
+                    self.config.get("htf_ema_slow", 50)
+                )
             self._cache["htf_trend"] = htf_trend
         
         # HTF过滤
@@ -299,13 +330,12 @@ class SMCFiboFlexStrategy(StrategyBase):
             if trend == "bearish" and htf_trend == "bullish":
                 return None
         
-        # 结构检测
-        bos = detect_bos(candles, swing_highs, swing_lows)
-        choch = detect_choch(candles, swing_highs, swing_lows, trend)
+        # 结构检测（使用"旧"swing 点，对齐 old1 延迟更新逻辑）
+        bos = detect_bos(candles, bos_swing_highs, bos_swing_lows)
+        choch = detect_choch(candles, bos_swing_highs, bos_swing_lows, trend)
 
-        # DEBUG: 打印 BOS 检测情况
-        if self._step_counter % 500 == 0:
-            print(f"Step {self._step_counter}: Trend={trend}, BOS={bos}, CHoCH={choch}, Swings(H/L)={len(swing_highs)}/{len(swing_lows)}")
+        if bos: self._debug_bos_count += 1
+        if choch: self._debug_choch_count += 1
         
         # 像 old1 一样：BOS/CHoCH 检测后立即更新持久化趋势
         if bos == "BUY":
@@ -329,8 +359,11 @@ class SMCFiboFlexStrategy(StrategyBase):
         )
         
         # 斐波那契Fallback
+        fibo_side_fallback = False
         if not side and self.config.get("fibo_fallback", True):
-            side, _ = apply_fibo_fallback(side, trend, htf_trend)
+            side, fibo_side_fallback = apply_fibo_fallback(side, trend, htf_trend)
+            if fibo_side_fallback:
+                self._debug_fallback_count += 1
         
         # Bias过滤（使用更新后的 trend，而非原始 trend）
         if side:
@@ -341,11 +374,19 @@ class SMCFiboFlexStrategy(StrategyBase):
             )
         
         if not side:
-            # print(f"Step {self._step_counter}: No side (bias/structure filtered)")
             return None
         
+        # 对齐 old1: fallback 模式下，价格必须在折价/溢价区内
+        # old1 line 1601-1605: BUY 时 bar["l"] 必须 <= mid_price, SELL 时 bar["h"] 必须 >= mid_price
+        if fibo_side_fallback and len(swing_highs) >= 1 and len(swing_lows) >= 1:
+            mid_price = (swing_highs[-1].price + swing_lows[-1].price) / 2.0
+            current_bar = candles[-1]
+            if side == "BUY" and current_bar["low"] > mid_price:
+                return None
+            if side == "SELL" and current_bar["high"] < mid_price:
+                return None
+        
         # 识别Order Block / FVG / 流动性
-        # 注意：OB和FVG的查找函数内部已经做了lookback限制，不需要我们再次限制
 
         order_blocks = []
         if self.config.get("use_ob") in (True, "auto"):
@@ -365,125 +406,47 @@ class SMCFiboFlexStrategy(StrategyBase):
                 self.config.get("ob_lookback", 20)
             )
         
-        # 计算斐波那契回撤位
-        recent_high = swing_highs[-1].price
-        recent_low = swing_lows[-1].price
+        # 计算斐波那契回撤位（对齐 old1：用 BOS 检测时的旧 swing 点）
+        recent_high = bos_swing_highs[-1].price if bos_swing_highs and len(bos_swing_highs) >= 1 else swing_highs[-1].price
+        recent_low = bos_swing_lows[-1].price if bos_swing_lows and len(bos_swing_lows) >= 1 else swing_lows[-1].price
         swing_range = recent_high - recent_low
         
         if swing_range <= 0:
             return None
-        
-        # 像old1一样：计算斐波那契位
-        # old1的计算方式：
-        # BUY: entry = swing_high - swing_range * level
-        # SELL: entry = swing_low + swing_range * level
-        fibo_levels_list = self.config.get("fibo_levels", [0.5, 0.618, 0.705])
-        mid_price = (recent_high + recent_low) / 2.0
-        
-        # 像old1一样：检测到结构后，遍历所有合适的斐波那契位，生成限价单
-        current_price = candles[-1]["close"]
-        allow_limit_orders = self.config.get("allow_limit_orders", True)
-        
-        # 生成信号候选
+
+        # 根据 entry_source 选择入场逻辑
+        entry_source = self.config.get("entry_source", "auto")
         candidates = []
+
+        # 传给候选函数的 swing 点用 bos 版本（对齐 old1）
+        _sh = bos_swing_highs if bos_swing_highs and len(bos_swing_highs) >= 2 else swing_highs
+        _sl = bos_swing_lows if bos_swing_lows and len(bos_swing_lows) >= 2 else swing_lows
         
-        # 遍历所有斐波那契位（像old1一样）
-        for fibo_level in fibo_levels_list:
-            if side == "BUY":
-                # BUY信号：从高点回撤
-                entry = recent_high - swing_range * fibo_level
-                # 只使用下半部分的斐波那契位
-                if entry > mid_price:
-                    continue
-            else:
-                # SELL信号：从低点反弹（old1的计算方式）
-                entry = recent_low + swing_range * fibo_level
-                # 只使用上半部分的斐波那契位
-                if entry < mid_price:
-                    continue
-            
-            # 检查价格是否在斐波那契区域（用于立即入场，否则是限价单）
-            price_in_zone = abs(entry - current_price) / current_price <= self.config.get("fibo_tolerance", 0.005)
-            if price_in_zone:
-                # 如果价格在区域，使用当前价格（立即入场）
-                entry = current_price
-            
-            # 找到最近的Order Block
-            ob = None
-            if order_blocks:
-                ob = find_nearest_order_block(
-                    order_blocks,
-                    side,
-                    entry,
-                    self.config.get("ob_max_tests", 3),
-                    self.config.get("ob_valid_bars", 100),
-                    len(candles) - 1
-                )
-            
-            # 计算止损（stop_buffer_pct 已在 validator 中标准化为小数）
-            stop_loss = calculate_stop_loss(
-                side,
-                entry,
-                ob,
-                recent_high,
-                recent_low,
-                self.config.get("stop_source", "auto"),
-                self.config["stop_buffer_pct"]
+        if entry_source == "ob":
+            candidates = self._find_ob_candidates(
+                candles, side, trend, htf_trend,
+                order_blocks, fvgs, _sh, _sl
             )
-            
-            if entry == stop_loss:
-                continue
-            
-            # 计算止盈
-            fibo_extension_dict = calculate_fibo_extension(recent_high, recent_low)
-            take_profit = calculate_take_profit(
-                side,
-                entry,
-                stop_loss,
-                self.config.get("tp_mode", "swing"),
-                recent_high,
-                recent_low,
-                self.config.get("rr", 2.0),
-                fibo_extension_dict
+        elif entry_source == "fvg":
+            candidates = self._find_fvg_candidates(
+                candles, side, trend, htf_trend,
+                order_blocks, fvgs, _sh, _sl
             )
-            
-            # 确保最小RR
-            take_profit, rr_ratio = ensure_min_rr(
-                side,
-                entry,
-                stop_loss,
-                take_profit,
-                self.config.get("min_rr", 2.0)
+        elif entry_source == "swing":
+            candidates = self._find_fibo_candidates(
+                candles, side, trend, htf_trend,
+                order_blocks, fvgs, _sh, _sl
             )
-            
-            if rr_ratio < self.config.get("min_rr", 2.0):
-                # if self._step_counter < 1000: print(f"Step {self._step_counter}: Candidate RR {rr_ratio} < min_rr")
-                continue
-            
-            # 计算仓位
-            position_size = calculate_position_size(
-                entry,
-                stop_loss,
-                self.config.get("max_loss", 100)
+        else: # auto / fibo
+            candidates = self._find_fibo_candidates(
+                candles, side, trend, htf_trend,
+                order_blocks, fvgs, _sh, _sl
             )
-            
-            if position_size <= 0:
-                # if self._step_counter < 1000: print(f"Step {self._step_counter}: Position size {position_size} <= 0")
-                continue
-            
-            candidates.append({
-                "entry": entry,
-                "stop_loss": stop_loss,
-                "take_profit": take_profit,
-                "rr_ratio": rr_ratio,
-                "fibo_level": fibo_level,
-                "position_size": position_size,
-                "ob": ob,
-            })
         
         if not candidates:
             # 像old1一样：如果没有合适的斐波那契候选，使用mid_price作为fallback
             # 这样可以确保至少有一个信号，即使价格不在斐波那契位
+            mid_price = (recent_high + recent_low) / 2.0
             entry = mid_price
             # stop_buffer_pct 已在 validator.py 中标准化为小数（如 0.0005）
             _buf = self.config["stop_buffer_pct"]
@@ -495,6 +458,10 @@ class SMCFiboFlexStrategy(StrategyBase):
                 tp = recent_low
             
             # 计算止损（stop_buffer_pct 已在 validator 中标准化为小数）
+            _atr_val_fb = 0.0
+            _atr_mult_fb = self.config.get("sl_atr_multiplier", 0.5)
+            if self.config.get("stop_buffer_mode") == "atr":
+                _atr_val_fb = atr(candles, period=self.config.get("atr_period", 14)) or 0.0
             stop_loss = calculate_stop_loss(
                 side,
                 entry,
@@ -502,7 +469,9 @@ class SMCFiboFlexStrategy(StrategyBase):
                 recent_high,
                 recent_low,
                 self.config.get("stop_source", "auto"),
-                self.config["stop_buffer_pct"]
+                self.config["stop_buffer_pct"],
+                atr_value=_atr_val_fb,
+                atr_multiplier=_atr_mult_fb,
             )
             
             if entry == stop_loss:
@@ -548,13 +517,15 @@ class SMCFiboFlexStrategy(StrategyBase):
             
             # 创建信号（StrategyOutput已经在文件顶部导入）
             return StrategyOutput(
+                symbol=symbol,
                 signal_type="OPEN",
                 side=side,
                 entry_price=entry,
                 stop_loss=stop_loss,
                 take_profit=take_profit,
-                position_size=position_size,
+                # position_size=position_size, # StrategyOutput 不包含 position_size，放入 indicators
                 indicators={
+                    "position_size": position_size,
                     "structure": "fallback",
                     "entry_source": "mid_price",
                     "require_retest": self.config.get("require_retest", True),
@@ -599,13 +570,16 @@ class SMCFiboFlexStrategy(StrategyBase):
         if self.signal_scorer.check_duplicate(symbol, side, self._step_counter):
             return None
         
-        # 检查冷却期：避免连续产生同方向信号
-        if (self._last_signal_side == side and 
+        # 检查冷却期：避免频繁交易（对齐 old1 的 cooldown_bars）
+        # 注意：冷却从上次成交时刻算起，而非信号创建时刻
+        if (self._last_signal_index > 0 and 
             self._step_counter - self._last_signal_index < self._signal_cooldown):
-            return None  # 冷却期内，跳过同方向信号
+            return None  # 冷却期内，跳过所有方向信号
         
-        # 回踩确认
-        if self.config.get("require_retest", True):
+        # 回踩确认 / 限价单挂单
+        _entry_mode = self.config.get("entry_mode", "retest")
+        _need_pending = _entry_mode in ("retest", "limit") or self.config.get("require_retest", True)
+        if _need_pending:
             self._pending = {
                 "symbol": symbol,
                 "side": side,
@@ -618,11 +592,9 @@ class SMCFiboFlexStrategy(StrategyBase):
                 "position_size": best["position_size"],
                 "rr_ratio": best["rr_ratio"],
             }
-            # print(f"DEBUG: Pending created at {self._step_counter} for {side} (Entry: {best['entry']})")
-            print(f"DEBUG: Pending created at {self._step_counter} for {side}")
             self._pending_created_at = self._step_counter
             self.signal_count += 1
-            return None  # 等待回踩确认
+            return None  # 等待限价触达 / 回踩确认
         
         # 计算置信度
         confidence = min(95, max(50, int(signal_score * 20 + 50)))
@@ -667,6 +639,280 @@ class SMCFiboFlexStrategy(StrategyBase):
             },
         )
     
+    def _find_fibo_candidates(
+        self, candles, side, trend, htf_trend,
+        order_blocks, fvgs, swing_highs, swing_lows
+    ) -> List[Dict]:
+        """寻找 Fibonacci 入场候选"""
+        candidates = []
+        recent_high = swing_highs[-1].price
+        recent_low = swing_lows[-1].price
+        swing_range = recent_high - recent_low
+        mid_price = (recent_high + recent_low) / 2.0
+        current_price = candles[-1]["close"]
+        
+        fibo_levels_list = self.config.get("fibo_levels", [0.5, 0.618, 0.705])
+        
+        for fibo_level in fibo_levels_list:
+            if side == "BUY":
+                entry = recent_high - swing_range * fibo_level
+                if entry > mid_price: continue
+            else:
+                entry = recent_low + swing_range * fibo_level
+                if entry < mid_price: continue
+            
+            # 检查价格是否在斐波那契区域
+            price_in_zone = abs(entry - current_price) / current_price <= self.config.get("fibo_tolerance", 0.005)
+            if price_in_zone:
+                entry = current_price
+            
+            # 找到最近的Order Block
+            ob = None
+            if order_blocks:
+                ob = find_nearest_order_block(
+                    order_blocks, side, entry,
+                    self.config.get("ob_max_tests", 3),
+                    self.config.get("ob_valid_bars", 100),
+                    len(candles) - 1
+                )
+            
+            # 计算止损
+            _atr_val = 0.0
+            _atr_mult = self.config.get("sl_atr_multiplier", 0.5)
+            if self.config.get("stop_buffer_mode") == "atr":
+                _atr_val = atr(candles, period=self.config.get("atr_period", 14)) or 0.0
+            stop_loss = calculate_stop_loss(
+                side, entry, ob, recent_high, recent_low,
+                self.config.get("stop_source", "auto"),
+                self.config["stop_buffer_pct"],
+                atr_value=_atr_val,
+                atr_multiplier=_atr_mult,
+            )
+            
+            if entry == stop_loss: continue
+            
+            # 计算止盈
+            fibo_extension_dict = calculate_fibo_extension(recent_high, recent_low)
+            take_profit = calculate_take_profit(
+                side, entry, stop_loss,
+                self.config.get("tp_mode", "swing"),
+                recent_high, recent_low,
+                self.config.get("rr", 2.0),
+                fibo_extension_dict
+            )
+            
+            # 确保最小RR
+            take_profit, rr_ratio = ensure_min_rr(
+                side, entry, stop_loss, take_profit,
+                self.config.get("min_rr", 2.0)
+            )
+            
+            if rr_ratio < self.config.get("min_rr", 2.0): continue
+            
+            # 计算仓位
+            position_size = calculate_position_size(
+                entry, stop_loss, self.config.get("max_loss", 100)
+            )
+            
+            if position_size <= 0: continue
+            
+            candidates.append({
+                "entry": entry,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "rr_ratio": rr_ratio,
+                "fibo_level": fibo_level,
+                "position_size": position_size,
+                "ob": ob,
+            })
+        return candidates
+
+    def _find_ob_candidates(
+        self, candles, side, trend, htf_trend,
+        order_blocks, fvgs, swing_highs, swing_lows
+    ) -> List[Dict]:
+        """
+        寻找 Order Block + Breaker Block 入场候选
+        
+        Step 3 升级：除了新鲜 OB，还检查 Breaker Block (供需反转区)
+        对应文档："突破后原供区转为需区，类似支撑阻力转换"
+        """
+        candidates = []
+        recent_high = swing_highs[-1].price
+        recent_low = swing_lows[-1].price
+        target_type = "bullish" if side == "BUY" else "bearish"
+        
+        # === Part A: 新鲜 Order Block ===
+        if order_blocks:
+            for ob in order_blocks:
+                if ob.type != target_type: continue
+                if len(candles) - 1 - ob.index > self.config.get("ob_valid_bars", 100): continue
+                
+                entry = ob.high if side == "BUY" else ob.low
+                stop_buffer = entry * self.config["stop_buffer_pct"]
+                stop_loss = (ob.low - stop_buffer) if side == "BUY" else (ob.high + stop_buffer)
+                
+                fibo_extension_dict = calculate_fibo_extension(recent_high, recent_low)
+                take_profit = calculate_take_profit(
+                    side, entry, stop_loss,
+                    self.config.get("tp_mode", "swing"),
+                    recent_high, recent_low,
+                    self.config.get("rr", 2.0),
+                    fibo_extension_dict
+                )
+                
+                take_profit, rr_ratio = ensure_min_rr(
+                    side, entry, stop_loss, take_profit,
+                    self.config.get("min_rr", 2.0)
+                )
+                
+                if rr_ratio < self.config.get("min_rr", 2.0): continue
+                
+                position_size = calculate_position_size(
+                    entry, stop_loss, self.config.get("max_loss", 100)
+                )
+                
+                if position_size <= 0: continue
+                
+                candidates.append({
+                    "entry": entry,
+                    "stop_loss": stop_loss,
+                    "take_profit": take_profit,
+                    "rr_ratio": rr_ratio,
+                    "fibo_level": 0.0,
+                    "position_size": position_size,
+                    "ob": ob,
+                    "source": "fresh_ob",
+                })
+        
+        # === Part B: Breaker Block (供需反转区) ===
+        if self.config.get("use_breaker", True):
+            breaker_lookback = self.config.get("breaker_lookback", 50)
+            breakers = find_breaker_blocks(
+                candles,
+                ob_lookback=breaker_lookback,
+                ob_min_body_ratio=self.config.get("ob_min_body_ratio", 0.5),
+            )
+            
+            current_index = len(candles) - 1
+            current_price = candles[-1]["close"]
+            
+            for bb in breakers:
+                if bb.type != target_type: continue
+                # Breaker 必须是在突破之后才有效，且不能太旧
+                if current_index - bb.break_index > self.config.get("breaker_valid_bars", 80): continue
+                if bb.tests >= self.config.get("breaker_max_tests", 2): continue
+                
+                # 价格必须在 Breaker 附近才有意义
+                # BUY: 价格接近 Breaker 上沿 (回踩支撑)
+                # SELL: 价格接近 Breaker 下沿 (回踩阻力)
+                if side == "BUY":
+                    # 价格回踩到 Breaker 区域内
+                    if not (bb.low <= current_price <= bb.high * 1.005):
+                        continue
+                    entry = bb.body_high  # 在 Breaker 实体上沿挂单
+                else:
+                    if not (bb.low * 0.995 <= current_price <= bb.high):
+                        continue
+                    entry = bb.body_low  # 在 Breaker 实体下沿挂单
+                
+                stop_buffer = entry * self.config["stop_buffer_pct"]
+                stop_loss = (bb.low - stop_buffer) if side == "BUY" else (bb.high + stop_buffer)
+                
+                fibo_extension_dict = calculate_fibo_extension(recent_high, recent_low)
+                take_profit = calculate_take_profit(
+                    side, entry, stop_loss,
+                    self.config.get("tp_mode", "swing"),
+                    recent_high, recent_low,
+                    self.config.get("rr", 2.0),
+                    fibo_extension_dict
+                )
+                
+                take_profit, rr_ratio = ensure_min_rr(
+                    side, entry, stop_loss, take_profit,
+                    self.config.get("min_rr", 2.0)
+                )
+                
+                if rr_ratio < self.config.get("min_rr", 2.0): continue
+                
+                position_size = calculate_position_size(
+                    entry, stop_loss, self.config.get("max_loss", 100)
+                )
+                
+                if position_size <= 0: continue
+                
+                candidates.append({
+                    "entry": entry,
+                    "stop_loss": stop_loss,
+                    "take_profit": take_profit,
+                    "rr_ratio": rr_ratio,
+                    "fibo_level": 0.0,
+                    "position_size": position_size,
+                    "ob": None,  # Breaker 不算传统 OB
+                    "source": "breaker_block",
+                })
+        
+        return candidates
+
+    def _find_fvg_candidates(
+        self, candles, side, trend, htf_trend,
+        order_blocks, fvgs, swing_highs, swing_lows
+    ) -> List[Dict]:
+        """寻找 FVG 入场候选 (忽略 Fibo)"""
+        candidates = []
+        if not fvgs:
+            return candidates
+            
+        recent_high = swing_highs[-1].price
+        recent_low = swing_lows[-1].price
+        target_type = "bullish" if side == "BUY" else "bearish"
+        
+        for fvg in fvgs:
+            if fvg.type != target_type: continue
+            if fvg.filled: continue
+            if len(candles) - 1 - fvg.index > self.config.get("fvg_valid_bars", 50): continue
+            
+            # 挂单在FVG边界
+            entry = fvg.high if side == "BUY" else fvg.low
+            
+            # 止损放FVG另一侧 + buffer
+            stop_buffer = entry * self.config["stop_buffer_pct"]
+            stop_loss = (fvg.low - stop_buffer) if side == "BUY" else (fvg.high + stop_buffer)
+            
+            # 计算止盈
+            fibo_extension_dict = calculate_fibo_extension(recent_high, recent_low)
+            take_profit = calculate_take_profit(
+                side, entry, stop_loss,
+                self.config.get("tp_mode", "swing"),
+                recent_high, recent_low,
+                self.config.get("rr", 2.0),
+                fibo_extension_dict
+            )
+            
+            take_profit, rr_ratio = ensure_min_rr(
+                side, entry, stop_loss, take_profit,
+                self.config.get("min_rr", 2.0)
+            )
+            
+            if rr_ratio < self.config.get("min_rr", 2.0): continue
+            
+            position_size = calculate_position_size(
+                entry, stop_loss, self.config.get("max_loss", 100)
+            )
+            
+            if position_size <= 0: continue
+            
+            candidates.append({
+                "entry": entry,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "rr_ratio": rr_ratio,
+                "fibo_level": 0.0, # FVG模式无Fibo
+                "position_size": position_size,
+                "ob": None,
+            })
+        return candidates
+
     def _check_pending(
         self,
         symbol: str,
@@ -747,14 +993,13 @@ class SMCFiboFlexStrategy(StrategyBase):
             )
             print(f"DEBUG: Rejection check at {self._step_counter}: {rejection_result.get('close_reject')} {rejection_result.get('score')}")
             
-            # 检查是否满足最小评分（放宽条件：只要有拒绝形态或close_reject即可）
-            # old1逻辑：只要 close_reject 且有任意形态（pinbar/engulf/etc）就进场
-            # flex逻辑：评分或close_reject
+            # old1 核心逻辑 (line 1454):
+            # close_reject AND (pinbar OR engulf OR morning_star OR evening_star)
             has_rejection_pattern = rejection_result.get("meets_min_score", False)
             has_close_reject = rejection_result.get("close_reject", False)
             
-            # 如果检测到拒绝形态，或者有close_reject，都可以确认
-            if has_rejection_pattern or has_close_reject:
+            # AND 逻辑: 必须同时满足 close_reject 和至少一个形态
+            if has_close_reject and has_rejection_pattern:
                 # 回踩确认成功
                 # 像old1一样：使用原始 pending entry 价格入场（假设在回踩时成交）
                 # old1 logic: entry = pending["entry"] (Line 1456)
@@ -791,6 +1036,219 @@ class SMCFiboFlexStrategy(StrategyBase):
                 return signal
         
         return "waiting"
+    
+    def _check_pending_limit(
+        self,
+        symbol: str,
+        candles: List[Dict],
+    ) -> Any:
+        """
+        限价单模式 — 完全对齐 old1 的两步确认流程:
+        
+        old1 核心逻辑 (backtest_engine.py line 1437-1454):
+          Step 1: 价格触达区间 → 标记 touched
+          Step 2: 触达后 (当根或后续K线) 检测拒绝形态
+                  要求: close_reject AND (pinbar OR engulf OR morning_star OR evening_star)
+        
+        关键差异修复:
+          旧 flex: 仅当价格在 entry_price 时检查确认 (miss post-touch bars)
+          旧 flex: close_reject OR pattern (太宽松 → 3x 多余成交 → 低胜率 → 高回撤)
+          新 flex: 触达后 ALL subsequent bars 检查 + close_reject AND pattern
+        """
+        if not self._pending:
+            return "no_pending"
+        
+        bars_waited = self._step_counter - self._pending_created_at
+        retest_bars = self.config.get("retest_bars", 20)
+        
+        # 超时检查
+        if bars_waited > retest_bars:
+            self._pending = None
+            self._debug_limit_expire_count += 1
+            return "expired"
+        
+        current = candles[-1]
+        prev = candles[-2] if len(candles) >= 2 else None
+        prev2 = candles[-3] if len(candles) >= 3 else None
+        side = self._pending["side"]
+        entry_price = self._pending["entry"]
+        
+        # 止损触及检查 (对齐 old1 line 1425-1434)
+        if not self.config.get("retest_ignore_stop_touch", False):
+            if side == "BUY" and current["low"] <= self._pending["stop_loss"]:
+                self._pending = None
+                self._debug_limit_stop_count += 1
+                return "stop_touched"
+            if side == "SELL" and current["high"] >= self._pending["stop_loss"]:
+                self._pending = None
+                self._debug_limit_stop_count += 1
+                return "stop_touched"
+        
+        # ── Step 1: 触达检测 (对齐 old1 line 1437-1440) ──
+        # old1 用 zone (entry~stop 区间)，这里用 entry_price 作为触达点
+        zone_low = min(entry_price, self._pending["stop_loss"])
+        zone_high = max(entry_price, self._pending["stop_loss"])
+        
+        # 检查价格是否触达区间
+        touched_now = current["low"] <= zone_high and current["high"] >= zone_low
+        if touched_now and not self._pending.get("touched"):
+            self._pending["touched"] = True
+            self._pending["touch_index"] = self._step_counter
+        
+        # ── Step 2: 触达后处理 ──
+        if not self._pending.get("touched"):
+            return "waiting"
+        
+        # ══════════════════════════════════════════════════════════
+        # 方案C: confirm_after_fill — 限价先成交，确认后决定去留
+        # 真实交易: 限价单触碰即成交 → 持仓后再看确认信号
+        # ══════════════════════════════════════════════════════════
+        if self.config.get("confirm_after_fill", False):
+            self._debug_limit_fill_count += 1
+            position_size = self._pending["position_size"]
+            rr_ratio = self._pending["rr_ratio"]
+            
+            self._last_signal_side = side
+            self._last_signal_index = self._step_counter
+            
+            # 创建 post-fill 确认状态（成交后监控 N 根K线的确认形态）
+            self._post_fill_state = {
+                "side": side,
+                "zone_low": zone_low,
+                "zone_high": zone_high,
+                "fill_step": self._step_counter,
+                "confirm_bars": self.config.get("post_fill_confirm_bars", 5),
+            }
+            
+            signal = StrategyOutput(
+                symbol=symbol,
+                signal_type="OPEN",
+                side=side,
+                entry_price=round(entry_price, 5),
+                stop_loss=round(self._pending["stop_loss"], 5),
+                take_profit=round(self._pending["take_profit"], 5),
+                confidence=70,
+                reason=f"SMC+Fibo{side}: 限价成交@{self._pending['fibo_level']:.1%}(待确认{self._post_fill_state['confirm_bars']}K), RR{rr_ratio:.2f}",
+                indicators={
+                    "fibo_level": self._pending["fibo_level"],
+                    "rr_ratio": round(rr_ratio, 2),
+                    "position_size": position_size,
+                    "bars_waited": bars_waited,
+                    "confirmed_fill": True,
+                    "needs_post_confirmation": True,
+                },
+            )
+            self._pending = None
+            return signal
+        
+        # ══════════════════════════════════════════════════════════
+        # 传统模式: 触达后检测拒绝形态 (对齐 old1 line 1442-1454)
+        # 关键: 一旦 touched=True，后续每根 K 线都检查
+        # ══════════════════════════════════════════════════════════
+        rejection_result = detect_rejection(
+            current, prev, prev2, side,
+            zone_low, zone_high,
+            self.config
+        )
+        
+        has_close_reject = rejection_result.get("close_reject", False)
+        has_pattern = rejection_result.get("meets_min_score", False)
+        
+        # 核心: AND 逻辑 (对齐 old1 line 1454)
+        if has_close_reject and has_pattern:
+            # ✅ 回踩确认成功
+            self._debug_limit_fill_count += 1
+            position_size = self._pending["position_size"]
+            rr_ratio = self._pending["rr_ratio"]
+            
+            self._last_signal_side = side
+            self._last_signal_index = self._step_counter
+            
+            patterns = "+".join(rejection_result.get("patterns", []))
+            
+            signal = StrategyOutput(
+                symbol=symbol,
+                signal_type="OPEN",
+                side=side,
+                entry_price=round(entry_price, 5),
+                stop_loss=round(self._pending["stop_loss"], 5),
+                take_profit=round(self._pending["take_profit"], 5),
+                confidence=80,
+                reason=f"SMC+Fibo{side}: 限价确认@{self._pending['fibo_level']:.1%} {patterns}({bars_waited}K), RR{rr_ratio:.2f}",
+                indicators={
+                    "fibo_level": self._pending["fibo_level"],
+                    "rr_ratio": round(rr_ratio, 2),
+                    "position_size": position_size,
+                    "bars_waited": bars_waited,
+                    "confirmed_fill": True,
+                },
+            )
+            self._pending = None
+            return signal
+        
+        # 触达但未确认 → 继续等待后续K线
+        return "waiting"
+    
+    def _check_post_fill_confirmation(
+        self,
+        symbol: str,
+        candles: List[Dict],
+    ) -> Optional[StrategyOutput]:
+        """
+        方案C: 限价成交后的确认检查
+        
+        时间线:
+          Bar N:   BOS → 挂限价
+          Bar N+M: 限价触碰 → 成交（持仓）
+          Bar N+M+1..+K: 检查拒绝形态
+            ✅ 有 close_reject + pattern → 持仓（return None）
+            ❌ K根K线内无确认 → 平仓（return CLOSE 信号）
+        """
+        state = self._post_fill_state
+        if not state:
+            return None
+        
+        bars_since_fill = self._step_counter - state["fill_step"]
+        
+        current = candles[-1]
+        prev = candles[-2] if len(candles) >= 2 else None
+        prev2 = candles[-3] if len(candles) >= 3 else None
+        
+        # 检测拒绝形态（和传统模式完全相同的 detect_rejection）
+        rejection_result = detect_rejection(
+            current, prev, prev2, state["side"],
+            state["zone_low"], state["zone_high"],
+            self.config
+        )
+        
+        has_close_reject = rejection_result.get("close_reject", False)
+        has_pattern = rejection_result.get("meets_min_score", False)
+        
+        if has_close_reject and has_pattern:
+            # ✅ 确认成功 → 持有仓位（保留原始 SL/TP）
+            self._debug_post_fill_confirmed += 1
+            self._post_fill_state = None
+            return None  # None = 不做任何操作 = 继续持有
+        
+        # 检查超时
+        if bars_since_fill >= state["confirm_bars"]:
+            # ❌ 超时未确认 → 发出 CLOSE 信号
+            self._debug_post_fill_unconfirmed += 1
+            self._post_fill_state = None
+            return StrategyOutput(
+                symbol=symbol,
+                signal_type="CLOSE",
+                side=state["side"],
+                entry_price=0,
+                stop_loss=None,
+                take_profit=None,
+                confidence=50,
+                reason=f"未确认平仓: {state['side']} 成交后{bars_since_fill}K无拒绝形态",
+                indicators={"unconfirmed_close": True},
+            )
+        
+        # 还在确认窗口内 → 继续等待
+        return None
     
     def _check_pending_result(
         self,

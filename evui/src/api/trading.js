@@ -42,3 +42,16 @@ export function submitManualOrder(data) {
 export function closePosition(data) {
   return axios.post('/close-position', data)
 }
+
+// ---- 限价挂单 ----
+export function getPendingLimitOrders(params = {}) {
+  return axios.get('/pending-limit-orders', {params: withDefaults(params)})
+}
+
+export function getPendingLimitOrderStats(params = {}) {
+  return axios.get('/pending-limit-orders/stats', {params: withDefaults(params)})
+}
+
+export function cancelPendingLimitOrder(id) {
+  return axios.post(`/pending-limit-orders/${id}/cancel`)
+}

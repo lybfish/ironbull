@@ -108,9 +108,255 @@ _FALLBACK_STRATEGY = {
 signal_cooldown: Dict[str, datetime] = {}
 _state_lock = threading.Lock()  # 保护 monitor_state、signal_cooldown 等全局状态
 
+# ── 策略实例缓存 (Step 1a) ──
+# key = "strategy_code:symbol", value = strategy instance
+# 确保策略内部状态（pending_order, post_fill_state, step_counter, cooldown）跨周期保持
+_strategy_cache: Dict[str, Any] = {}
+_strategy_config_hash: Dict[str, str] = {}   # 配置指纹，配置变更时重建实例
+
+# ── 限价挂单追踪 (Step 2) ──
+# 内存缓存（运行时快速查询），与 DB fact_pending_limit_order 表双写
+# key = "strategy_code:symbol", value = {order_id, exchange_order_id, entry_price, side, ...}
+_pending_limit_orders: Dict[str, Dict[str, Any]] = {}
+
+# ── 待确认仓位 (Step 3) ──
+# key = "strategy_code:symbol", value = {filled_at, confirm_deadline_candles, filled_price, side, ...}
+_awaiting_confirmation: Dict[str, Dict[str, Any]] = {}
+
 # 监控线程
 monitor_thread: Optional[threading.Thread] = None
 stop_event = threading.Event()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# pending 限价单 DB 持久化辅助函数
+# ═══════════════════════════════════════════════════════════════════
+
+def _db_save_pending(pending_key: str, info: Dict[str, Any]):
+    """将 pending 限价单写入 DB（INSERT or UPDATE）"""
+    try:
+        from libs.position.models import PendingLimitOrder
+        session = get_session()
+        target = info.get("target")
+        row = session.query(PendingLimitOrder).filter(
+            PendingLimitOrder.pending_key == pending_key
+        ).first()
+        if row:
+            # 更新
+            row.order_id = info.get("order_id")
+            row.exchange_order_id = info.get("exchange_order_id")
+            row.entry_price = info.get("entry_price", 0)
+            row.stop_loss = info.get("stop_loss")
+            row.take_profit = info.get("take_profit")
+            row.side = info.get("side", "BUY")
+            row.amount_usdt = info.get("amount_usdt")
+            row.leverage = info.get("leverage")
+            row.status = info.get("db_status", "PENDING")
+            row.updated_at = datetime.now()
+        else:
+            row = PendingLimitOrder(
+                pending_key=pending_key,
+                order_id=info.get("order_id"),
+                exchange_order_id=info.get("exchange_order_id"),
+                symbol=info.get("symbol", ""),
+                side=info.get("side", "BUY"),
+                entry_price=info.get("entry_price", 0),
+                stop_loss=info.get("stop_loss"),
+                take_profit=info.get("take_profit"),
+                strategy_code=info.get("strategy_code", ""),
+                account_id=target.account_id if target else 0,
+                tenant_id=target.tenant_id if target else 0,
+                amount_usdt=info.get("amount_usdt"),
+                leverage=info.get("leverage"),
+                timeframe=info.get("timeframe", "15m"),
+                retest_bars=info.get("retest_bars", 20),
+                confirm_after_fill=info.get("confirm_after_fill", False),
+                post_fill_confirm_bars=info.get("post_fill_confirm_bars", 3),
+                placed_at=info.get("placed_at", datetime.now()),
+                status="PENDING",
+            )
+            session.add(row)
+        session.commit()
+        session.close()
+    except Exception as e:
+        log.warning("DB保存pending限价单失败", key=pending_key, error=str(e))
+
+
+def _db_update_pending_status(pending_key: str, status: str, **extra):
+    """更新 DB 中 pending 限价单状态（FILLED/CONFIRMING/EXPIRED/CANCELLED）"""
+    try:
+        from libs.position.models import PendingLimitOrder
+        session = get_session()
+        row = session.query(PendingLimitOrder).filter(
+            PendingLimitOrder.pending_key == pending_key
+        ).first()
+        if row:
+            row.status = status
+            row.closed_at = datetime.now() if status in ("FILLED", "EXPIRED", "CANCELLED") else None
+            for k, v in extra.items():
+                if hasattr(row, k):
+                    setattr(row, k, v)
+            row.updated_at = datetime.now()
+            session.commit()
+        session.close()
+    except Exception as e:
+        log.warning("DB更新pending状态失败", key=pending_key, status=status, error=str(e))
+
+
+def _db_load_pending_orders() -> Dict[str, Dict[str, Any]]:
+    """启动时从 DB 加载所有 PENDING/CONFIRMING 状态的限价单"""
+    result = {}
+    try:
+        from libs.position.models import PendingLimitOrder
+        from libs.member.models import ExchangeAccount
+        session = get_session()
+        rows = session.query(PendingLimitOrder).filter(
+            PendingLimitOrder.status.in_(["PENDING", "CONFIRMING"])
+        ).all()
+        if not rows:
+            session.close()
+            return result
+
+        # 批量获取账户信息以重建 target
+        account_ids = set(r.account_id for r in rows)
+        from libs.member.service import MemberService, ExecutionTarget
+        member_svc = MemberService(session)
+
+        accounts = {}
+        for aid in account_ids:
+            acct = session.query(ExchangeAccount).filter(ExchangeAccount.id == aid).first()
+            if acct:
+                accounts[aid] = acct
+
+        for row in rows:
+            acct = accounts.get(row.account_id)
+            if not acct:
+                log.warning("恢复pending失败: 账户不存在", account_id=row.account_id, key=row.pending_key)
+                continue
+
+            # 重建简化的 target（只需 exchange 凭证即可）
+            target = ExecutionTarget(
+                tenant_id=row.tenant_id,
+                account_id=row.account_id,
+                user_id=acct.user_id,
+                exchange=acct.exchange,
+                api_key=acct.api_key,
+                api_secret=acct.api_secret,
+                passphrase=acct.passphrase,
+                market_type=acct.account_type or "future",
+                binding_id=0,
+                strategy_code=row.strategy_code,
+                ratio=100,
+            )
+
+            info = {
+                "order_id": row.order_id,
+                "exchange_order_id": row.exchange_order_id,
+                "symbol": row.symbol,
+                "side": row.side,
+                "entry_price": float(row.entry_price) if row.entry_price else 0,
+                "stop_loss": float(row.stop_loss) if row.stop_loss else 0,
+                "take_profit": float(row.take_profit) if row.take_profit else 0,
+                "strategy_code": row.strategy_code,
+                "target": target,
+                "amount_usdt": float(row.amount_usdt) if row.amount_usdt else 0,
+                "leverage": row.leverage,
+                "placed_at": row.placed_at or row.created_at,
+                "retest_bars": row.retest_bars,
+                "timeframe": row.timeframe,
+                "confirm_after_fill": row.confirm_after_fill,
+                "post_fill_confirm_bars": row.post_fill_confirm_bars,
+            }
+
+            if row.status == "CONFIRMING":
+                # 恢复到 _awaiting_confirmation
+                _awaiting_confirmation[row.pending_key] = {
+                    **info,
+                    "filled_at": row.filled_at or datetime.now(),
+                    "filled_price": float(row.filled_price) if row.filled_price else info["entry_price"],
+                    "filled_qty": float(row.filled_qty) if row.filled_qty else 0,
+                    "candles_checked": row.candles_checked or 0,
+                }
+            else:
+                result[row.pending_key] = info
+
+        session.close()
+        log.info(f"从DB恢复限价单: {len(result)} pending, {len(_awaiting_confirmation)} confirming")
+    except Exception as e:
+        log.error("从DB加载pending限价单失败", error=str(e))
+    return result
+
+
+def _config_fingerprint(cfg: Dict) -> str:
+    """配置指纹：配置变更时重建策略实例"""
+    import hashlib
+    return hashlib.md5(_json.dumps(cfg, sort_keys=True, default=str).encode()).hexdigest()[:12]
+
+
+def _get_cached_strategy(strategy_code: str, strategy_config: Dict, symbol: str):
+    """
+    获取或创建策略实例（缓存版）
+    - 同一 strategy_code + symbol 复用实例，保持内部状态
+    - 配置变更时自动重建
+    """
+    cache_key = f"{strategy_code}:{symbol}"
+    fp = _config_fingerprint(strategy_config)
+    
+    if cache_key in _strategy_cache and _strategy_config_hash.get(cache_key) == fp:
+        return _strategy_cache[cache_key]
+    
+    # 新建或配置变更 → 创建新实例
+    strategy = get_strategy(strategy_code, strategy_config)
+    _strategy_cache[cache_key] = strategy
+    _strategy_config_hash[cache_key] = fp
+    log.info("策略实例已创建/更新", key=cache_key, fingerprint=fp)
+    return strategy
+
+
+def _query_open_positions(symbol: str, strategy_code: str = None) -> Optional[Dict]:
+    """
+    查询数据库中该 symbol 的 OPEN 持仓，返回策略可识别的 positions dict
+    """
+    try:
+        session = get_session()
+        from libs.position.repository import PositionRepository
+        repo = PositionRepository(session)
+        # 查询所有 OPEN 持仓
+        from sqlalchemy import and_
+        from libs.position.models import Position
+        query = session.query(Position).filter(
+            and_(
+                Position.symbol == symbol,
+                Position.status == "OPEN",
+                Position.quantity > 0,
+            )
+        )
+        if strategy_code:
+            query = query.filter(Position.strategy_code == strategy_code)
+        positions = query.all()
+        session.close()
+        
+        if not positions:
+            return None
+        
+        # 返回策略可识别的格式（analyze 中检查 has_position / has_long / has_short）
+        pos = positions[0]
+        side_upper = (pos.position_side or "").upper()
+        return {
+            "has_position": True,
+            "has_long": side_upper == "LONG",
+            "has_short": side_upper == "SHORT",
+            "symbol": pos.symbol,
+            "side": "BUY" if side_upper == "LONG" else "SELL",
+            "entry_price": float(pos.entry_price) if pos.entry_price else float(pos.avg_cost or 0),
+            "quantity": float(pos.quantity or 0),
+            "stop_loss": float(pos.stop_loss) if pos.stop_loss else None,
+            "take_profit": float(pos.take_profit) if pos.take_profit else None,
+            "position_id": pos.position_id,
+        }
+    except Exception as e:
+        log.debug("查询持仓失败（可能表不存在）", error=str(e))
+        return None
 
 
 def _load_cooldowns_from_db():
@@ -150,7 +396,7 @@ def fetch_candles(symbol: str, timeframe: str, limit: int = 200) -> List[Dict]:
 
 def check_signal(strategy_code: str, strategy_config: Dict, 
                  symbol: str, timeframe: str) -> Optional[Dict]:
-    """检测单个策略信号"""
+    """检测单个策略信号（使用缓存策略实例 + 传入持仓信息）"""
     try:
         # 获取 K 线
         candles = fetch_candles(symbol, timeframe)
@@ -158,15 +404,33 @@ def check_signal(strategy_code: str, strategy_config: Dict,
             log.warning(f"K线数据不足: {symbol} {len(candles)}")
             return None
         
-        # 运行策略
-        strategy = get_strategy(strategy_code, strategy_config)
+        # ── Step 1a: 使用缓存策略实例（保持内部状态跨周期持续）──
+        strategy = _get_cached_strategy(strategy_code, strategy_config, symbol)
+        
+        # ── Step 1b: 查询当前持仓，传给策略（防止重复开仓）──
+        positions = _query_open_positions(symbol, strategy_code)
+        
+        # ── Step 1c: 检查是否有 pending 限价单（防止重复挂单）──
+        pending_key = f"{strategy_code}:{symbol}"
+        with _state_lock:
+            if pending_key in _pending_limit_orders or pending_key in _awaiting_confirmation:
+                return None  # 已有挂单或等待确认中，跳过
+        
         signal = strategy.analyze(
             symbol=symbol,
             timeframe=timeframe,
             candles=candles,
+            positions=positions,
         )
         
         if signal:
+            # 把策略配置中的关键参数带到信号里，执行层据此决定市价/限价 + 确认逻辑
+            indicators = signal.indicators or {}
+            indicators["entry_mode"] = strategy_config.get("entry_mode", "market")
+            indicators["retest_bars"] = strategy_config.get("retest_bars", 20)
+            indicators["confirm_after_fill"] = strategy_config.get("confirm_after_fill", False)
+            indicators["post_fill_confirm_bars"] = strategy_config.get("post_fill_confirm_bars", 3)
+            
             return {
                 "symbol": signal.symbol,
                 "signal_type": signal.signal_type,   # OPEN / CLOSE / HEDGE 等
@@ -176,7 +440,7 @@ def check_signal(strategy_code: str, strategy_config: Dict,
                 "take_profit": signal.take_profit,
                 "confidence": signal.confidence,
                 "reason": signal.reason,
-                "indicators": signal.indicators or {},
+                "indicators": indicators,
                 "strategy": strategy_code,
                 "timeframe": timeframe,
                 "timestamp": datetime.now().isoformat(),
@@ -276,6 +540,303 @@ def _split_hedge_signal(signal: Dict) -> List[Dict]:
         "take_profit": indicators.get("short_take_profit", signal.get("take_profit")),
     }
     return [long_signal, short_signal]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Step 2+3: 限价挂单管理 + 成交后确认过滤
+# ═══════════════════════════════════════════════════════════════════
+
+def _check_pending_limit_orders_cycle():
+    """
+    检查所有已挂的限价单：
+      - 已成交 → 写入 SL/TP（或启动确认倒计时）
+      - 超时未成交 → 撤单
+    在 monitor_loop 每轮末尾调用。
+    """
+    if not _pending_limit_orders:
+        return
+    
+    now = datetime.now()
+    to_remove = []
+    
+    with _state_lock:
+        items = list(_pending_limit_orders.items())
+    
+    for pending_key, info in items:
+        try:
+            # 计算超时
+            tf_minutes = _timeframe_to_minutes(info.get("timeframe", "15m"))
+            max_wait_minutes = tf_minutes * info.get("retest_bars", 20)
+            elapsed_minutes = (now - info["placed_at"]).total_seconds() / 60
+            
+            target = info["target"]
+            sandbox = config.get_bool("exchange_sandbox", True)
+            
+            # 创建 trader 查询订单状态
+            trader = LiveTrader(
+                exchange=target.exchange,
+                api_key=target.api_key,
+                api_secret=target.api_secret,
+                passphrase=target.passphrase,
+                sandbox=sandbox,
+                market_type=target.market_type,
+            )
+            
+            loop = asyncio.new_event_loop()
+            try:
+                order_result = loop.run_until_complete(
+                    trader.get_order(info["exchange_order_id"], info["symbol"])
+                )
+                
+                status = order_result.status if order_result else None
+                
+                if status in (OrderStatus.FILLED, OrderStatus.PARTIAL):
+                    # ── 限价单已成交 ──
+                    filled_price = order_result.filled_price or info["entry_price"]
+                    filled_qty = order_result.filled_quantity or 0
+                    
+                    log.info("限价单已成交",
+                             key=pending_key, price=filled_price, qty=filled_qty)
+                    
+                    # ── 推送通知：限价单已成交 ──
+                    if NOTIFY_ON_SIGNAL:
+                        side_emoji = "🟢" if info["side"].upper() == "BUY" else "🔴"
+                        notifier.send(
+                            title="✅ 限价单已成交",
+                            content=(
+                                f"{side_emoji} <b>{info['side']} {info['symbol']}</b>\n\n"
+                                f"💰 成交价: <code>{filled_price:,.2f}</code>\n"
+                                f"📦 数量: <code>{filled_qty}</code>\n"
+                                f"🛑 止损: <code>{info['stop_loss']:,.2f}</code>\n"
+                                f"🎯 止盈: <code>{info['take_profit']:,.2f}</code>\n\n"
+                                f"📝 策略: {info['strategy_code']}\n"
+                                f"⏰ {now.strftime('%Y-%m-%d %H:%M:%S')}"
+                            ),
+                        )
+                    
+                    if info.get("confirm_after_fill"):
+                        # ── Step 3: 启动确认倒计时 ──
+                        with _state_lock:
+                            _awaiting_confirmation[pending_key] = {
+                                "filled_at": now,
+                                "filled_price": filled_price,
+                                "filled_qty": filled_qty,
+                                "side": info["side"],
+                                "symbol": info["symbol"],
+                                "stop_loss": info["stop_loss"],
+                                "take_profit": info["take_profit"],
+                                "strategy_code": info["strategy_code"],
+                                "target": target,
+                                "timeframe": info["timeframe"],
+                                "post_fill_confirm_bars": info.get("post_fill_confirm_bars", 3),
+                                "candles_checked": 0,
+                            }
+                        _db_update_pending_status(pending_key, "CONFIRMING",
+                                                  filled_price=filled_price,
+                                                  filled_qty=filled_qty,
+                                                  filled_at=now)
+                        log.info("进入确认等待", key=pending_key,
+                                 confirm_bars=info.get("post_fill_confirm_bars", 3))
+                    else:
+                        # 无需确认 → 直接写入 SL/TP
+                        session = get_session()
+                        try:
+                            order_side = OrderSide.BUY if info["side"].upper() == "BUY" else OrderSide.SELL
+                            _write_sl_tp_to_position(
+                                session, target, info["symbol"], order_side,
+                                filled_price, info["stop_loss"], info["take_profit"],
+                                info["strategy_code"],
+                            )
+                            session.commit()
+                        finally:
+                            session.close()
+                        _db_update_pending_status(pending_key, "FILLED",
+                                                  filled_price=filled_price,
+                                                  filled_qty=filled_qty,
+                                                  filled_at=now)
+                    
+                    to_remove.append(pending_key)
+                
+                elif elapsed_minutes >= max_wait_minutes:
+                    # ── 超时未成交 → 撤单 ──
+                    log.info("限价单超时撤单",
+                             key=pending_key, elapsed_min=f"{elapsed_minutes:.0f}",
+                             max_min=max_wait_minutes)
+                    loop.run_until_complete(
+                        trader.cancel_order(info["exchange_order_id"], info["symbol"])
+                    )
+                    
+                    _db_update_pending_status(pending_key, "EXPIRED")
+                    
+                    # ── 推送通知：限价单超时撤单 ──
+                    if NOTIFY_ON_SIGNAL:
+                        notifier.send(
+                            title="⏰ 限价单超时撤单",
+                            content=(
+                                f"{'🟢' if info['side'].upper() == 'BUY' else '🔴'} "
+                                f"<b>{info['side']} {info['symbol']}</b>\n\n"
+                                f"💰 挂单价: <code>{info['entry_price']:,.2f}</code>\n"
+                                f"⏳ 等待: {elapsed_minutes:.0f} 分钟\n"
+                                f"❌ 价格未到，已自动撤单\n\n"
+                                f"📝 策略: {info['strategy_code']}\n"
+                                f"⏰ {now.strftime('%Y-%m-%d %H:%M:%S')}"
+                            ),
+                        )
+                    
+                    to_remove.append(pending_key)
+                
+                loop.run_until_complete(trader.close())
+            finally:
+                loop.close()
+                
+        except Exception as e:
+            log.error("检查限价单失败", key=pending_key, error=str(e))
+    
+    # 清理已处理的挂单
+    if to_remove:
+        with _state_lock:
+            for key in to_remove:
+                _pending_limit_orders.pop(key, None)
+
+
+def _check_awaiting_confirmations_cycle():
+    """
+    检查等待确认的仓位：
+      - 在 post_fill_confirm_bars 内出现确认形态 → 设置 SL/TP，保留仓位
+      - 超过 confirm_bars 仍无确认 → 市价平仓
+    
+    确认逻辑复用策略实例的 _check_post_fill_confirmation()
+    """
+    if not _awaiting_confirmation:
+        return
+    
+    now = datetime.now()
+    to_remove = []
+    
+    with _state_lock:
+        items = list(_awaiting_confirmation.items())
+    
+    for conf_key, info in items:
+        try:
+            tf_minutes = _timeframe_to_minutes(info.get("timeframe", "15m"))
+            elapsed_minutes = (now - info["filled_at"]).total_seconds() / 60
+            candles_elapsed = int(elapsed_minutes / tf_minutes)
+            
+            strategy_code = info["strategy_code"]
+            symbol = info["symbol"]
+            
+            # 获取缓存的策略实例
+            cache_key = f"{strategy_code}:{symbol}"
+            strategy = _strategy_cache.get(cache_key)
+            if not strategy:
+                log.warning("确认检查: 策略实例不存在", key=conf_key)
+                to_remove.append(conf_key)
+                continue
+            
+            # 获取 K 线用于确认检查
+            candles = fetch_candles(symbol, info.get("timeframe", "15m"))
+            if not candles:
+                continue
+            
+            # 构造当前持仓信息
+            current_position = {
+                "side": info["side"],
+                "entry_price": info["filled_price"],
+                "stop_loss": info["stop_loss"],
+                "take_profit": info["take_profit"],
+            }
+            
+            # 调用策略的确认检查方法
+            confirm_result = None
+            if hasattr(strategy, "_check_post_fill_confirmation"):
+                confirm_result = strategy._check_post_fill_confirmation(
+                    symbol, candles, current_position
+                )
+            
+            if confirm_result and confirm_result.signal_type == "CLOSE":
+                # ── 确认失败 → 市价平仓 ──
+                log.info("确认失败，平仓", key=conf_key, reason="UNCONFIRMED",
+                         candles_elapsed=candles_elapsed)
+                _close_unconfirmed_position(info)
+                _db_update_pending_status(conf_key, "CANCELLED",
+                                          candles_checked=candles_elapsed)
+                to_remove.append(conf_key)
+            
+            elif confirm_result is None and hasattr(strategy, "_post_fill_state") and not strategy._post_fill_state:
+                # ── 确认成功（策略清除了 _post_fill_state）→ 设置 SL/TP ──
+                log.info("确认成功，设置SL/TP", key=conf_key, candles_elapsed=candles_elapsed)
+                session = get_session()
+                try:
+                    target = info["target"]
+                    order_side = OrderSide.BUY if info["side"].upper() == "BUY" else OrderSide.SELL
+                    _write_sl_tp_to_position(
+                        session, target, symbol, order_side,
+                        info["filled_price"], info["stop_loss"], info["take_profit"],
+                        strategy_code,
+                    )
+                    session.commit()
+                finally:
+                    session.close()
+                _db_update_pending_status(conf_key, "FILLED",
+                                          candles_checked=candles_elapsed)
+                to_remove.append(conf_key)
+            
+            elif candles_elapsed > info.get("post_fill_confirm_bars", 3) + 1:
+                # ── 超时兜底：超过确认窗口仍未决定 → 平仓 ──
+                log.info("确认超时，兜底平仓", key=conf_key, candles_elapsed=candles_elapsed)
+                _close_unconfirmed_position(info)
+                _db_update_pending_status(conf_key, "CANCELLED",
+                                          candles_checked=candles_elapsed)
+                to_remove.append(conf_key)
+            
+        except Exception as e:
+            log.error("确认检查失败", key=conf_key, error=str(e))
+    
+    if to_remove:
+        with _state_lock:
+            for key in to_remove:
+                _awaiting_confirmation.pop(key, None)
+
+
+def _close_unconfirmed_position(info: Dict):
+    """市价平仓：确认失败的仓位"""
+    try:
+        target = info["target"]
+        sandbox = config.get_bool("exchange_sandbox", True)
+        
+        # 平仓方向与开仓方向相反
+        close_side = OrderSide.SELL if info["side"].upper() == "BUY" else OrderSide.BUY
+        
+        trader = LiveTrader(
+            exchange=target.exchange,
+            api_key=target.api_key,
+            api_secret=target.api_secret,
+            passphrase=target.passphrase,
+            sandbox=sandbox,
+            market_type=target.market_type,
+        )
+        
+        loop = asyncio.new_event_loop()
+        try:
+            result = loop.run_until_complete(
+                trader.create_order(
+                    symbol=info["symbol"],
+                    side=close_side,
+                    order_type=OrderType.MARKET,
+                    quantity=info.get("filled_qty", 0),
+                    trade_type="CLOSE",
+                    close_reason="UNCONFIRMED",
+                )
+            )
+            ok = result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
+            log.info("未确认仓位已平仓" if ok else "未确认仓位平仓失败",
+                     symbol=info["symbol"], side=info["side"],
+                     filled_price=result.filled_price)
+            loop.run_until_complete(trader.close())
+        finally:
+            loop.close()
+    except Exception as e:
+        log.error("平仓未确认仓位失败", symbol=info.get("symbol"), error=str(e))
 
 
 def _load_strategies_from_db():
@@ -518,6 +1079,17 @@ def monitor_loop():
             with _state_lock:
                 monitor_state["errors"] += 1
 
+        # ── Step 2+3: 每轮检查限价挂单 + 确认过滤 ──
+        try:
+            _check_pending_limit_orders_cycle()
+        except Exception as e:
+            log.error("检查限价挂单异常", error=str(e))
+        
+        try:
+            _check_awaiting_confirmations_cycle()
+        except Exception as e:
+            log.error("检查确认过滤异常", error=str(e))
+
         # 等待下次检测
         stop_event.wait(MONITOR_INTERVAL)
 
@@ -562,8 +1134,39 @@ def get_status():
     # 获取持仓监控扫描间隔
     pm_interval = config.get_float("position_monitor_interval", 5.0)
 
+    # ── Step 2+3: 挂单 + 确认状态 ──
     with _state_lock:
+        pending_orders = [
+            {
+                "key": k,
+                "symbol": v["symbol"],
+                "side": v["side"],
+                "entry_price": v["entry_price"],
+                "stop_loss": v.get("stop_loss"),
+                "take_profit": v.get("take_profit"),
+                "strategy_code": v.get("strategy_code", ""),
+                "amount_usdt": v.get("amount_usdt"),
+                "placed_at": v["placed_at"].isoformat(),
+                "elapsed_min": round((now - v["placed_at"]).total_seconds() / 60, 1),
+                "retest_bars": v.get("retest_bars", 20),
+                "timeframe": v.get("timeframe", "15m"),
+            }
+            for k, v in _pending_limit_orders.items()
+        ]
+        awaiting = [
+            {
+                "key": k,
+                "symbol": v["symbol"],
+                "side": v["side"],
+                "filled_price": v["filled_price"],
+                "filled_at": v["filled_at"].isoformat(),
+                "confirm_bars": v.get("post_fill_confirm_bars", 3),
+            }
+            for k, v in _awaiting_confirmation.items()
+        ]
+        cached_strategies = list(_strategy_cache.keys())
         state_snapshot = dict(monitor_state)
+    
     return jsonify({
         "success": True,
         "state": state_snapshot,
@@ -580,6 +1183,9 @@ def get_status():
         },
         "position_monitor_stats": pm_stats,
         "cooldowns": cooldowns,
+        "pending_limit_orders": pending_orders,
+        "awaiting_confirmation": awaiting,
+        "cached_strategies": cached_strategies,
     })
 
 
@@ -799,6 +1405,98 @@ def get_strategies():
     })
 
 
+# ========== 限价挂单管理 API ==========
+
+@app.route("/api/pending-orders/cancel", methods=["POST"])
+def cancel_pending_order():
+    """
+    手动撤销限价挂单（管理后台调用）。
+    请求体: {"pending_key": "strategy_code:symbol", "reason": "..."}
+
+    流程：
+    1. 从内存 _pending_limit_orders / _awaiting_confirmation 查找
+    2. 在交易所撤单（如果是 PENDING 状态）
+    3. 如果是 CONFIRMING 状态，市价平仓
+    4. 更新内存 + DB 状态
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    pending_key = data.get("pending_key", "").strip()
+    reason = data.get("reason", "手动撤单")
+
+    if not pending_key:
+        return jsonify({"success": False, "error": "pending_key 必填"}), 400
+
+    with _state_lock:
+        info = _pending_limit_orders.get(pending_key)
+        awaiting_info = _awaiting_confirmation.get(pending_key)
+
+    if not info and not awaiting_info:
+        return jsonify({"success": False, "error": f"未找到挂单: {pending_key}"}), 404
+
+    try:
+        if info:
+            # PENDING 状态 → 交易所撤单
+            target = info.get("target")
+            exchange_order_id = info.get("exchange_order_id")
+            symbol = info.get("symbol", "")
+
+            if target and exchange_order_id:
+                try:
+                    from libs.trading.live_trader import LiveTrader
+                    sandbox = config.get_bool("exchange_sandbox", True)
+                    trader = LiveTrader(
+                        exchange=target.exchange,
+                        api_key=target.api_key,
+                        api_secret=target.api_secret,
+                        passphrase=target.passphrase,
+                        sandbox=sandbox,
+                        market_type=target.market_type,
+                    )
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    try:
+                        loop.run_until_complete(
+                            trader.cancel_order(order_id=exchange_order_id, symbol=symbol)
+                        )
+                    finally:
+                        loop.close()
+                    log.info("管理员撤单成功", pending_key=pending_key, reason=reason)
+                except Exception as e:
+                    log.warning("交易所撤单失败(可能已不存在)", pending_key=pending_key, error=str(e))
+
+            with _state_lock:
+                _pending_limit_orders.pop(pending_key, None)
+
+            _db_update_pending_status(pending_key, "CANCELLED")
+            return jsonify({
+                "success": True,
+                "message": f"已撤销挂单 {pending_key}",
+                "reason": reason,
+            })
+
+        elif awaiting_info:
+            # CONFIRMING 状态 → 市价平仓
+            try:
+                _close_unconfirmed_position(awaiting_info)
+                log.info("管理员撤销确认中仓位", pending_key=pending_key, reason=reason)
+            except Exception as e:
+                log.warning("平仓失败", pending_key=pending_key, error=str(e))
+
+            with _state_lock:
+                _awaiting_confirmation.pop(pending_key, None)
+
+            _db_update_pending_status(pending_key, "CANCELLED")
+            return jsonify({
+                "success": True,
+                "message": f"已撤销确认中仓位 {pending_key}，已市价平仓",
+                "reason": reason,
+            })
+
+    except Exception as e:
+        log.error("撤单失败", pending_key=pending_key, error=str(e))
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # ========== 自动交易 API ==========
 
 # 按策略多账户分发：为 True 时，有 strategy_code 的信号将查 dim_strategy_binding 并对每个绑定账户执行
@@ -895,6 +1593,11 @@ async def _execute_signal_for_target(
 ) -> Dict[str, Any]:
     """
     对单个绑定账户执行信号：创建带 settlement 的 LiveTrader，下单并可选设置止盈止损。
+    
+    ★ Step 2 升级：支持限价单 (entry_mode=limit)
+      - 限价单：挂单到交易所，追踪到 _pending_limit_orders，由 monitor_loop 管理生命周期
+      - 市价单：原有逻辑不变
+    
     仅服务端使用，勿暴露 target 中的凭证。
     """
     symbol = signal.get("symbol", "")
@@ -902,7 +1605,7 @@ async def _execute_signal_for_target(
     entry_price = float(signal.get("entry_price") or 0)
     stop_loss = float(signal.get("stop_loss") or 0)
     take_profit = float(signal.get("take_profit") or 0)
-    leverage = int(signal.get("leverage") or 0)  # 杠杆倍数（策略配置，随信号传入）
+    leverage = int(signal.get("leverage") or 0)
     if not symbol or not entry_price:
         return {"account_id": target.account_id, "success": False, "error": "missing symbol or entry_price"}
     if amount_usdt <= 0:
@@ -932,25 +1635,97 @@ async def _execute_signal_for_target(
                       "HEDGE": "OPEN", "GRID": "OPEN"}.get(sig_type, "OPEN")
         close_reason = signal.get("close_reason") if trade_type == "CLOSE" else None
 
-        # 传 amount_usdt 让 LiveTrader 内部统一换算数量（自动处理 contractSize、最小限制等）
+        # ── Step 2: 根据 entry_mode 决定市价/限价 ──
+        indicators = signal.get("indicators") or {}
+        entry_mode = indicators.get("entry_mode", "market")
+        use_limit = (entry_mode == "limit" and trade_type == "OPEN")
+        
+        order_type = OrderType.LIMIT if use_limit else OrderType.MARKET
+
         order_result = await trader.create_order(
             symbol=symbol,
             side=order_side,
-            order_type=OrderType.MARKET,
+            order_type=order_type,
             amount_usdt=amount_usdt,
             price=entry_price,
             leverage=leverage or None,
             signal_id=signal.get("signal_id"),
-            stop_loss=stop_loss or None,
-            take_profit=take_profit or None,
+            stop_loss=stop_loss or None if not use_limit else None,     # 限价单成交前不设SL
+            take_profit=take_profit or None if not use_limit else None,  # 限价单成交前不设TP
             trade_type=trade_type,
             close_reason=close_reason,
         )
+        
+        if use_limit:
+            # ── 限价单：不会立即成交，追踪到 _pending_limit_orders ──
+            strategy_code = signal.get("strategy") or signal.get("strategy_code") or ""
+            pending_key = f"{strategy_code}:{symbol}"
+            exchange_order_id = getattr(order_result, "exchange_order_id", None) or getattr(order_result, "order_id", None)
+            
+            with _state_lock:
+                _pending_limit_orders[pending_key] = {
+                    "order_id": getattr(order_result, "order_id", None),
+                    "exchange_order_id": exchange_order_id,
+                    "symbol": symbol,
+                    "side": side_str,
+                    "entry_price": entry_price,
+                    "stop_loss": stop_loss,
+                    "take_profit": take_profit,
+                    "strategy_code": strategy_code,
+                    "target": target,
+                    "amount_usdt": amount_usdt,
+                    "leverage": leverage,
+                    "placed_at": datetime.now(),
+                    "retest_bars": int(indicators.get("retest_bars", 20)),
+                    "timeframe": signal.get("timeframe", "15m"),
+                    "confirm_after_fill": bool(indicators.get("confirm_after_fill", False)),
+                    "post_fill_confirm_bars": int(indicators.get("post_fill_confirm_bars", 3)),
+                }
+            
+            # ── DB 持久化 ──
+            _db_save_pending(pending_key, _pending_limit_orders[pending_key])
+            
+            log.info("限价单已挂出",
+                     strategy=strategy_code, symbol=symbol, side=side_str,
+                     price=entry_price, exchange_order_id=exchange_order_id)
+            
+            # ── 推送通知：限价单已挂出 ──
+            if NOTIFY_ON_SIGNAL:
+                side_emoji = "🟢" if side_str.upper() == "BUY" else "🔴"
+                tf = signal.get("timeframe", "15m")
+                retest_bars = int(indicators.get("retest_bars", 20))
+                timeout_min = _timeframe_to_minutes(tf) * retest_bars
+                notifier.send(
+                    title="📋 限价单已挂出",
+                    content=(
+                        f"{side_emoji} <b>{side_str} {symbol}</b>\n\n"
+                        f"💰 挂单价: <code>{entry_price:,.2f}</code>\n"
+                        f"🛑 止损: <code>{stop_loss:,.2f}</code>\n"
+                        f"🎯 止盈: <code>{take_profit:,.2f}</code>\n"
+                        f"💵 金额: <code>{amount_usdt:,.0f} USDT</code>\n\n"
+                        f"⏳ 超时: {timeout_min}分钟后自动撤单\n"
+                        f"📝 策略: {strategy_code}\n"
+                        f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                    ),
+                )
+            
+            await trader.close()
+            return {
+                "account_id": target.account_id,
+                "user_id": target.user_id,
+                "success": True,
+                "order_type": "LIMIT",
+                "order_id": getattr(order_result, "order_id", None),
+                "exchange_order_id": exchange_order_id,
+                "entry_price": entry_price,
+                "status": "PENDING",
+            }
+        
+        # ── 市价单：原有逻辑 ──
         ok = order_result.status in (OrderStatus.FILLED, OrderStatus.PARTIAL)
         filled_qty = order_result.filled_quantity or 0
         filled_price = order_result.filled_price or entry_price
 
-        # 如果 LiveTrader 返回了非 FILLED 状态（如金额不够 1 张合约），提取错误信息
         error_msg = None
         if not ok:
             error_msg = getattr(order_result, "error_message", None) or getattr(order_result, "error_code", None)
@@ -960,11 +1735,10 @@ async def _execute_signal_for_target(
                             error_code=getattr(order_result, "error_code", None),
                             error_message=getattr(order_result, "error_message", None))
 
-        # 不自管挂交易所止盈止损单，SL/TP 只写入持仓表，由 position_monitor 到价平仓
+        # SL/TP 写入持仓表，由 position_monitor 到价平仓
         sl_tp_ok = False
         if ok and (stop_loss or take_profit) and filled_qty > 0:
-            sl_tp_ok = True  # 由下方 _write_sl_tp_to_position + position_monitor 接管
-        # ── 写入持仓表的 SL/TP + entry_price（自管模式核心）──
+            sl_tp_ok = True
         if ok and filled_qty > 0:
             try:
                 strategy_code = signal.get("strategy") or signal.get("strategy_code") or ""
@@ -1810,6 +2584,36 @@ def _sync_loop():
     log.info("自动同步线程已停止")
 
 
+def _recover_pending_limit_orders():
+    """
+    程序重启后从 DB 恢复 pending 限价单到内存，继续追踪生命周期。
+    
+    流程：
+    1. 从 fact_pending_limit_order 表读取 PENDING/CONFIRMING 状态的记录
+    2. 重建 ExecutionTarget（通过 account_id 查交易所凭证）
+    3. 恢复到 _pending_limit_orders / _awaiting_confirmation 内存字典
+    4. 下一轮 monitor_loop 会自动检查这些挂单的交易所状态
+    """
+    global _pending_limit_orders, _awaiting_confirmation
+    try:
+        recovered = _db_load_pending_orders()
+        if recovered:
+            with _state_lock:
+                _pending_limit_orders.update(recovered)
+            log.info(f"从DB恢复 {len(recovered)} 个pending限价单")
+            if NOTIFY_ON_SIGNAL:
+                total = len(recovered) + len(_awaiting_confirmation)
+                if total > 0:
+                    notifier.send(
+                        title="🔄 重启恢复",
+                        content=f"程序重启，已从数据库恢复 {total} 个限价单追踪。",
+                    )
+        else:
+            log.info("无pending限价单需要恢复")
+    except Exception as e:
+        log.error("恢复pending限价单失败", error=str(e))
+
+
 def _auto_start_monitor():
     """
     若配置了 auto_trade_enabled=true，Flask 进程启动后自动开启监控循环，
@@ -1826,6 +2630,8 @@ def _auto_start_monitor():
             monitor_state["running"] = False
         log.info("auto_trade_enabled=false，监控不自动启动（可手动 POST /api/start）")
         return
+    # 恢复/清理重启前的孤立限价单
+    _recover_pending_limit_orders()
     # 启动信号监控
     stop_event.clear()
     monitor_thread = threading.Thread(target=monitor_loop, daemon=True)
@@ -1837,9 +2643,25 @@ def _auto_start_monitor():
     sync_thread.start()
     # 启动持仓 SL/TP 自管监控（不在交易所挂单，自己监控到价平仓）
     if not EXCHANGE_SL_TP:
-        from libs.position.monitor import start_position_monitor, set_on_sl_triggered
+        from libs.position.monitor import start_position_monitor, set_on_sl_triggered, set_on_close_notify
         # 注册止损冷却回调：止损平仓后自动设置策略冷却
         set_on_sl_triggered(lambda symbol, strategy: set_cooldown(symbol, strategy))
+        # 注册平仓通知回调：SL/TP 平仓后推送 Telegram
+        def _notify_close(symbol, side, trigger_type, entry_price, exit_price, pnl, strategy_code):
+            emoji = "🟢" if pnl >= 0 else "🔴"
+            tp_sl = "止盈 ✅" if trigger_type == "TP" else "止损 ❌"
+            pnl_str = f"+${pnl:.2f}" if pnl >= 0 else f"-${abs(pnl):.2f}"
+            notifier.send(
+                title=f"{emoji} {tp_sl} | {symbol}",
+                content=(
+                    f"策略: {strategy_code}\n"
+                    f"方向: {'做多' if side == 'LONG' else '做空'}\n"
+                    f"入场: {entry_price:.4f}\n"
+                    f"出场: {exit_price:.4f}\n"
+                    f"盈亏: {pnl_str}"
+                ),
+            )
+        set_on_close_notify(_notify_close)
         pm_interval = config.get_float("position_monitor_interval", 5.0)
         start_position_monitor(interval=pm_interval)
         log.info("position_monitor 已启动（自管SL/TP模式）", interval=pm_interval)

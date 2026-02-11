@@ -100,6 +100,88 @@ def get_htf_trend(
     return "neutral"
 
 
+def get_htf_structure_trend(
+    candles: List[Dict],
+    htf_multiplier: int = 4,
+    swing_count: int = 3
+) -> str:
+    """
+    基于大周期 K 线结构（Swing High/Low）判断趋势
+    
+    核心思想：
+    - 聚合出 HTF K线
+    - 在 HTF 上识别摆动高低点
+    - Higher High + Higher Low = bullish
+    - Lower High + Lower Low = bearish
+    
+    相比 EMA 方式，这种方法更符合 SMC/PA 体系：
+    "大周期定方向 → 看 K 线结构，而非看均线金叉死叉"
+    
+    Args:
+        candles: 小周期 K 线数据
+        htf_multiplier: 大周期倍数 (如 4 表示 1H→4H)
+        swing_count: HTF 摆动点灵敏度 (默认 3，即需要左右各 3 根 HTF K线确认)
+    
+    Returns:
+        "bullish" / "bearish" / "neutral"
+    """
+    # 至少需要足够的 K 线来生成 HTF 摆动点
+    min_htf_bars = (swing_count * 2 + 1) * 3  # 需要至少 3 组完整的摆动结构
+    min_candles = min_htf_bars * htf_multiplier
+    
+    if len(candles) < min_candles:
+        return "neutral"
+    
+    # 聚合到大周期
+    htf_candles = _aggregate_candles(candles, htf_multiplier)
+    
+    if len(htf_candles) < min_htf_bars:
+        return "neutral"
+    
+    # 在 HTF K线上识别摆动点
+    htf_swing_highs = []
+    htf_swing_lows = []
+    
+    for i in range(swing_count, len(htf_candles) - swing_count):
+        high = htf_candles[i]["high"]
+        low = htf_candles[i]["low"]
+        
+        # 摆动高点: 左右 swing_count 根 K 线的 high 都 <= 当前
+        is_high = all(
+            high >= htf_candles[j]["high"]
+            for j in range(i - swing_count, i + swing_count + 1)
+        )
+        if is_high:
+            htf_swing_highs.append({"index": i, "price": high})
+        
+        # 摆动低点: 左右 swing_count 根 K 线的 low 都 >= 当前
+        is_low = all(
+            low <= htf_candles[j]["low"]
+            for j in range(i - swing_count, i + swing_count + 1)
+        )
+        if is_low:
+            htf_swing_lows.append({"index": i, "price": low})
+    
+    if len(htf_swing_highs) < 2 or len(htf_swing_lows) < 2:
+        return "neutral"
+    
+    # 取最近两个摆动高点和低点
+    h1 = htf_swing_highs[-2]["price"]
+    h2 = htf_swing_highs[-1]["price"]
+    l1 = htf_swing_lows[-2]["price"]
+    l2 = htf_swing_lows[-1]["price"]
+    
+    # Higher High + Higher Low = bullish
+    if h2 > h1 and l2 > l1:
+        return "bullish"
+    
+    # Lower High + Lower Low = bearish
+    if h2 < h1 and l2 < l1:
+        return "bearish"
+    
+    return "neutral"
+
+
 def _aggregate_candles(candles: List[Dict], multiplier: int) -> List[Dict]:
     """
     将小周期K线聚合为大周期

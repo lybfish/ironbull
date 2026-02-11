@@ -70,11 +70,21 @@ _closing_in_progress: set = set()  # position_id 集合
 # 签名: callback(symbol: str, strategy_code: str) -> None
 _on_sl_triggered_callback = None
 
+# 平仓通知回调（由 signal-monitor 注册，SL/TP 触发后推送 Telegram）
+# 签名: callback(symbol, side, trigger_type, entry_price, exit_price, pnl, strategy_code) -> None
+_on_close_notify_callback = None
+
 
 def set_on_sl_triggered(callback):
     """注册止损触发回调（由 signal-monitor 在启动时调用）"""
     global _on_sl_triggered_callback
     _on_sl_triggered_callback = callback
+
+
+def set_on_close_notify(callback):
+    """注册平仓通知回调（由 signal-monitor 在启动时调用，推送 Telegram）"""
+    global _on_close_notify_callback
+    _on_close_notify_callback = callback
 
 
 # ─────────────────────── 信号事件写入 ───────────────────────
@@ -377,6 +387,26 @@ async def _close_position_local(
                 session, position, trigger_type, current_price,
                 pm_signal_id, success=True,
             )
+            # 平仓通知推送（Telegram）
+            if is_full_close and _on_close_notify_callback:
+                try:
+                    entry_p = float(position.entry_price or position.avg_cost or 0)
+                    exit_p = float(result.filled_price or current_price)
+                    if side == "LONG":
+                        pnl = (exit_p - entry_p) * qty
+                    else:
+                        pnl = (entry_p - exit_p) * qty
+                    _on_close_notify_callback(
+                        symbol=position.symbol,
+                        side=side,
+                        trigger_type=trigger_type,
+                        entry_price=entry_p,
+                        exit_price=exit_p,
+                        pnl=pnl,
+                        strategy_code=position.strategy_code or "",
+                    )
+                except Exception as nf_err:
+                    log.warning(f"close notify callback failed: {nf_err}")
             # 止损触发后设置策略冷却（仅全部成交时触发，部分成交等下一轮继续平）
             if is_full_close and trigger_type == "SL" and position.strategy_code and _on_sl_triggered_callback:
                 try:
@@ -542,6 +572,26 @@ async def _close_position_remote(
                     except Exception as fallback_err:
                         log.error("[REMOTE] 回退更新也失败", error=str(fallback_err))
 
+            # 平仓通知推送（Telegram）
+            if is_full_close and _on_close_notify_callback:
+                try:
+                    entry_p = float(position.entry_price or position.avg_cost or 0)
+                    exit_p = filled_price
+                    if side == "LONG":
+                        pnl = (exit_p - entry_p) * filled_qty
+                    else:
+                        pnl = (entry_p - exit_p) * filled_qty
+                    _on_close_notify_callback(
+                        symbol=position.symbol,
+                        side=side,
+                        trigger_type=trigger_type,
+                        entry_price=entry_p,
+                        exit_price=exit_p,
+                        pnl=pnl,
+                        strategy_code=position.strategy_code or "",
+                    )
+                except Exception as nf_err:
+                    log.warning(f"close notify callback (remote): {nf_err}")
             # 止损触发后设置策略冷却（仅全部成交时触发，部分成交等下一轮继续平）
             if is_full_close and trigger_type == "SL" and position.strategy_code and _on_sl_triggered_callback:
                 try:

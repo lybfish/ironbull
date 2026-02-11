@@ -107,6 +107,8 @@ class BacktestEngine:
         trailing_activation_pct: float = 0.0,  # 移动止损激活阈值（浮盈达到保证金的X%后激活，0=立即激活）
         max_drawdown_pct: float = 0.0,  # 最大回撤保护（百分比，0=不启用，例如 25.0 表示回撤 25% 后停止交易）
         max_consecutive_losses: int = 0,  # 连续亏损保护（0=不启用，例如 5 表示连续亏 5 笔后暂停）
+        fill_delay_bars: int = 0,        # 延迟入场K线数（0=即时，1=下根K线open入场，消除同根K线确认偏差）
+        slippage_pct: float = 0.0,       # 止损滑点百分比（0=无滑点，0.05=0.05%，模拟真实SL执行）
     ):
         self.initial_balance = initial_balance
         self.commission_rate = commission_rate
@@ -123,6 +125,32 @@ class BacktestEngine:
         self.max_consecutive_losses = max_consecutive_losses  # 连续亏损保护
         self._consecutive_losses = 0                         # 当前连续亏损计数
         self._dd_halted = False                              # 回撤保护已触发
+        
+        # ── 消除上帝视角 ──
+        # fill_delay_bars: 信号在当前K线收盘产生，延迟N根后以 open 价入场
+        #   0 = 即时入场（传统回测，有同根K线确认偏差）
+        #   1 = 下根K线 open 入场（更接近真实交易）
+        self.fill_delay_bars = fill_delay_bars
+        self._deferred_entries: List = []        # 待延迟执行的信号队列
+        self._processing_deferred = False        # 正在处理延迟信号（防递归）
+        # slippage_pct: 止损滑点（仅对 SL 生效，TP 视为限价单无滑点）
+        #   0 = 精确止损价成交
+        #   0.05 = SL成交价偏移 0.05%（多头更低、空头更高）
+        self.slippage_pct = slippage_pct
+        
+        # ── 回撤动态缩仓 ──
+        # 基于当前回撤百分比动态调整仓位大小，核心风控机制
+        # dd_scale_levels: [(dd_threshold_pct, scale_factor), ...]
+        # 例: [(10, 0.5), (20, 0.25), (30, 0.0)]
+        #   DD >= 10% → 仓位缩至 50%
+        #   DD >= 20% → 仓位缩至 25%
+        #   DD >= 30% → 停止交易
+        self.dd_scale_levels: List = []
+        
+        # ── 严格单仓模式（对齐 old1）──
+        # True = 有持仓时禁止开新仓、禁止替换仓位（old1 行为）
+        # False = 允许信号平仓+反向开仓（更灵活但回撤更大）
+        self.strict_single_position = True
         
         # 账户状态
         self.balance = initial_balance
@@ -204,8 +232,16 @@ class BacktestEngine:
             # 以损定仓计算
             position_size = self.risk_per_trade / sl_distance
             
-            # 安全阀 2: 名义价值不超过账户余额的 3 倍（余额已确认 > 0）
-            max_notional = self.balance * 3
+            # 回撤动态缩仓：DD 越深 → 仓位越小
+            dd_factor = self._get_dd_scale_factor()
+            if dd_factor < 1.0:
+                position_size *= dd_factor
+            
+            # 安全阀 2: 名义价值不超过初始余额的 1.5 倍
+            # 这是降低回撤的关键：限制未实现亏损 (unrealized DD)
+            # 例: $10k 账户最大名义 $15k → ETH@$3000 最多 5 个
+            # 这样 1% 逆行最多 = 5 * $30 = $150 → 1.5% DD
+            max_notional = self.initial_balance * 1.5
             max_qty = max_notional / entry_price if entry_price > 0 else base_qty
             position_size = min(position_size, max_qty)
             
@@ -255,10 +291,21 @@ class BacktestEngine:
                 history = candles[i - lookback : i + 1]
             current_candle = candles[i]
             current_price = current_candle["close"]
+            current_open = current_candle["open"]
             current_time = self._parse_time(current_candle["timestamp"])
             self._current_index = i  # 保存当前索引，供_check_pending使用
             
-            # 检查止损止盈
+            # ── 延迟入场：处理上一根K线的信号 → 以当前K线 open 入场 ──
+            # 真实交易中：K线收盘 → 策略确认信号 → 下一根K线 open 提交订单
+            if self.fill_delay_bars > 0 and self._deferred_entries:
+                self._processing_deferred = True
+                for deferred_signal in self._deferred_entries:
+                    if not self._is_risk_halted():
+                        self._handle_signal(deferred_signal, current_open, current_time)
+                self._deferred_entries.clear()
+                self._processing_deferred = False
+            
+            # 检查止损止盈（延迟入场的持仓也会在同根K线检查 SL/TP）
             self._check_all_stop_loss_take_profit(
                 current_candle["high"],
                 current_candle["low"],
@@ -292,7 +339,12 @@ class BacktestEngine:
             
             # 处理信号（含回撤保护 + 连续亏损保护）
             if signal and not self._is_risk_halted():
-                self._handle_signal(signal, current_price, current_time)
+                if self.fill_delay_bars > 0 and not self._processing_deferred:
+                    # 延迟模式：存入队列，下根K线 open 执行
+                    self._deferred_entries.append(signal)
+                else:
+                    # 即时模式：当前K线 close 执行（传统回测行为）
+                    self._handle_signal(signal, current_price, current_time)
             
             # 更新权益曲线
             self._update_equity(current_price, current_time)
@@ -313,16 +365,39 @@ class BacktestEngine:
         )
     
     def _is_risk_halted(self) -> bool:
-        """检查是否触发风控保护（最大回撤 / 连续亏损）"""
+        """检查是否触发风控保护（最大回撤 / 连续亏损 / 动态缩仓至0）"""
         # 最大回撤保护
         if self.max_drawdown_pct > 0 and self.peak_equity > 0:
             current_dd = (self.peak_equity - self.equity) / self.peak_equity * 100
             if current_dd >= self.max_drawdown_pct:
                 return True
+        # 动态缩仓至 0（= 暂停交易）
+        if self._get_dd_scale_factor() <= 0:
+            return True
         # 连续亏损保护
         if self.max_consecutive_losses > 0 and self._consecutive_losses >= self.max_consecutive_losses:
             return True
         return False
+    
+    def _get_dd_scale_factor(self) -> float:
+        """
+        根据当前回撤返回仓位缩放因子 (0.0 ~ 1.0)
+        
+        对齐交易行业标准的"权益曲线交易法"：
+        回撤越深 → 仓位越小 → 限制进一步亏损 → 自然恢复
+        """
+        if not self.dd_scale_levels or self.peak_equity <= 0:
+            return 1.0
+        
+        current_dd = (self.peak_equity - self.equity) / self.peak_equity * 100
+        
+        # dd_scale_levels 已按阈值排序（从低到高）
+        factor = 1.0
+        for threshold, scale in sorted(self.dd_scale_levels, key=lambda x: x[0]):
+            if current_dd >= threshold:
+                factor = scale
+        
+        return factor
     
     def _detect_hedge_mode(self, strategy):
         """检测策略是否需要对冲模式"""
@@ -346,6 +421,9 @@ class BacktestEngine:
         self.liquidated_count = 0  # 逐仓爆仓计数
         self._consecutive_losses = 0
         self._dd_halted = False
+        self._deferred_entries = []
+        self._processing_deferred = False
+        self.pending_orders = []
     
     def _build_positions_info(self) -> Dict:
         """构建持仓信息传给策略"""
@@ -482,10 +560,32 @@ class BacktestEngine:
         """单向模式下处理开仓（支持限价单）"""
         
         # 获取信号中的entry_price（如果存在且不等于current_price，则创建限价单）
-        entry_price = getattr(signal, "entry_price", current_price)
+        # 延迟入场模式下：current_price 已是下根K线 open，忽略 signal.entry_price
+        if self._processing_deferred:
+            entry_price = current_price  # 延迟入场：用下根K线 open 价
+        else:
+            entry_price = getattr(signal, "entry_price", current_price)
+        indicators = getattr(signal, "indicators", {}) or {}
+        
+        # ── 严格单仓保护（对齐 old1: not open_trade and pos == 0）──
+        # old1 绝不在持仓时开新仓或替换仓位
+        if self.strict_single_position and self.position is not None:
+            return
+        
+        # 如果策略已经确认了限价单成交（confirmed_fill=True），直接以 entry_price 开仓
+        if indicators.get("confirmed_fill", False):
+            if self.position:
+                # 非严格模式下允许替换
+                if signal.side != self.position.side:
+                    self._close_position(current_price, current_time, "SIGNAL")
+                    self._open_position(signal, entry_price, current_time)
+                # 同方向不替换（减少不必要的交易）
+            else:
+                self._open_position(signal, entry_price, current_time)
+            return
         
         # 如果entry_price与current_price不同，或者require_retest=True，创建限价单
-        require_retest = getattr(signal, "indicators", {}).get("require_retest", False) if hasattr(signal, "indicators") else False
+        require_retest = indicators.get("require_retest", False)
         if abs(entry_price - current_price) / current_price > 0.0001 or require_retest:  # 0.01%的容差或需要回踩确认
             # 检查是否已有限价单（同方向只保留一个，但允许创建新的限价单即使已有持仓）
             existing_order = None
@@ -530,6 +630,11 @@ class BacktestEngine:
     def _check_pending_orders(self, high: float, low: float, current_price: float, current_time: datetime, current_candle: Dict, prev_candle: Optional[Dict] = None, prev2_candle: Optional[Dict] = None):
         """检查限价单是否触达（与old1一致：需要回踩确认）"""
         if not self.pending_orders:
+            return
+        
+        # ── 严格单仓保护（对齐 old1 line 1360: not open_trade and pos == 0）──
+        # 有持仓时不处理任何限价单
+        if self.strict_single_position and self.position is not None:
             return
         
         # 获取完整的K线历史（用于策略的_check_pending方法）
@@ -789,15 +894,16 @@ class BacktestEngine:
             self._close_short(exit_price, exit_time, exit_reason)
     
     def _calculate_pnl(self, trade: Trade, exit_price: float) -> float:
-        """计算盈亏"""
+        """计算盈亏（对齐 old1 的费用模型）"""
         if trade.side == "BUY":
             pnl = (exit_price - trade.entry_price) * trade.quantity
         else:
             pnl = (trade.entry_price - exit_price) * trade.quantity
         
-        # 扣除平仓手续费
-        commission = abs(pnl) * self.commission_rate if pnl > 0 else 0
-        pnl -= commission
+        # 平仓手续费 = 名义价值 × 费率（无论盈亏都扣，对齐 old1）
+        # old1: fee_out = abs(qty * exit_price) * fee_rate
+        exit_commission = abs(exit_price * trade.quantity) * self.commission_rate
+        pnl -= exit_commission
         
         return pnl
     
@@ -854,7 +960,7 @@ class BacktestEngine:
         if self.trailing_stop_pct > 0:
             self._update_trailing_stop(position, high, low, is_long)
         
-        # ── 止损检查（含移动止损触发）──
+        # ── 止损检查（含移动止损触发 + 滑点模拟）──
         if position.stop_loss:
             triggered = False
             exit_price = position.stop_loss
@@ -865,6 +971,16 @@ class BacktestEngine:
                 triggered = True
             
             if triggered:
+                # 滑点模拟：SL 以市价执行，实际成交比挂单价更差
+                # 多头止损：实际成交更低（price * (1 - slip)）
+                # 空头止损：实际成交更高（price * (1 + slip)）
+                if self.slippage_pct > 0:
+                    slip = self.slippage_pct / 100.0
+                    if is_long:
+                        exit_price = exit_price * (1 - slip)
+                    else:
+                        exit_price = exit_price * (1 + slip)
+                
                 # 判断是原始止损还是移动止损触发
                 is_trailing = (
                     self.trailing_stop_pct > 0
@@ -1058,9 +1174,22 @@ class BacktestEngine:
             win_rate = result.win_rate / 100
             result.expectancy = win_rate * result.avg_win + (1 - win_rate) * result.avg_loss
         
-        # 最大回撤
+        # 最大回撤 (标准 peak-to-trough 算法，对齐 old1)
+        # 正确方法: 逐点跟踪 running peak，计算每个点的 drawdown = (peak - equity) / peak
         if self.equity_curve:
-            result.max_drawdown = self.peak_equity - min(e["equity"] for e in self.equity_curve)
-            result.max_drawdown_pct = (result.max_drawdown / self.peak_equity) * 100
+            running_peak = self.initial_balance
+            max_dd_pct = 0.0
+            max_dd_abs = 0.0
+            for e in self.equity_curve:
+                eq = e["equity"]
+                if eq > running_peak:
+                    running_peak = eq
+                dd_abs = running_peak - eq
+                dd_pct = (dd_abs / running_peak * 100) if running_peak > 0 else 0.0
+                if dd_pct > max_dd_pct:
+                    max_dd_pct = dd_pct
+                    max_dd_abs = dd_abs
+            result.max_drawdown = max_dd_abs
+            result.max_drawdown_pct = max_dd_pct
         
         return result

@@ -78,25 +78,36 @@ def old1_to_flex_format(candles_old1):
 
 # ======================== 运行 old1 ========================
 
-def run_old1(candles_old1, realtime=False, timeframe="15m"):
+def run_old1(candles_old1, realtime=True, timeframe="15m"):
     """运行 old1 回测引擎，返回结果字典"""
-    # old1 需要的参数
+    # old1 需要的参数 (对齐 test_smc_backtest.py 的真实参数)
     params = {
         "symbol": "BTCUSD",
-        "realtime_mode": realtime,
+        "realtime_mode": realtime,       # 线上默认 True
         "timeframe": timeframe,
         "initial_cash": 10000.0,
-        "risk_cash": 100.0,  # 每笔风险
+        "risk_cash": 100.0,
         "commission_rate": 0.001,
-        "strategy": "smc_fibo", # 指定使用 smc_backtest
+        "strategy": "smc_fibo",
+        "entry_mode": "retest",
+        "order_type": "limit",
+        "rr": 2,
+        "tif_bars": 20,
         "smc": {
-            "fiboLevels": "0.5,0.618,0.705", # old1 默认
-            "minRr": 2.0,
+            "fiboLevels": [0.5, 0.618, 0.705],
+            "retestBars": 20,
+            "minRr": 2,
+            "pinbarRatio": 1.5,
+            "allowEngulf": True,
             "stopBufferPct": 0.05,
-            "tpMode": "rr",
+            "stopSource": "auto",
+            "tpMode": "swing",
             "bias": "with_trend",
             "structure": "both",
-            "fiboFallback": True, # old1 默认开启
+            "entry": "auto",
+            "session": "all",
+            "fiboFallback": True,
+            "retestIgnoreStopTouch": False,
         }
     }
     
@@ -165,6 +176,8 @@ def run_flex(candles_flex, timeframe="15m"):
         # 恢复 retest 模式，复刻 old1 的"宽区成交"逻辑
         "entry_mode": "retest",
         "require_retest": True,        # 开启回踩确认
+        "retest_bars": 20,             # 保持 20 根 K 线等待
+        "entry_source": "auto",        # 默认使用 auto (fibo)
         # 诊断脚本不提供 HTF K线，因此关闭 HTF 过滤
         "require_htf_filter": False,
         # 关闭信号评分和去重，最大化信号数量
@@ -174,6 +187,12 @@ def run_flex(candles_flex, timeframe="15m"):
         "bias": "with_trend",
         "structure": "both",
         "signal_cooldown": 0,          # 允许连续信号
+        
+        # === Step 1: 开启时区过滤 (Session Filter) ===
+        "enable_session_filter": True,
+        "allowed_sessions": ["london", "ny"],
+        # 默认时区定义 (UTC): London 07-16, NY 12-21 (重叠 12-16)
+        # Asia 00-09
     }
     
     strategy = get_strategy("smc_fibo_flex", strategy_config)
@@ -259,36 +278,62 @@ def print_comparison(res1, res2, title_suffix=""):
 
 
 def main():
-    # 1. Run Standard 15m Test (35040 candles)
-    size = 35040
-    print(f"正在生成 {size} 根 15m K线数据 (≈1年)...")
-    candles_old1 = generate_candles_old1_format(size, interval="15m")
-    candles_flex = old1_to_flex_format(candles_old1)
+    print("=" * 72)
+    print("  完整对比: old1 vs smc_fibo_flex (Fibo模式, old1参数)")
+    print("  两者使用完全相同的参数:")
+    print("    fibo_levels=[0.5, 0.618, 0.705], min_rr=2.0")
+    print("    bias=with_trend, structure=both, stopBufferPct=0.05")
+    print("=" * 72)
     
-    print(f"运行 old1 (lookahead, 15m)...")
-    old1_res = run_old1(candles_old1, realtime=False, timeframe="15m")
+    # ==================== 15m 对比 ====================
+    size_15m = 35040
+    print(f"\n📊 生成 {size_15m} 根 15m K线 (≈1年)...")
+    candles_old1_15m = generate_candles_old1_format(size_15m, interval="15m")
+    candles_flex_15m = old1_to_flex_format(candles_old1_15m)
     
-    print(f"运行 smc_fibo_flex (15m)...")
-    flex_res = run_flex(candles_flex, timeframe="15m")
-
-    print_comparison(old1_res, flex_res, f"{size} 根 K线, 15m")
+    print("运行 old1 (15m)...")
+    old1_15m = run_old1(candles_old1_15m, realtime=False, timeframe="15m")
     
-    # 2. Run 1H Test (8760 candles = 1 year)
+    print("运行 flex Fibo (15m, old1参数)...")
+    flex_15m = run_flex(candles_flex_15m, timeframe="15m")
+    
+    print_comparison(old1_15m, flex_15m, "15m 周期, old1参数")
+    
+    # ==================== 1H 对比 ====================
     size_1h = 8760
-    print("\n\n" + "="*72)
-    print(f"  SWITCHING TO 1H TIMEFRAME (Same Duration, fewer candles)")
-    print("="*72)
-    print(f"正在生成 {size_1h} 根 1H K线数据 (≈1年)...")
+    print(f"\n📊 生成 {size_1h} 根 1H K线 (≈1年)...")
     candles_old1_1h = generate_candles_old1_format(size_1h, interval="1h")
     candles_flex_1h = old1_to_flex_format(candles_old1_1h)
     
-    print(f"运行 old1 (lookahead, 1h)...")
-    old1_res_1h = run_old1(candles_old1_1h, realtime=False, timeframe="1h")
+    print("运行 old1 (1h)...")
+    old1_1h = run_old1(candles_old1_1h, realtime=False, timeframe="1h")
     
-    print(f"运行 smc_fibo_flex (1h)...")
-    flex_res_1h = run_flex(candles_flex_1h, timeframe="1h")
+    print("运行 flex Fibo (1h, old1参数)...")
+    flex_1h = run_flex(candles_flex_1h, timeframe="1h")
     
-    print_comparison(old1_res_1h, flex_res_1h, f"{size_1h} 根 K线, 1H")
+    print_comparison(old1_1h, flex_1h, "1H 周期, old1参数")
+    
+    # ==================== 汇总表 ====================
+    print("\n" + "=" * 72)
+    print("  📋 汇总对比表")
+    print("=" * 72)
+    print(f"{'指标':<18} {'old1(15m)':>12} {'flex(15m)':>12} {'old1(1h)':>12} {'flex(1h)':>12}")
+    print("-" * 72)
+    for label, key, fmt in [
+        ("交易数",    "trade_count", "d"),
+        ("信号数",    "signal_count", "d"),
+        ("胜率(%)",   "win_rate", ".1f"),
+        ("PF",       "profit_factor", ".2f"),
+        ("总PnL($)", "total_pnl", ".0f"),
+        ("最大回撤(%)", "max_drawdown", ".1f"),
+        ("最终权益($)", "final_equity", ".0f"),
+    ]:
+        vals = [old1_15m[key], flex_15m[key], old1_1h[key], flex_1h[key]]
+        if fmt == "d":
+            print(f"  {label:<18} {vals[0]:>12} {vals[1]:>12} {vals[2]:>12} {vals[3]:>12}")
+        else:
+            print(f"  {label:<18} {vals[0]:>12{fmt}} {vals[1]:>12{fmt}} {vals[2]:>12{fmt}} {vals[3]:>12{fmt}}")
+    print("-" * 72)
 
 if __name__ == "__main__":
     main()

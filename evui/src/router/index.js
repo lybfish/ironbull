@@ -30,6 +30,7 @@ const menuRoutes = [
     meta: {title: '交易数据', icon: 'el-icon-s-order'},
     children: [
       {path: '/trading/orders', component: () => import('@/views/trading/orders'), meta: {title: '订单列表'}},
+      {path: '/trading/pending-orders', component: () => import('@/views/trading/pending-orders'), meta: {title: '限价挂单'}},
       {path: '/trading/fills', component: () => import('@/views/trading/fills'), meta: {title: '成交记录'}},
       {path: '/trading/positions', component: () => import('@/views/trading/positions'), meta: {title: '持仓管理'}},
       {path: '/trading/accounts', component: () => import('@/views/trading/accounts'), meta: {title: '资金账户'}},

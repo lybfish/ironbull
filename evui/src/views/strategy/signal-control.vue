@@ -162,6 +162,94 @@
       </el-table>
     </el-card>
 
+    <!-- 限价挂单状态 -->
+    <el-card shadow="never" style="margin-top: 16px" v-loading="statusLoading">
+      <div slot="header" class="card-header">
+        <span>限价挂单 (实时)</span>
+        <div>
+          <el-tag v-if="pendingOrders.length" size="small" type="warning">{{ pendingOrders.length }} 个等待中</el-tag>
+          <el-tag v-if="awaitingConfirm.length" size="small" type="info" style="margin-left: 6px">{{ awaitingConfirm.length }} 个确认中</el-tag>
+          <el-button size="mini" icon="el-icon-refresh" @click="fetchStatus" style="margin-left: 8px">刷新</el-button>
+        </div>
+      </div>
+      <div v-if="pendingOrders.length === 0 && awaitingConfirm.length === 0" style="text-align:center;color:#909399;padding:20px 0;">
+        暂无待处理限价挂单
+      </div>
+      <!-- 等待成交的挂单 -->
+      <div v-if="pendingOrders.length > 0">
+        <div style="font-weight:600;margin-bottom:8px;color:#E6A23C;">⏳ 等待成交</div>
+        <el-table :data="pendingOrders" stripe border size="small" :header-cell-style="{ background: '#fafafa' }">
+          <el-table-column prop="symbol" label="交易对" width="110">
+            <template slot-scope="{row}"><span style="font-weight:600">{{ row.symbol }}</span></template>
+          </el-table-column>
+          <el-table-column prop="side" label="方向" width="70" align="center">
+            <template slot-scope="{row}">
+              <el-tag :type="row.side === 'BUY' ? 'success' : 'danger'" size="mini" effect="dark">{{ row.side }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="entry_price" label="挂单价" width="110" align="right">
+            <template slot-scope="{row}">{{ formatPrice(row.entry_price) }}</template>
+          </el-table-column>
+          <el-table-column label="止损/止盈" width="130" align="right">
+            <template slot-scope="{row}">
+              <div v-if="row.stop_loss" style="color:#F56C6C;font-size:12px">SL {{ formatPrice(row.stop_loss) }}</div>
+              <div v-if="row.take_profit" style="color:#67C23A;font-size:12px">TP {{ formatPrice(row.take_profit) }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="key" label="策略" width="180" show-overflow-tooltip/>
+          <el-table-column prop="placed_at" label="挂单时间" width="170">
+            <template slot-scope="{row}">{{ formatTime(row.placed_at) }}</template>
+          </el-table-column>
+          <el-table-column prop="elapsed_min" label="等待" width="80" align="center">
+            <template slot-scope="{row}">
+              <span style="color:#E6A23C;font-weight:600">{{ row.elapsed_min }}m</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="80" align="center">
+            <template slot-scope="{row}">
+              <el-button type="text" size="mini" style="color:#F56C6C" @click="handleCancelPending(row)">撤单</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <!-- 等待确认的挂单 -->
+      <div v-if="awaitingConfirm.length > 0" style="margin-top: 16px;">
+        <div style="font-weight:600;margin-bottom:8px;color:#409EFF;">🔍 等待确认</div>
+        <el-table :data="awaitingConfirm" stripe border size="small" :header-cell-style="{ background: '#fafafa' }">
+          <el-table-column prop="symbol" label="交易对" width="110">
+            <template slot-scope="{row}"><span style="font-weight:600">{{ row.symbol }}</span></template>
+          </el-table-column>
+          <el-table-column prop="side" label="方向" width="70" align="center">
+            <template slot-scope="{row}">
+              <el-tag :type="row.side === 'BUY' ? 'success' : 'danger'" size="mini" effect="dark">{{ row.side }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="filled_price" label="成交价" width="110" align="right">
+            <template slot-scope="{row}">{{ formatPrice(row.filled_price) }}</template>
+          </el-table-column>
+          <el-table-column prop="key" label="策略" width="180" show-overflow-tooltip/>
+          <el-table-column prop="filled_at" label="成交时间" width="170">
+            <template slot-scope="{row}">{{ formatTime(row.filled_at) }}</template>
+          </el-table-column>
+          <el-table-column prop="confirm_bars" label="确认K线数" width="100" align="center"/>
+          <el-table-column label="操作" width="80" align="center">
+            <template slot-scope="{row}">
+              <el-button type="text" size="mini" style="color:#F56C6C" @click="handleCancelAwaiting(row)">撤销</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </el-card>
+
+    <!-- 策略缓存 -->
+    <el-card v-if="cachedStrategies.length > 0" shadow="never" style="margin-top: 16px">
+      <div slot="header" class="card-header">
+        <span>已缓存策略实例</span>
+        <el-tag size="small" type="success">{{ cachedStrategies.length }} 个</el-tag>
+      </div>
+      <el-tag v-for="s in cachedStrategies" :key="s" size="small" style="margin: 4px">{{ s }}</el-tag>
+    </el-card>
+
     <!-- 策略列表 -->
     <el-card shadow="never" style="margin-top: 16px" v-loading="strategiesLoading">
       <div slot="header" class="card-header">
@@ -195,7 +283,8 @@ import {
   getSignalStrategies,
   startSignalMonitor,
   stopSignalMonitor,
-  testSignalNotify
+  testSignalNotify,
+  cancelSignalPendingOrder
 } from '@/api/signal'
 
 export default {
@@ -215,7 +304,10 @@ export default {
       statusConfig: {},
       config: { interval_seconds: 300, sync_interval_seconds: 300, notify_on_signal: true },
       strategies: [],
-      cooldowns: []
+      cooldowns: [],
+      pendingOrders: [],
+      awaitingConfirm: [],
+      cachedStrategies: []
     }
   },
   computed: {
@@ -260,6 +352,50 @@ export default {
       this.fetchConfig()
       this.fetchStrategies()
     },
+    formatPrice(val) {
+      if (val == null || val === '' || val === 0) return '-'
+      const n = Number(val)
+      if (isNaN(n)) return val
+      if (n >= 1000) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      if (n >= 1) return n.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
+      return n.toLocaleString('en-US', { minimumFractionDigits: 6, maximumFractionDigits: 8 })
+    },
+    async handleCancelPending(row) {
+      try {
+        await this.$confirm(`确定撤销挂单「${row.symbol} ${row.side}」？`, '撤单确认', {
+          confirmButtonText: '确认撤销', cancelButtonText: '取消', type: 'warning'
+        })
+      } catch { return }
+      try {
+        const res = await cancelSignalPendingOrder(row.key, '管理员手动撤单')
+        if (res.data.success) {
+          this.$message.success(res.data.message || '撤单成功')
+        } else {
+          this.$message.error(res.data.error || '撤单失败')
+        }
+        this.fetchStatus()
+      } catch (e) {
+        this.$message.error(e.response?.data?.error || '撤单失败')
+      }
+    },
+    async handleCancelAwaiting(row) {
+      try {
+        await this.$confirm(`确定撤销确认中仓位「${row.symbol} ${row.side}」？将市价平仓。`, '撤销确认', {
+          confirmButtonText: '确认撤销', cancelButtonText: '取消', type: 'error'
+        })
+      } catch { return }
+      try {
+        const res = await cancelSignalPendingOrder(row.key, '管理员手动撤销确认')
+        if (res.data.success) {
+          this.$message.success(res.data.message || '撤销成功')
+        } else {
+          this.$message.error(res.data.error || '撤销失败')
+        }
+        this.fetchStatus()
+      } catch (e) {
+        this.$message.error(e.response?.data?.error || '撤销失败')
+      }
+    },
     async fetchStatus() {
       this.statusLoading = true
       this.connectionError = ''
@@ -269,11 +405,17 @@ export default {
         this.state = data.state || data || {}
         this.statusConfig = data.config || {}
         this.cooldowns = data.cooldowns || []
+        this.pendingOrders = data.pending_limit_orders || []
+        this.awaitingConfirm = data.awaiting_confirmation || []
+        this.cachedStrategies = data.cached_strategies || []
       } catch (e) {
         this.connectionError = e.message || (e.response && e.response.data && (e.response.data.error || e.response.data.detail)) || '请确认 signal-monitor 已启动（端口 8020）'
         this.state = {}
         this.statusConfig = {}
         this.cooldowns = []
+        this.pendingOrders = []
+        this.awaitingConfirm = []
+        this.cachedStrategies = []
       } finally {
         this.statusLoading = false
       }

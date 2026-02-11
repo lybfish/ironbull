@@ -48,3 +48,11 @@ export function stopSignalMonitor() {
 export function testSignalNotify() {
   return signalAxios.post(signalApiUrl('/test-notify'))
 }
+
+// ---- 限价挂单管理（直连 signal-monitor）----
+export function cancelSignalPendingOrder(pendingKey, reason) {
+  return signalAxios.post(signalApiUrl('/pending-orders/cancel'), {
+    pending_key: pendingKey,
+    reason: reason || '管理员手动撤单'
+  })
+}

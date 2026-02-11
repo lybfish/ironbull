@@ -1,0 +1,68 @@
+{
+  "_说明": "flex策略生产配置 — 限价单成交直接设SL/TP（不确认过滤）",
+  "_回测结果": {
+    "数据": "ETH/USDT 15m 1年(35040根K线)",
+    "费率": "maker 0.04%",
+    "SL滑点": "0.05%",
+    "交易数": 508,
+    "胜率": "62.4%",
+    "PF": 2.58,
+    "PnL": "+$24,472 (初始$10,000)",
+    "最大回撤": "6.2%",
+    "日均交易": "~1.4笔",
+    "stopBufferPct": "1.0% (止损放在swing下方1%,防流动性扫损)",
+    "vs_old1": "PF 2.58 > 2.50, WR 62.4% > 51.0%, DD 6.2% < 6.9%"
+  },
+  
+  "strategy": "smc_fibo_flex",
+  "strategy_config": {
+    "preset_profile": "none",
+    "auto_profile": "off",
+    
+    "swing": 3,
+    "min_rr": 1.5,
+    "fibo_levels": [0.5, 0.618, 0.705],
+    "stopBufferPct": 1.0,
+    "bias": "with_trend",
+    "structure": "both",
+    "tp_mode": "swing",
+    
+    "entry_mode": "limit",
+    "require_retest": true,
+    "retest_bars": 20,
+    "entry_source": "auto",
+    
+    "confirm_after_fill": false,
+    "signal_cooldown": 20,
+    
+    "fibo_fallback": false,
+    "require_htf_filter": false,
+    "enable_signal_score": false,
+    "enable_session_filter": false,
+    "amd_entry_mode": "off",
+    "use_breaker": false
+  },
+  
+  "engine_config": {
+    "commission_rate": 0.0004,
+    "risk_per_trade_pct": 1.0,
+    "strict_single_position": true,
+    "slippage_pct": 0.05
+  },
+  
+  "_关键参数说明": {
+    "stopBufferPct=1.0": "止损放在swing低/高点下/上方1%,有效防止流动性扫损",
+    "confirm_after_fill=false": "限价单成交后直接设SL/TP,不做确认过滤(回测证明直接设更好)",
+    "signal_cooldown=20": "每20根K线(15m周期=5小时)最多1个信号,控制交易频率",
+    "strict_single_position": "严格单仓,有持仓不开新仓",
+    "min_rr=1.5": "最低盈亏比1.5:1",
+    "slippage_pct=0.05": "止损单滑点0.05%"
+  },
+
+  "_实盘信号流程": {
+    "Step1_信号检测": "策略实例按 strategy_code:symbol 缓存,每轮检测信号",
+    "Step2_挂限价单": "entry_mode=limit时,在交易所挂限价单(Fibo回踩价);超过retest_bars根K线未成交自动撤单",
+    "Step3_成交处理": "限价单成交后直接设SL/TP(confirm_after_fill=false)",
+    "监控API": "GET /api/status 可查看 pending_limit_orders 状态"
+  }
+}

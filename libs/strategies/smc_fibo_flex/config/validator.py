@@ -252,8 +252,8 @@ def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
     validated["auto_profile"] = validate_enum(
         normalized.get("auto_profile") or normalized.get("autoProfile"),
         "auto_profile",
-        ["conservative", "medium", "aggressive"],
-        "medium"
+        ["off", "conservative", "medium", "aggressive"],
+        "off"
     )
     
     # 止损/止盈/回踩确认参数
@@ -273,6 +273,20 @@ def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
         validated["stop_buffer_pct"] = validate_range(
             raw_sl_buffer, "stop_buffer_pct", 0.00005, 0.01
         )
+    # 止损缓冲模式: "fixed" = 固定百分比, "atr" = ATR动态缓冲
+    validated["stop_buffer_mode"] = validate_enum(
+        normalized.get("stop_buffer_mode"),
+        "stop_buffer_mode",
+        ["fixed", "atr"],
+        "fixed"
+    )
+    # ATR乘数(仅 stop_buffer_mode="atr" 时生效): SL = swing - ATR * multiplier
+    validated["sl_atr_multiplier"] = validate_range(
+        validate_type(normalized.get("sl_atr_multiplier"), float, "sl_atr_multiplier") or 0.5,
+        "sl_atr_multiplier",
+        0.1,
+        3.0
+    )
     validated["stop_source"] = validate_enum(
         normalized.get("stop_source") or normalized.get("stopSource"),
         "stop_source",
@@ -451,6 +465,17 @@ def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
         10.0
     )
     validated["require_retest"] = validate_type(normalized.get("require_retest"), bool, "require_retest") if normalized.get("require_retest") is not None else True
+    
+    # ========== 方案C: 限价先成交，确认后决定去留 ==========
+    # confirm_after_fill=True: 限价单触碰即成交，随后 N 根K线检查确认形态
+    #   有确认 → 持有（保留 SL/TP）
+    #   无确认 → 平仓（UNCONFIRMED）
+    validated["confirm_after_fill"] = validate_type(
+        normalized.get("confirm_after_fill"), bool, "confirm_after_fill"
+    ) if normalized.get("confirm_after_fill") is not None else False
+    validated["post_fill_confirm_bars"] = max(1, validate_type(
+        normalized.get("post_fill_confirm_bars"), int, "post_fill_confirm_bars"
+    ) or 5)
     
     # ========== 流动性参数 ==========
     validated["allow_external"] = validate_type(normalized.get("allow_external"), bool, "allow_external") if normalized.get("allow_external") is not None else True

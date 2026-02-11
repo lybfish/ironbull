@@ -38,10 +38,19 @@ def calculate_stop_loss(
     swing_high: Optional[float] = None,
     swing_low: Optional[float] = None,
     stop_source: str = "auto",
-    stop_buffer_pct: float = 0.05
+    stop_buffer_pct: float = 0.05,
+    atr_value: float = 0.0,
+    atr_multiplier: float = 0.5
 ) -> float:
     """
     根据 stop_source 计算止损价
+    
+    止损缓冲模式:
+      1. 固定百分比: stop_buffer_pct > 0, atr_value == 0
+         SL = swing_low × (1 - pct)
+      2. ATR动态:    atr_value > 0
+         SL = swing_low - ATR × multiplier
+         (忽略 stop_buffer_pct)
     
     Args:
         side: "BUY" / "SELL"
@@ -50,32 +59,42 @@ def calculate_stop_loss(
         swing_high: 摆动高点
         swing_low: 摆动低点
         stop_source: "auto" / "ob" / "swing" / "structure"
-        stop_buffer_pct: 止损缓冲百分比（与 old1 一致：0.05 表示 0.05%，内部除以 100）
+        stop_buffer_pct: 止损缓冲百分比（0.05 表示 0.05%）
+        atr_value: ATR值（>0 时启用ATR缓冲模式）
+        atr_multiplier: ATR乘数（默认0.5，即半个ATR作为缓冲）
     
     Returns:
         止损价
     """
-    # 与 old1 对齐：stopBufferPct=0.05 表示 0.05%，需要 /100 转换为小数
-    # old1: stop_buffer_pct = float(smc.get("stopBufferPct", 0.05)) / 100.0
-    buffer = stop_buffer_pct / 100.0 if stop_buffer_pct >= 0.01 else stop_buffer_pct
+    # 选择缓冲模式
+    use_atr = atr_value > 0
+    
+    if use_atr:
+        # ATR模式: 缓冲距离 = ATR × multiplier（绝对值）
+        atr_buffer = atr_value * atr_multiplier
+    else:
+        # 固定百分比模式
+        # 与 old1 对齐：stopBufferPct=0.05 表示 0.05%，需要 /100 转换为小数
+        buffer = stop_buffer_pct / 100.0 if stop_buffer_pct >= 0.01 else stop_buffer_pct
     
     if stop_source == "ob" and order_block:
-        if side == "BUY":
-            return order_block.get("low", 0) * (1 - buffer)
+        base = order_block.get("low", 0) if side == "BUY" else order_block.get("high", 0)
+        if use_atr:
+            return (base - atr_buffer) if side == "BUY" else (base + atr_buffer)
         else:
-            return order_block.get("high", 0) * (1 + buffer)
+            return base * (1 - buffer) if side == "BUY" else base * (1 + buffer)
     
     if stop_source == "swing" or stop_source == "auto":
         if side == "BUY" and swing_low:
-            return swing_low * (1 - buffer)
+            return (swing_low - atr_buffer) if use_atr else swing_low * (1 - buffer)
         elif side == "SELL" and swing_high:
-            return swing_high * (1 + buffer)
+            return (swing_high + atr_buffer) if use_atr else swing_high * (1 + buffer)
     
-    # Fallback：使用入场价计算一个保守止损
-    if side == "BUY":
-        return entry_price * (1 - buffer)
+    # Fallback：使用入场价
+    if use_atr:
+        return (entry_price - atr_buffer) if side == "BUY" else (entry_price + atr_buffer)
     else:
-        return entry_price * (1 + buffer)
+        return entry_price * (1 - buffer) if side == "BUY" else entry_price * (1 + buffer)
 
 
 def calculate_take_profit(

@@ -135,6 +135,139 @@ def find_order_blocks(
     return order_blocks
 
 
+@dataclass
+class BreakerBlock:
+    """Breaker Block (被突破的 OB → 供需反转)"""
+    index: int
+    type: str  # "bullish" (原 bearish OB 被向上突破) / "bearish" (原 bullish OB 被向下突破)
+    high: float
+    low: float
+    body_high: float
+    body_low: float
+    original_type: str  # 原始 OB 类型
+    break_index: int  # 被突破的 K 线索引
+    timestamp: Optional[int] = None
+    tests: int = 0
+
+
+def find_breaker_blocks(
+    candles: List[Dict],
+    ob_lookback: int = 50,
+    ob_min_body_ratio: float = 0.5,
+) -> List[BreakerBlock]:
+    """
+    识别 Breaker Block (供需反转区)
+    
+    原理：
+    - 一个 Bullish OB 被价格向下突破 → 变成 Bearish Breaker (阻力位)
+    - 一个 Bearish OB 被价格向上突破 → 变成 Bullish Breaker (支撑位)
+    
+    对应文档中的"供需反转：突破后原供区转为需区，类似支撑阻力转换"
+    
+    Args:
+        candles: K线数据
+        ob_lookback: 回看范围
+        ob_min_body_ratio: 最小实体比例
+    
+    Returns:
+        BreakerBlock 列表
+    """
+    breakers = []
+    
+    if len(candles) < 3:
+        return breakers
+    
+    lookback_start = max(0, len(candles) - ob_lookback - 1)
+    
+    # 第一步：找出所有 OB (用 reversal 类型)
+    raw_obs = []
+    for i in range(lookback_start + 1, len(candles) - 1):
+        c0 = candles[i - 1]
+        c1 = candles[i]
+        
+        body1 = abs(c1["close"] - c1["open"])
+        range1 = c1["high"] - c1["low"]
+        
+        if range1 == 0:
+            continue
+        
+        body_ratio1 = body1 / range1
+        if body_ratio1 < ob_min_body_ratio:
+            continue
+        
+        # Bullish OB: 阴线 + 阳线突破
+        if (c0["close"] < c0["open"] and
+            c1["close"] > c1["open"] and
+            c1["close"] > c0["high"]):
+            raw_obs.append({
+                "index": i - 1,
+                "type": "bullish",
+                "high": c0["high"],
+                "low": c0["low"],
+                "body_high": max(c0["open"], c0["close"]),
+                "body_low": min(c0["open"], c0["close"]),
+                "ts": c0.get("timestamp") or c0.get("time"),
+            })
+        
+        # Bearish OB: 阳线 + 阴线突破
+        if (c0["close"] > c0["open"] and
+            c1["close"] < c1["open"] and
+            c1["close"] < c0["low"]):
+            raw_obs.append({
+                "index": i - 1,
+                "type": "bearish",
+                "high": c0["high"],
+                "low": c0["low"],
+                "body_high": max(c0["open"], c0["close"]),
+                "body_low": min(c0["open"], c0["close"]),
+                "ts": c0.get("timestamp") or c0.get("time"),
+            })
+    
+    # 第二步：检查哪些 OB 被后续价格突破 → 变成 Breaker
+    for ob in raw_obs:
+        ob_idx = ob["index"]
+        
+        # 从 OB 之后的第 2 根 K 线开始检查（第 1 根是形成 OB 的突破 K 线本身）
+        for j in range(ob_idx + 2, len(candles)):
+            c = candles[j]
+            
+            if ob["type"] == "bullish":
+                # Bullish OB 被向下突破 → Bearish Breaker (阻力)
+                # 条件：收盘价跌破 OB 低点
+                if c["close"] < ob["low"]:
+                    breakers.append(BreakerBlock(
+                        index=ob_idx,
+                        type="bearish",  # 反转后的类型
+                        high=ob["high"],
+                        low=ob["low"],
+                        body_high=ob["body_high"],
+                        body_low=ob["body_low"],
+                        original_type="bullish",
+                        break_index=j,
+                        timestamp=ob["ts"],
+                    ))
+                    break  # 只取第一次突破
+            
+            elif ob["type"] == "bearish":
+                # Bearish OB 被向上突破 → Bullish Breaker (支撑)
+                # 条件：收盘价涨破 OB 高点
+                if c["close"] > ob["high"]:
+                    breakers.append(BreakerBlock(
+                        index=ob_idx,
+                        type="bullish",  # 反转后的类型
+                        high=ob["high"],
+                        low=ob["low"],
+                        body_high=ob["body_high"],
+                        body_low=ob["body_low"],
+                        original_type="bearish",
+                        break_index=j,
+                        timestamp=ob["ts"],
+                    ))
+                    break  # 只取第一次突破
+    
+    return breakers
+
+
 def find_nearest_order_block(
     order_blocks: List[OrderBlock],
     side: str,
