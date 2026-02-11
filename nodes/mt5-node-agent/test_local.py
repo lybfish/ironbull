@@ -20,9 +20,9 @@ from main import MT5Client, AgentConfig, MT5Config, setup_logging
 # 修改 USE_ONLINE_SERVER 为 True 则测试线上服务器
 USE_ONLINE_SERVER = True  # True = 线上测试, False = 本地测试
 
-# 线上服务器配置
+# 线上服务器配置 (支持 IP 或域名)
 ONLINE_CONFIG = AgentConfig(
-    server_url="54.255.160.210:9102",
+    server_url="api.aigomsg.com",  # 或用 IP: "54.255.160.210:9102"
     node_id="test_online_node",
     mt5=MT5Config(
         login=0,  # Mock 模式不需要真实账户
