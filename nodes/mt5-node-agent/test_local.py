@@ -61,7 +61,7 @@ TEST_CONFIG = ONLINE_CONFIG if USE_ONLINE_SERVER else LOCAL_CONFIG
 def get_ws_url():
     """获取 WebSocket 连接地址"""
     if USE_ONLINE_SERVER:
-        return f"ws://mt5.aigomsg.com/ib/mt5-ws/ws/node/{TEST_CONFIG.node_id}"
+        return f"ws://54.255.160.210:9103/ws/node/{TEST_CONFIG.node_id}"
     else:
         return f"ws://localhost:9102/ws/node/{TEST_CONFIG.node_id}"
 
