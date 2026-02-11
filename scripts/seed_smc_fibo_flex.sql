@@ -1,10 +1,11 @@
 -- ═══════════════════════════════════════════════════════════════
--- smc_fibo_flex 三档策略部署脚本
+-- smc_fibo_flex 策略部署脚本 (v2 精简版)
 -- 包含：
 --   1) 限价挂单追踪表
---   2) 策略配置（稳健/均衡/激进三档，与 market_regime 模式一致）
---   3) 租户2的策略展示配置 (dim_tenant_strategy)
---   4) 租户2用户绑定稳健档 (dim_strategy_binding)
+--   2) 加 max_loss_per_trade 字段 (binding + tenant_strategy)
+--   3) 清理多余策略，只保留 smc_fibo_flex
+--   4) 策略配置更新
+--   5) 租户2的展示配置 + 用户绑定
 --
 -- 回测数据: ETH 15m 1年
 --   胜率 62.4%, PF 2.58, 回撤 6.2%, PnL +$24,472
@@ -65,11 +66,46 @@ CREATE TABLE IF NOT EXISTS `fact_pending_limit_order` (
 
 
 -- ───────────────────────────────────────────────────────────────
--- 2. smc_fibo_flex 三档策略 → dim_strategy
---    命名规则与 market_regime 一致: 名称·风格
+-- 2. 新增 max_loss_per_trade 字段
+--    用户直接填每单最大亏损金额，替代 capital × risk_pct 间接计算
 -- ───────────────────────────────────────────────────────────────
 
--- 共用策略配置（JSON）
+-- 策略绑定表
+ALTER TABLE `dim_strategy_binding`
+    ADD COLUMN IF NOT EXISTS `max_loss_per_trade` DECIMAL(20,2) DEFAULT NULL
+    COMMENT '每单最大亏损(USDT)，设置后优先于 capital×risk_pct' AFTER `risk_mode`;
+
+-- 租户策略实例表
+ALTER TABLE `dim_tenant_strategy`
+    ADD COLUMN IF NOT EXISTS `max_loss_per_trade` DECIMAL(20,2) DEFAULT NULL
+    COMMENT '每单最大亏损(USDT)，设置后优先于 capital×risk_pct' AFTER `risk_mode`;
+
+-- 策略主表
+ALTER TABLE `dim_strategy`
+    ADD COLUMN IF NOT EXISTS `max_loss_per_trade` DECIMAL(20,2) DEFAULT NULL
+    COMMENT '每单最大亏损(USDT)默认值' AFTER `risk_mode`;
+
+
+-- ───────────────────────────────────────────────────────────────
+-- 3. 清理多余策略（只保留 smc_fibo_flex）
+-- ───────────────────────────────────────────────────────────────
+
+-- 先删绑定
+DELETE FROM `dim_strategy_binding` WHERE `strategy_code` IN ('smc_fibo_flex_balanced', 'smc_fibo_flex_aggressive');
+
+-- 再删租户策略
+DELETE ts FROM `dim_tenant_strategy` ts
+JOIN `dim_strategy` s ON s.id = ts.strategy_id
+WHERE s.code IN ('smc_fibo_flex_balanced', 'smc_fibo_flex_aggressive');
+
+-- 最后删策略本体
+DELETE FROM `dim_strategy` WHERE `code` IN ('smc_fibo_flex_balanced', 'smc_fibo_flex_aggressive');
+
+
+-- ───────────────────────────────────────────────────────────────
+-- 4. 更新 smc_fibo_flex 策略配置
+-- ───────────────────────────────────────────────────────────────
+
 SET @smc_config = '{
     "preset_profile": "none",
     "auto_profile": "off",
@@ -95,150 +131,64 @@ SET @smc_config = '{
     "use_breaker": false
 }';
 
--- 2a. 稳健档 (原 smc_fibo_flex，更新名称)
 UPDATE `dim_strategy` SET
-    `name`              = 'SMC结构·稳健',
+    `name`              = 'SMC结构策略',
     `risk_level`        = 1,
-    `risk_mode`         = 1,
+    `risk_mode`         = NULL,
+    `max_loss_per_trade` = 20.00,
     `amount_usdt`       = 200.00,
-    `user_display_name` = 'SMC斐波那契(稳健) Pro',
-    `user_description`  = '基于Smart Money概念的结构突破+斐波那契回踩限价入场策略。采用1%风险系数，以损定仓自动控制每笔亏损。回测胜率62%，盈亏比2.58:1，最大回撤6.2%。适合追求稳健增长的中长期交易者。'
+    `user_display_name` = 'SMC斐波那契 Pro',
+    `user_description`  = '基于Smart Money概念的结构突破+斐波那契回踩限价入场策略。以损定仓，用户可直接设置每笔最大亏损金额，系统根据止损距离自动计算仓位。回测胜率62%，盈亏比2.58:1，最大回撤6.2%。',
+    `config`            = @smc_config
 WHERE `code` = 'smc_fibo_flex';
 
--- 2b. 均衡档 (新增)
-INSERT INTO `dim_strategy` (
-    `code`, `name`, `description`,
-    `symbol`, `symbols`, `timeframe`, `exchange`, `market_type`,
-    `min_capital`, `risk_level`, `amount_usdt`, `leverage`, `capital`, `risk_mode`,
-    `min_confidence`, `cooldown_minutes`, `status`, `show_to_user`,
-    `user_display_name`, `user_description`, `config`
-) VALUES (
-    'smc_fibo_flex_balanced',
-    'SMC结构·均衡',
-    'SMC结构突破 + 斐波那契回踩 限价入场策略（均衡版），风险系数1.5%',
-    'ETHUSDT', '["ETHUSDT"]', '15m', NULL, 'future',
-    200.00, 2, 300.00, 20, 1000.00, 2,
-    50, 75, 1, 1,
-    'SMC斐波那契(均衡) Pro',
-    'SMC斐波那契均衡版在稳健版基础上将风险系数提升至1.5%，通过更均衡的风险收益比设计，提供更具弹性的收益空间。限价单入场，以损定仓自动控制每笔亏损。回测胜率62%，盈亏比2.58:1。适合具备一定风险承受能力的投资者。',
-    @smc_config
-)
-ON DUPLICATE KEY UPDATE
-    `name` = VALUES(`name`),
-    `description` = VALUES(`description`),
-    `risk_level` = VALUES(`risk_level`),
-    `amount_usdt` = VALUES(`amount_usdt`),
-    `risk_mode` = VALUES(`risk_mode`),
-    `user_display_name` = VALUES(`user_display_name`),
-    `user_description` = VALUES(`user_description`),
-    `config` = VALUES(`config`),
-    `updated_at` = CURRENT_TIMESTAMP;
-
--- 2c. 激进档 (新增)
-INSERT INTO `dim_strategy` (
-    `code`, `name`, `description`,
-    `symbol`, `symbols`, `timeframe`, `exchange`, `market_type`,
-    `min_capital`, `risk_level`, `amount_usdt`, `leverage`, `capital`, `risk_mode`,
-    `min_confidence`, `cooldown_minutes`, `status`, `show_to_user`,
-    `user_display_name`, `user_description`, `config`
-) VALUES (
-    'smc_fibo_flex_aggressive',
-    'SMC结构·激进',
-    'SMC结构突破 + 斐波那契回踩 限价入场策略（激进版），风险系数2%',
-    'ETHUSDT', '["ETHUSDT"]', '15m', NULL, 'future',
-    200.00, 3, 400.00, 20, 1000.00, 3,
-    50, 75, 1, 1,
-    'SMC斐波那契(激进) Pro',
-    'SMC斐波那契激进版将风险系数提升至2%，面向追求高收益、具备较高风险承受能力的专业交易者。限价单入场，以损定仓自动控制每笔亏损，配合动态止损与仓位约束机制。回测胜率62%，盈亏比2.58:1。',
-    @smc_config
-)
-ON DUPLICATE KEY UPDATE
-    `name` = VALUES(`name`),
-    `description` = VALUES(`description`),
-    `risk_level` = VALUES(`risk_level`),
-    `amount_usdt` = VALUES(`amount_usdt`),
-    `risk_mode` = VALUES(`risk_mode`),
-    `user_display_name` = VALUES(`user_display_name`),
-    `user_description` = VALUES(`user_description`),
-    `config` = VALUES(`config`),
-    `updated_at` = CURRENT_TIMESTAMP;
-
 
 -- ───────────────────────────────────────────────────────────────
--- 3. 租户2的策略展示配置 (dim_tenant_strategy)
+-- 5. 租户2的展示配置
 -- ───────────────────────────────────────────────────────────────
 
--- 先获取策略 ID（使用子查询）
+-- 清理旧的多余租户策略，只保留 smc_fibo_flex
+DELETE ts FROM `dim_tenant_strategy` ts
+JOIN `dim_strategy` s ON s.id = ts.strategy_id
+WHERE ts.tenant_id = 2 AND s.code = 'smc_fibo_flex';
+
 INSERT INTO `dim_tenant_strategy` (
     `tenant_id`, `strategy_id`, `display_name`, `display_description`,
-    `leverage`, `capital`, `risk_mode`, `amount_usdt`, `min_capital`,
+    `leverage`, `capital`, `risk_mode`, `max_loss_per_trade`, `amount_usdt`, `min_capital`,
     `status`, `sort_order`
 )
 SELECT
     2,
     s.id,
-    'SMC斐波那契(稳健) Pro',
-    '基于Smart Money概念的结构突破+斐波那契回踩限价入场策略。采用1%风险系数，以损定仓自动控制每笔亏损。回测胜率62%，盈亏比2.58:1，最大回撤6.2%。适合追求稳健增长的中长期交易者。',
-    20, 1000.00, 1, 200.00, 200.00,
+    'SMC斐波那契 Pro',
+    '基于Smart Money概念的结构突破+斐波那契回踩限价入场策略。以损定仓，设置每笔最大亏损即可，系统根据止损距离自动计算仓位。',
+    20, 200.00, NULL, 20.00, NULL, 200.00,
     1, 1
-FROM `dim_strategy` s WHERE s.code = 'smc_fibo_flex'
-ON DUPLICATE KEY UPDATE
-    `display_name` = VALUES(`display_name`),
-    `display_description` = VALUES(`display_description`),
-    `updated_at` = CURRENT_TIMESTAMP;
-
-INSERT INTO `dim_tenant_strategy` (
-    `tenant_id`, `strategy_id`, `display_name`, `display_description`,
-    `leverage`, `capital`, `risk_mode`, `amount_usdt`, `min_capital`,
-    `status`, `sort_order`
-)
-SELECT
-    2,
-    s.id,
-    'SMC斐波那契(均衡) Pro',
-    'SMC斐波那契均衡版在稳健版基础上将风险系数提升至1.5%，提供更具弹性的收益空间。限价单入场，以损定仓自动控制每笔亏损。适合具备一定风险承受能力的投资者。',
-    20, 1000.00, 2, 300.00, 200.00,
-    1, 2
-FROM `dim_strategy` s WHERE s.code = 'smc_fibo_flex_balanced'
-ON DUPLICATE KEY UPDATE
-    `display_name` = VALUES(`display_name`),
-    `display_description` = VALUES(`display_description`),
-    `updated_at` = CURRENT_TIMESTAMP;
-
-INSERT INTO `dim_tenant_strategy` (
-    `tenant_id`, `strategy_id`, `display_name`, `display_description`,
-    `leverage`, `capital`, `risk_mode`, `amount_usdt`, `min_capital`,
-    `status`, `sort_order`
-)
-SELECT
-    2,
-    s.id,
-    'SMC斐波那契(激进) Pro',
-    'SMC斐波那契激进版将风险系数提升至2%，面向追求高收益的专业交易者。限价单入场，以损定仓自动控制每笔亏损，配合动态止损与仓位约束机制。',
-    20, 1000.00, 3, 400.00, 200.00,
-    1, 3
-FROM `dim_strategy` s WHERE s.code = 'smc_fibo_flex_aggressive'
-ON DUPLICATE KEY UPDATE
-    `display_name` = VALUES(`display_name`),
-    `display_description` = VALUES(`display_description`),
-    `updated_at` = CURRENT_TIMESTAMP;
+FROM `dim_strategy` s WHERE s.code = 'smc_fibo_flex';
 
 
 -- ───────────────────────────────────────────────────────────────
--- 4. 租户2用户(id=66) 绑定稳健档
---    注意：需要该用户先有交易所账户才能实际执行交易
---    这里先建 binding，account_id 可后续补充
+-- 6. 租户2用户(id=66) 绑定
 -- ───────────────────────────────────────────────────────────────
+
+-- 更新已有绑定的 max_loss_per_trade
+UPDATE `dim_strategy_binding` SET
+    `max_loss_per_trade` = 20.00,
+    `capital` = 200.00,
+    `risk_mode` = NULL
+WHERE user_id = 66 AND strategy_code = 'smc_fibo_flex';
+
+-- 如果不存在则创建
 INSERT INTO `dim_strategy_binding` (
     `user_id`, `strategy_code`, `account_id`,
-    `capital`, `leverage`, `risk_mode`, `amount_usdt`,
+    `capital`, `leverage`, `risk_mode`, `max_loss_per_trade`,
     `status`
 )
 SELECT
     66,
     'smc_fibo_flex',
     COALESCE((SELECT id FROM `fact_exchange_account` WHERE user_id = 66 LIMIT 1), 0),
-    1000.00, 20, 1, 200.00,
+    200.00, 20, NULL, 20.00,
     1
 FROM DUAL
 WHERE NOT EXISTS (
@@ -250,17 +200,15 @@ WHERE NOT EXISTS (
 -- ═══════════════════════════════════════════════════════════════
 -- 验证
 -- ═══════════════════════════════════════════════════════════════
-SELECT id, code, name, risk_level, risk_mode, amount_usdt, capital, leverage, status
+SELECT id, code, name, risk_level, risk_mode, max_loss_per_trade, amount_usdt, capital, leverage, status
 FROM dim_strategy
-WHERE code LIKE 'smc_fibo_flex%'
-ORDER BY risk_level;
+WHERE code LIKE 'smc_fibo_flex%';
 
-SELECT ts.id, ts.tenant_id, ts.strategy_id, s.code, ts.display_name, ts.risk_mode, ts.status
+SELECT ts.id, ts.tenant_id, ts.strategy_id, s.code, ts.display_name, ts.max_loss_per_trade, ts.risk_mode, ts.status
 FROM dim_tenant_strategy ts
 JOIN dim_strategy s ON s.id = ts.strategy_id
-WHERE ts.tenant_id = 2
-ORDER BY ts.sort_order;
+WHERE ts.tenant_id = 2;
 
-SELECT id, user_id, strategy_code, capital, leverage, risk_mode, status
+SELECT id, user_id, strategy_code, capital, leverage, risk_mode, max_loss_per_trade, status
 FROM dim_strategy_binding
 WHERE user_id = 66;

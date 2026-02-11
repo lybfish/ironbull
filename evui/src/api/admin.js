@@ -102,6 +102,12 @@ export function getStrategyBindings(params = {}) {
 export function getBindingsAdmin(params = {}) {
   return axios.get('/strategy-bindings-admin', {params})
 }
+export function getBindingFormOptions() {
+  return axios.get('/strategy-bindings-admin/form-options')
+}
+export function createBinding(data) {
+  return axios.post('/strategy-bindings-admin', data)
+}
 export function updateBinding(bindingId, data) {
   return axios.put(`/strategy-bindings-admin/${bindingId}`, data)
 }
@@ -123,4 +129,7 @@ export function batchAssignNode(data) {
 // ---- 信号事件历史 ----
 export function getSignalEvents(params = {}) {
   return axios.get('/signal-events', {params})
+}
+export function getSignalStrategies() {
+  return axios.get('/signal-events/strategies')
 }

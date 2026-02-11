@@ -29,6 +29,7 @@ class TenantStrategyCreate(BaseModel):
     capital: Optional[float] = None
     leverage: Optional[int] = None
     risk_mode: Optional[int] = None
+    max_loss_per_trade: Optional[float] = None
     min_capital: Optional[float] = None
     status: int = 1
     sort_order: int = 0
@@ -41,6 +42,7 @@ class TenantStrategyUpdate(BaseModel):
     capital: Optional[float] = None
     leverage: Optional[int] = None
     risk_mode: Optional[int] = None
+    max_loss_per_trade: Optional[float] = None
     min_capital: Optional[float] = None
     status: Optional[int] = None
     sort_order: Optional[int] = None
@@ -64,7 +66,12 @@ def _instance_to_dict(ts: TenantStrategy, strategy: Optional[Strategy] = None) -
             risk_based_sizing = bool(cfg.get("risk_based_sizing", False))
         except Exception:
             pass
-    max_loss_per_trade = round(capital * pct, 2) if capital > 0 else 0
+    # max_loss_per_trade: 优先取实例级直接设定值，否则 fallback capital × risk_pct
+    db_max_loss = float(getattr(ts, "max_loss_per_trade", 0) or 0)
+    if db_max_loss <= 0:
+        s_max_loss = float(getattr(s, "max_loss_per_trade", 0) or 0) if s else 0
+        db_max_loss = s_max_loss
+    max_loss_per_trade = db_max_loss if db_max_loss > 0 else (round(capital * pct, 2) if capital > 0 else 0)
     return {
         "id": ts.id,
         "tenant_id": ts.tenant_id,
@@ -135,6 +142,7 @@ def create_tenant_strategy(
         capital=body.capital,
         leverage=body.leverage,
         risk_mode=body.risk_mode,
+        max_loss_per_trade=body.max_loss_per_trade,
         min_capital=body.min_capital,
         status=body.status,
         sort_order=body.sort_order,
@@ -143,6 +151,7 @@ def create_tenant_strategy(
         ts.capital = float(getattr(strategy, "capital", 0) or 0) or None
         ts.leverage = int(getattr(strategy, "leverage", 0) or 0)
         ts.risk_mode = int(getattr(strategy, "risk_mode", 1) or 1)
+        ts.max_loss_per_trade = float(getattr(strategy, "max_loss_per_trade", 0) or 0) or None
         ts.min_capital = float(getattr(strategy, "min_capital", 200) or 200)
         if not ts.display_name:
             ts.display_name = strategy.name
@@ -208,6 +217,7 @@ def copy_from_master(
     ts.capital = float(getattr(strategy, "capital", 0) or 0) or None
     ts.leverage = int(getattr(strategy, "leverage", 0) or 0)
     ts.risk_mode = int(getattr(strategy, "risk_mode", 1) or 1)
+    ts.max_loss_per_trade = float(getattr(strategy, "max_loss_per_trade", 0) or 0) or None
     ts.min_capital = float(getattr(strategy, "min_capital", 200) or 200)
     # 自动计算 amount_usdt
     cap = float(ts.capital or 0)

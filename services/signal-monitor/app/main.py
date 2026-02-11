@@ -1775,18 +1775,19 @@ def _resolve_amount_leverage_for_tenant(repo, strategy, tenant_id: int):
     """
     按租户解析下单金额与杠杆：
     优先级：dim_tenant_strategy 覆盖 > dim_strategy 默认
-    如果设置了 capital + risk_mode，则自动计算 amount_usdt = capital × risk_pct × leverage。
-    返回 (amount_usdt, leverage, capital, risk_pct)。
-    后两个值供"以损定仓"模式使用。
+    返回 (amount_usdt, leverage, capital, max_loss_per_trade)。
+    如果设了 max_loss_per_trade，返回它（以损定仓直接用金额）；
+    否则 fallback 到 capital × risk_pct 计算 max_loss。
     """
     if not strategy:
-        return STRATEGY_DISPATCH_AMOUNT, 0, 0, 0.01
+        return STRATEGY_DISPATCH_AMOUNT, 0, 0, 0
 
     # 主策略默认值
     base_capital = float(getattr(strategy, "capital", 0) or 0)
     base_leverage = int(strategy.leverage or 0)
     base_risk_mode = int(getattr(strategy, "risk_mode", 1) or 1)
     base_amount = float(strategy.amount_usdt or 0)
+    base_max_loss = float(getattr(strategy, "max_loss_per_trade", 0) or 0)
 
     # 租户覆盖
     ts = repo.get_tenant_strategy(tenant_id, strategy.id)
@@ -1795,27 +1796,35 @@ def _resolve_amount_leverage_for_tenant(repo, strategy, tenant_id: int):
         leverage = int(ts.leverage) if ts.leverage is not None else base_leverage
         risk_mode = int(getattr(ts, "risk_mode", None) or 0) if getattr(ts, "risk_mode", None) is not None else base_risk_mode
         amount_fallback = float(ts.amount_usdt) if ts.amount_usdt is not None else base_amount
+        max_loss = float(getattr(ts, "max_loss_per_trade", 0) or 0) if getattr(ts, "max_loss_per_trade", None) is not None else base_max_loss
     else:
         capital = base_capital
         leverage = base_leverage
         risk_mode = base_risk_mode
         amount_fallback = base_amount
+        max_loss = base_max_loss
 
-    pct = RISK_MODE_PCT.get(risk_mode, 0.01)
+    # 计算 max_loss_per_trade: 优先直接设置的值，否则用 capital × risk_pct
+    if max_loss <= 0 and capital > 0:
+        pct = RISK_MODE_PCT.get(risk_mode, 0.01)
+        max_loss = round(capital * pct, 2)
 
-    # 如果设了 capital，自动计算（固定金额模式，兜底值）
-    if capital > 0 and leverage > 0:
+    # 计算固定金额（兜底值 / 非以损定仓策略用）
+    if capital > 0 and leverage > 0 and max_loss > 0:
+        amount = round(max_loss * leverage, 2)
+    elif capital > 0 and leverage > 0:
+        pct = RISK_MODE_PCT.get(risk_mode, 0.01)
         amount = round(capital * pct * leverage, 2)
     else:
         amount = amount_fallback
 
     amount = amount if amount > 0 else STRATEGY_DISPATCH_AMOUNT
-    return amount, leverage, capital, pct
+    return amount, leverage, capital, max_loss
 
 
 def _calc_risk_based_amount(
     capital: float,
-    risk_pct: float,
+    max_loss: float,
     entry_price: float,
     stop_loss: float,
     leverage: int = 0,
@@ -1825,48 +1834,42 @@ def _calc_risk_based_amount(
     以损定仓：根据止损距离反推下单金额。
     
     公式:
-        max_loss = capital × risk_pct          （每笔最大可接受亏损）
         sl_distance = |entry - sl| / entry     （止损距离百分比）
         amount_usdt = max_loss / sl_distance   （名义下单金额）
+    
+    参数:
+        capital: 用户实际本金（用于安全阀上限）
+        max_loss: 每笔最大亏损金额（USDT），直接传入
+        entry_price: 入场价
+        stop_loss: 止损价
     
     安全阀:
         1. 止损距离 < 0.1% 视为无效，按 0.1% 兜底
         2. 下单金额不超过本金的 3 倍（防止止损太窄导致仓位过大）
-        3. 逐仓保护：止损距离不能超过爆仓线（1/杠杆 × 80%安全系数）
-           如果超过，自动缩小仓位使亏损 ≤ 保证金的 80%
+        3. 逐仓保护：止损距离 > 爆仓线×80% 则跳过
     
-    示例（本金 1000U, risk_pct 1%）:
-        止损距离 1%  → amount = 10 / 0.01 = 1000U → 亏损 10U ✓
-        止损距离 2%  → amount = 10 / 0.02 = 500U  → 亏损 10U ✓
-        止损距离 5%  → amount = 10 / 0.05 = 200U  → 亏损 10U ✓
+    示例（max_loss = 20U）:
+        止损距离 1%  → amount = 20 / 0.01 = 2000U → 亏损 20U ✓
+        止损距离 2%  → amount = 20 / 0.02 = 1000U → 亏损 20U ✓
+        止损距离 5%  → amount = 20 / 0.05 = 400U  → 亏损 20U ✓
     """
-    if capital <= 0 or risk_pct <= 0 or entry_price <= 0 or stop_loss <= 0:
+    if max_loss <= 0 or entry_price <= 0 or stop_loss <= 0:
         return 0
 
-    max_loss = capital * risk_pct
     sl_distance_pct = abs(entry_price - stop_loss) / entry_price
 
     # 安全阀 1: 止损距离太窄（< 0.1%），用 0.1% 兜底
     if sl_distance_pct < 0.001:
         sl_distance_pct = 0.001
 
-    amount = max_loss / sl_distance_pct
-
-    # 安全阀 2: 不超过本金的 3 倍
-    cap = max_amount_cap if max_amount_cap > 0 else capital * 3
-    amount = min(amount, cap)
-
-    # 安全阀 3: 逐仓爆仓保护
-    # 逐仓: 保证金 margin = amount / leverage
-    # 爆仓: 价格反向 ≈ 1/leverage 时保证金归零（如 20x → 5%）
-    # 如果 止损距离 > 爆仓线的 80%，说明还没到止损就可能爆仓
-    # → 直接跳过这笔交易（返回 0），因为无法安全止损
+    # 安全阀 3: 逐仓爆仓保护（提前检查，避免无效计算）
     if leverage and leverage > 1:
         safe_threshold = 0.80 / leverage  # 安全线（20x→4%, 10x→8%）
         if sl_distance_pct > safe_threshold:
             import structlog
             structlog.get_logger().warning(
                 "以损定仓: 止损距离超过逐仓安全线，跳过",
+                max_loss=max_loss,
                 sl_distance=f"{sl_distance_pct*100:.2f}%",
                 safe_threshold=f"{safe_threshold*100:.2f}%",
                 leverage=leverage,
@@ -1874,6 +1877,13 @@ def _calc_risk_based_amount(
                 stop_loss=stop_loss,
             )
             return 0  # 跳过，不开仓
+
+    amount = max_loss / sl_distance_pct
+
+    # 安全阀 2: 不超过本金的 3 倍（capital > 0 时启用）
+    if capital > 0:
+        cap = max_amount_cap if max_amount_cap > 0 else capital * 3
+        amount = min(amount, cap)
 
     return round(amount, 2)
 
@@ -1999,38 +2009,37 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             # 优先级: 用户绑定参数 > 租户配置 > 策略默认
             if target.binding_amount_usdt > 0:
-                # 用户绑定了本金+杠杆+风险档位，直接用计算好的 amount_usdt
                 amount = target.binding_amount_usdt
                 leverage = target.binding_leverage if target.binding_leverage > 0 else 20
                 b_capital = float(getattr(target, "binding_capital", 0) or 0)
-                b_risk_mode = int(getattr(target, "binding_risk_mode", 1) or 1)
-                b_risk_pct = RISK_MODE_PCT.get(b_risk_mode, 0.01)
+                # max_loss_per_trade: 绑定级 > capital×risk_pct
+                b_max_loss = float(getattr(target, "binding_max_loss_per_trade", 0) or 0)
+                if b_max_loss <= 0 and b_capital > 0:
+                    b_risk_mode = int(getattr(target, "binding_risk_mode", 1) or 1)
+                    b_max_loss = round(b_capital * RISK_MODE_PCT.get(b_risk_mode, 0.01), 2)
             else:
-                amount, leverage, b_capital, b_risk_pct = _resolve_amount_leverage_for_tenant(repo, strategy, target.tenant_id)
+                amount, leverage, b_capital, b_max_loss = _resolve_amount_leverage_for_tenant(repo, strategy, target.tenant_id)
 
-            # ── 以损定仓：如果策略配置了 risk_based_sizing 且信号有 SL，
-            #    按「每笔固定亏损 = capital × risk_pct」反推仓位大小 ──
+            # ── 以损定仓：如果策略配置了 risk_based_sizing 且有 max_loss + SL ──
             strat_cfg = strategy.get_config() if strategy else {}
-            if strat_cfg.get("risk_based_sizing") and b_capital > 0 and b_risk_pct > 0:
+            if strat_cfg.get("risk_based_sizing") and b_max_loss > 0:
                 sig_entry = float(signal.get("entry_price", 0))
                 sig_sl = float(signal.get("stop_loss", 0))
                 if sig_entry > 0 and sig_sl > 0:
                     risk_amount = _calc_risk_based_amount(
                         capital=b_capital,
-                        risk_pct=b_risk_pct,
+                        max_loss=b_max_loss,
                         entry_price=sig_entry,
                         stop_loss=sig_sl,
                         leverage=leverage,
                     )
                     if risk_amount > 0:
                         sl_dist = abs(sig_entry - sig_sl) / sig_entry * 100
-                        max_loss = b_capital * b_risk_pct
                         log.info(
                             "以损定仓",
                             account_id=target.account_id,
                             capital=b_capital,
-                            risk_pct=f"{b_risk_pct*100:.1f}%",
-                            max_loss=f"{max_loss:.2f}U",
+                            max_loss=f"{b_max_loss:.2f}U",
                             sl_distance=f"{sl_dist:.2f}%",
                             old_amount=amount,
                             new_amount=risk_amount,
@@ -2082,19 +2091,21 @@ def execute_signal_by_strategy(signal: Dict[str, Any]) -> Dict[str, Any]:
                     amount = t.binding_amount_usdt
                     leverage = t.binding_leverage if t.binding_leverage > 0 else 20
                     r_capital = float(getattr(t, "binding_capital", 0) or 0)
-                    r_risk_mode = int(getattr(t, "binding_risk_mode", 1) or 1)
-                    r_risk_pct = RISK_MODE_PCT.get(r_risk_mode, 0.01)
+                    r_max_loss = float(getattr(t, "binding_max_loss_per_trade", 0) or 0)
+                    if r_max_loss <= 0 and r_capital > 0:
+                        r_risk_mode = int(getattr(t, "binding_risk_mode", 1) or 1)
+                        r_max_loss = round(r_capital * RISK_MODE_PCT.get(r_risk_mode, 0.01), 2)
                 else:
-                    amount, leverage, r_capital, r_risk_pct = _resolve_amount_leverage_for_tenant(repo, strategy, t.tenant_id)
+                    amount, leverage, r_capital, r_max_loss = _resolve_amount_leverage_for_tenant(repo, strategy, t.tenant_id)
 
                 # 以损定仓（远程节点）
                 strat_cfg_r = strategy.get_config() if strategy else {}
-                if strat_cfg_r.get("risk_based_sizing") and r_capital > 0 and r_risk_pct > 0:
+                if strat_cfg_r.get("risk_based_sizing") and r_max_loss > 0:
                     sig_entry_r = float(signal.get("entry_price", 0))
                     sig_sl_r = float(signal.get("stop_loss", 0))
                     if sig_entry_r > 0 and sig_sl_r > 0:
                         risk_amount_r = _calc_risk_based_amount(
-                            capital=r_capital, risk_pct=r_risk_pct,
+                            capital=r_capital, max_loss=r_max_loss,
                             entry_price=sig_entry_r, stop_loss=sig_sl_r,
                             leverage=leverage,
                         )

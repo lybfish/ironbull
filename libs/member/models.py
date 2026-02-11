@@ -39,6 +39,7 @@ class Strategy(Base):
     leverage = Column(Integer, nullable=False, default=20, comment="杠杆倍数，下单前自动设置到交易所")
     capital = Column(DECIMAL(20, 2), nullable=True, comment="默认本金(USDT)，用于计算 amount_usdt")
     risk_mode = Column(Integer, nullable=True, default=1, comment="风险档位: 1=稳健(1%) 2=均衡(1.5%) 3=激进(2%)")
+    max_loss_per_trade = Column(DECIMAL(20, 2), nullable=True, comment="每单最大亏损(USDT)默认值")
 
     # ---- 信号过滤 ----
     min_confidence = Column(Integer, nullable=False, default=50, comment="最低置信度（0-100），低于此值不执行")
@@ -166,6 +167,7 @@ class TenantStrategy(Base):
     leverage = Column(Integer, nullable=True, comment="杠杆倍数覆盖，空则用主策略")
     capital = Column(DECIMAL(20, 2), nullable=True, comment="本金覆盖(USDT)，空则用主策略")
     risk_mode = Column(Integer, nullable=True, comment="风险档位覆盖: 1=稳健 2=均衡 3=激进，空则用主策略")
+    max_loss_per_trade = Column(DECIMAL(20, 2), nullable=True, comment="每单最大亏损(USDT)，设置后优先于 capital×risk_pct")
     amount_usdt = Column(DECIMAL(20, 2), nullable=True, comment="单笔金额(USDT)，由 capital×risk_pct×leverage 自动计算")
     min_capital = Column(DECIMAL(20, 2), nullable=True, comment="最低资金覆盖，空则用主策略")
     status = Column(Integer, nullable=False, default=1, comment="1=对租户用户展示 0=不展示")
@@ -205,6 +207,7 @@ class StrategyBinding(Base):
     capital = Column(DECIMAL(20, 2), nullable=True, comment="本金/最大仓位(USDT)")
     leverage = Column(Integer, nullable=True, default=20, comment="杠杆倍数")
     risk_mode = Column(Integer, nullable=True, default=1, comment="风险档位: 1=稳健(1%) 2=均衡(1.5%) 3=激进(2%)")
+    max_loss_per_trade = Column(DECIMAL(20, 2), nullable=True, comment="每单最大亏损(USDT)，设置后优先于 capital×risk_pct")
 
     total_profit = Column(DECIMAL(20, 8), nullable=False, default=0)
     total_trades = Column(Integer, nullable=False, default=0)

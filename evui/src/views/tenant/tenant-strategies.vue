@@ -134,26 +134,30 @@
             <el-option :label="'100x'" :value="100"/>
           </el-select>
         </el-form-item>
-        <el-form-item label="风险档位">
-          <el-radio-group v-model="addForm.risk_mode">
-            <el-radio-button :label="1">稳健(1%)</el-radio-button>
-            <el-radio-button :label="2">均衡(1.5%)</el-radio-button>
-            <el-radio-button :label="3">激进(2%)</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item v-if="addForm.capital > 0" :label="addStrategyIsRiskBased ? '每笔最大亏损' : '下单金额(U)'">
-          <div style="line-height:32px;">
-            <template v-if="addStrategyIsRiskBased">
-              <span style="font-size:16px;font-weight:600;color:#E6A23C">{{ calcAddMaxLoss }}</span>
-              <span style="color:#909399;font-size:12px;margin-left:4px">USDT (capital × risk%)</span>
-              <div style="font-size:12px;color:#909399;margin-top:2px">仓位按止损距离自动调整（以损定仓）</div>
-            </template>
-            <template v-else>
-              <span style="font-size:16px;font-weight:600;color:#409EFF">{{ calcAddAmountUsdt }}</span>
-              <span style="color:#909399;font-size:12px;margin-left:4px">USDT (自动计算)</span>
-            </template>
+        <!-- 以损定仓: 每单最大亏损 -->
+        <el-form-item v-if="addStrategyIsRiskBased" label="每单最大亏损(U)">
+          <el-input-number v-model="addForm.max_loss_per_trade" :min="1" :step="5" :precision="2" style="width:200px"/>
+          <div style="font-size:12px;color:#909399;margin-top:2px">
+            <el-tag type="warning" size="mini">以损定仓</el-tag>
+            实际仓位按止损距离自动调整
           </div>
         </el-form-item>
+        <!-- 非以损定仓: 风险档位 + 金额 -->
+        <template v-else>
+          <el-form-item label="风险档位">
+            <el-radio-group v-model="addForm.risk_mode">
+              <el-radio-button :label="1">稳健(1%)</el-radio-button>
+              <el-radio-button :label="2">均衡(1.5%)</el-radio-button>
+              <el-radio-button :label="3">激进(2%)</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item v-if="addForm.capital > 0" label="下单金额(U)">
+            <div style="line-height:32px;">
+              <span style="font-size:16px;font-weight:600;color:#409EFF">{{ calcAddAmountUsdt }}</span>
+              <span style="color:#909399;font-size:12px;margin-left:4px">USDT (自动计算)</span>
+            </div>
+          </el-form-item>
+        </template>
         <el-form-item label="最低资金(USDT)">
           <el-input-number v-model="addForm.min_capital" :min="0" :precision="2" style="width:100%" placeholder="留空继承"/>
         </el-form-item>
@@ -198,26 +202,30 @@
             <el-option :label="'100x'" :value="100"/>
           </el-select>
         </el-form-item>
-        <el-form-item label="风险档位">
-          <el-radio-group v-model="editForm.risk_mode">
-            <el-radio-button :label="1">稳健(1%)</el-radio-button>
-            <el-radio-button :label="2">均衡(1.5%)</el-radio-button>
-            <el-radio-button :label="3">激进(2%)</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item v-if="editForm.capital > 0" :label="editStrategyIsRiskBased ? '每笔最大亏损' : '下单金额(U)'">
-          <div style="line-height:32px;">
-            <template v-if="editStrategyIsRiskBased">
-              <span style="font-size:16px;font-weight:600;color:#E6A23C">{{ calcEditMaxLoss }}</span>
-              <span style="color:#909399;font-size:12px;margin-left:4px">USDT (capital × risk%)</span>
-              <div style="font-size:12px;color:#909399;margin-top:2px">仓位按止损距离自动调整（以损定仓）</div>
-            </template>
-            <template v-else>
-              <span style="font-size:16px;font-weight:600;color:#409EFF">{{ calcEditAmountUsdt }}</span>
-              <span style="color:#909399;font-size:12px;margin-left:4px">USDT (自动计算)</span>
-            </template>
+        <!-- 以损定仓: 每单最大亏损 -->
+        <el-form-item v-if="editStrategyIsRiskBased" label="每单最大亏损(U)">
+          <el-input-number v-model="editForm.max_loss_per_trade" :min="1" :step="5" :precision="2" style="width:200px"/>
+          <div style="font-size:12px;color:#909399;margin-top:2px">
+            <el-tag type="warning" size="mini">以损定仓</el-tag>
+            实际仓位按止损距离自动调整
           </div>
         </el-form-item>
+        <!-- 非以损定仓: 风险档位 + 金额 -->
+        <template v-else>
+          <el-form-item label="风险档位">
+            <el-radio-group v-model="editForm.risk_mode">
+              <el-radio-button :label="1">稳健(1%)</el-radio-button>
+              <el-radio-button :label="2">均衡(1.5%)</el-radio-button>
+              <el-radio-button :label="3">激进(2%)</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item v-if="editForm.capital > 0" label="下单金额(U)">
+            <div style="line-height:32px;">
+              <span style="font-size:16px;font-weight:600;color:#409EFF">{{ calcEditAmountUsdt }}</span>
+              <span style="color:#909399;font-size:12px;margin-left:4px">USDT (自动计算)</span>
+            </div>
+          </el-form-item>
+        </template>
         <el-form-item label="最低资金(USDT)">
           <el-input-number v-model="editForm.min_capital" :min="0" :precision="2" style="width:100%"/>
         </el-form-item>
@@ -270,6 +278,7 @@ export default {
         capital: null,
         leverage: null,
         risk_mode: 1,
+        max_loss_per_trade: 20,
         min_capital: null,
         status: 1,
         sort_order: 0
@@ -301,12 +310,6 @@ export default {
       const pct = {1: 0.01, 2: 0.015, 3: 0.02}[mode] || 0.01
       return cap > 0 ? (cap * pct * lev).toFixed(2) : '0.00'
     },
-    calcAddMaxLoss() {
-      const cap = Number(this.addForm.capital) || 0
-      const mode = Number(this.addForm.risk_mode) || 1
-      const pct = {1: 0.01, 2: 0.015, 3: 0.02}[mode] || 0.01
-      return cap > 0 ? (cap * pct).toFixed(2) : '0.00'
-    },
     calcEditAmountUsdt() {
       const cap = Number(this.editForm.capital) || 0
       const lev = Number(this.editForm.leverage) || 20
@@ -314,12 +317,7 @@ export default {
       const pct = {1: 0.01, 2: 0.015, 3: 0.02}[mode] || 0.01
       return cap > 0 ? (cap * pct * lev).toFixed(2) : '0.00'
     },
-    calcEditMaxLoss() {
-      const cap = Number(this.editForm.capital) || 0
-      const mode = Number(this.editForm.risk_mode) || 1
-      const pct = {1: 0.01, 2: 0.015, 3: 0.02}[mode] || 0.01
-      return cap > 0 ? (cap * pct).toFixed(2) : '0.00'
-    }
+  
   },
   mounted() {
     this.fetchTenants()
@@ -394,6 +392,7 @@ export default {
         this.addForm.capital = s.capital != null ? Number(s.capital) : null
         this.addForm.leverage = s.leverage != null ? Number(s.leverage) : null
         this.addForm.risk_mode = s.risk_mode != null ? Number(s.risk_mode) : 1
+        this.addForm.max_loss_per_trade = s.max_loss_per_trade != null ? Number(s.max_loss_per_trade) : 20
         this.addForm.min_capital = s.min_capital != null ? Number(s.min_capital) : null
       } catch (e) {
         this.$message.warning('获取主策略参数失败，可手动填写或提交时由后端复制')
@@ -421,7 +420,11 @@ export default {
       if (this.addForm.display_description !== undefined && this.addForm.display_description !== '') payload.display_description = this.addForm.display_description
       if (this.addForm.capital != null && this.addForm.capital !== '') payload.capital = Number(this.addForm.capital)
       if (this.addForm.leverage != null && this.addForm.leverage !== '') payload.leverage = Number(this.addForm.leverage)
-      if (this.addForm.risk_mode != null) payload.risk_mode = Number(this.addForm.risk_mode)
+      if (this.addStrategyIsRiskBased) {
+        if (this.addForm.max_loss_per_trade > 0) payload.max_loss_per_trade = Number(this.addForm.max_loss_per_trade)
+      } else {
+        if (this.addForm.risk_mode != null) payload.risk_mode = Number(this.addForm.risk_mode)
+      }
       if (this.addForm.min_capital != null && this.addForm.min_capital !== '') payload.min_capital = Number(this.addForm.min_capital)
       this.addSaving = true
       try {
@@ -447,6 +450,7 @@ export default {
         capital: row.capital != null ? Number(row.capital) : null,
         leverage: row.leverage != null ? Number(row.leverage) : null,
         risk_mode: row.risk_mode != null ? Number(row.risk_mode) : 1,
+        max_loss_per_trade: row.max_loss_per_trade != null ? Number(row.max_loss_per_trade) : 20,
         min_capital: row.min_capital != null ? Number(row.min_capital) : null,
         status: row.status != null ? Number(row.status) : 1,
         sort_order: row.sort_order != null ? Number(row.sort_order) : 0
@@ -463,10 +467,14 @@ export default {
         display_description: this.editForm.display_description || null,
         capital: this.editForm.capital,
         leverage: this.editForm.leverage,
-        risk_mode: this.editForm.risk_mode,
         min_capital: this.editForm.min_capital,
         status: this.editForm.status,
         sort_order: this.editForm.sort_order
+      }
+      if (this.editStrategyIsRiskBased) {
+        payload.max_loss_per_trade = this.editForm.max_loss_per_trade > 0 ? this.editForm.max_loss_per_trade : null
+      } else {
+        payload.risk_mode = this.editForm.risk_mode
       }
       this.editSaving = true
       try {
