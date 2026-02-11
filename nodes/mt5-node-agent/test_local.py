@@ -18,7 +18,7 @@ from main import MT5Client, AgentConfig, MT5Config, setup_logging
 
 # ============ 测试配置选择 ============
 # 修改 USE_ONLINE_SERVER 为 True 则测试线上服务器
-USE_ONLINE_SERVER = False  # True = 线上测试, False = 本地测试
+USE_ONLINE_SERVER = True  # True = 线上测试, False = 本地测试
 
 # 线上服务器配置
 ONLINE_CONFIG = AgentConfig(
