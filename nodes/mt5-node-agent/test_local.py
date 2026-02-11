@@ -60,14 +60,10 @@ TEST_CONFIG = ONLINE_CONFIG if USE_ONLINE_SERVER else LOCAL_CONFIG
 # 获取 WebSocket 地址
 def get_ws_url():
     """获取 WebSocket 连接地址"""
-    host = "54.255.160.210" if USE_ONLINE_SERVER else "localhost"
-    port = "9102"
-    node_id = TEST_CONFIG.node_id
     if USE_ONLINE_SERVER:
-        # 通过 Nginx 代理
-        return f"ws://{host}/ib/mt5-ws/ws/node/{node_id}"
+        return f"ws://mt5.aigomsg.com/ib/mt5-ws/ws/node/{TEST_CONFIG.node_id}"
     else:
-        return f"ws://{host}:{port}/ws/node/{node_id}"
+        return f"ws://localhost:9102/ws/node/{TEST_CONFIG.node_id}"
 
 
 async def test_mt5_client():
