@@ -56,6 +56,11 @@
               <el-option label="execution-dispatcher" value="execution-dispatcher"/>
             </el-select>
           </el-form-item>
+          <el-form-item label="策略">
+            <el-select v-model="where.strategy_code" placeholder="全部策略" clearable filterable style="width:200px">
+              <el-option v-for="s in strategyOptions" :key="s.code" :label="s.name" :value="s.code"/>
+            </el-select>
+          </el-form-item>
           <el-form-item label="日期范围">
             <el-date-picker
               v-model="where.dateRange"
@@ -90,10 +95,10 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="策略" width="150" show-overflow-tooltip>
+        <el-table-column label="策略" width="160" show-overflow-tooltip>
           <template slot-scope="{row}">
-            <span v-if="getDetail(row, 'strategy')" style="font-weight:500">{{ getDetail(row, 'strategy') }}</span>
-            <span v-else-if="getDetail(row, 'strategy_code')" style="font-weight:500">{{ getDetail(row, 'strategy_code') }}</span>
+            <span v-if="getDetail(row, 'strategy')" style="font-weight:500">{{ strategyLabel(getDetail(row, 'strategy')) }}</span>
+            <span v-else-if="getDetail(row, 'strategy_code')" style="font-weight:500">{{ strategyLabel(getDetail(row, 'strategy_code')) }}</span>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
@@ -250,7 +255,7 @@
 </template>
 
 <script>
-import { getSignalEvents } from '@/api/admin'
+import { getSignalEvents, getSignalStrategies } from '@/api/admin'
 
 export default {
   name: 'SignalHistory',
@@ -266,8 +271,10 @@ export default {
         event_type: '',
         status: '',
         source_service: '',
+        strategy_code: '',
         dateRange: null
       },
+      strategyOptions: [],
       serverStats: {
         total: 0,
         executed: 0,
@@ -281,6 +288,7 @@ export default {
   },
   mounted() {
     this.fetchData()
+    this.loadStrategyOptions()
   },
   methods: {
     // ── 标签/映射 ──
@@ -324,6 +332,11 @@ export default {
         order_id: '订单号', filled_quantity: '成交数量', filled_price: '成交价格',
       }
       return m[key] || key
+    },
+
+    strategyLabel(code) {
+      const found = this.strategyOptions.find(s => s.code === code)
+      return found ? found.name : code
     },
 
     // ── 工具方法 ──
@@ -374,9 +387,20 @@ export default {
       this.fetchData()
     },
     reset() {
-      this.where = { signal_id: '', event_type: '', status: '', source_service: '', dateRange: null }
+      this.where = { signal_id: '', event_type: '', status: '', source_service: '', strategy_code: '', dateRange: null }
       this.currentPage = 1
       this.fetchData()
+    },
+
+    // ── 加载策略选项 ──
+    async loadStrategyOptions() {
+      try {
+        const res = await getSignalStrategies()
+        this.strategyOptions = res.data.data || []
+      } catch (e) {
+        // 降级：使用空列表
+        this.strategyOptions = []
+      }
     },
 
     // ── 数据获取 ──
@@ -391,6 +415,7 @@ export default {
         if (this.where.event_type) params.event_type = this.where.event_type
         if (this.where.status) params.status = this.where.status
         if (this.where.source_service) params.source_service = this.where.source_service
+        if (this.where.strategy_code) params.strategy_code = this.where.strategy_code
         if (this.where.dateRange && this.where.dateRange.length === 2) {
           params.start_date = this.where.dateRange[0]
           params.end_date = this.where.dateRange[1]

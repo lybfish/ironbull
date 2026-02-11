@@ -124,6 +124,8 @@ STRATEGY_REGISTRY = {
     "smc": SMCStrategy,
     "smc_fibo": SMCFiboStrategy,
     "smc_fibo_flex": SMCFiboFlexStrategy,
+    "smc_fibo_flex_balanced": SMCFiboFlexStrategy,
+    "smc_fibo_flex_aggressive": SMCFiboFlexStrategy,
     "mtf": MTFStrategy,
     "sr_break": SRBreakStrategy,
     "grid": GridStrategy,
