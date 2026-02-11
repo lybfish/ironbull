@@ -117,8 +117,16 @@
               {{ {1:'稳健(1%)',2:'均衡(1.5%)',3:'激进(2%)'}[detailData.risk_mode] || '稳健(1%)' }}
             </el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="下单金额">{{ detailData.amount_usdt > 0 ? detailData.amount_usdt + ' USDT' : '-' }}
-            <span v-if="detailData.capital > 0" style="color:#909399;font-size:12px"> (自动计算)</span>
+          <el-descriptions-item label="仓位模式">
+            <template v-if="detailData.config && detailData.config.risk_based_sizing">
+              <el-tag type="warning" size="small">以损定仓</el-tag>
+              <span style="color:#909399;font-size:12px;margin-left:4px">每笔最大亏损 = 本金 × 风险比例（仓位按止损距离自动调整）</span>
+            </template>
+            <template v-else>
+              <el-tag size="small">固定金额</el-tag>
+              <span v-if="detailData.amount_usdt > 0" style="margin-left:4px">{{ detailData.amount_usdt }} USDT</span>
+              <span v-if="detailData.capital > 0" style="color:#909399;font-size:12px;margin-left:4px">(= 本金 × 风险比例 × 杠杆)</span>
+            </template>
           </el-descriptions-item>
           <el-descriptions-item label="最低置信度">{{ detailData.min_confidence != null ? detailData.min_confidence : '-' }}</el-descriptions-item>
           <el-descriptions-item label="冷却(分钟)">{{ detailData.cooldown_minutes != null ? detailData.cooldown_minutes : '-' }}</el-descriptions-item>
@@ -227,12 +235,21 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="下单金额(U)">
-              <div style="line-height:32px;">
-                <span style="font-size:16px;font-weight:600;color:#409EFF">{{ calcAmountUsdt }}</span>
-                <span style="color:#909399;font-size:12px;margin-left:4px">USDT (自动计算)</span>
-              </div>
-              <div style="color:#909399;font-size:12px;">= 本金 × {{ {1:'1%',2:'1.5%',3:'2%'}[editForm.risk_mode] || '1%' }} × {{ editForm.leverage || 0 }}x</div>
+            <el-form-item :label="isRiskBasedSizing ? '每笔最大亏损' : '下单金额(U)'">
+              <template v-if="isRiskBasedSizing">
+                <div style="line-height:32px;">
+                  <span style="font-size:16px;font-weight:600;color:#E6A23C">{{ calcMaxLoss }}</span>
+                  <span style="color:#909399;font-size:12px;margin-left:4px">USDT (以损定仓)</span>
+                </div>
+                <div style="color:#909399;font-size:12px;">= 本金 {{ editForm.capital || 0 }} × {{ {1:'1%',2:'1.5%',3:'2%'}[editForm.risk_mode] || '1%' }}，仓位按止损距离自动调整</div>
+              </template>
+              <template v-else>
+                <div style="line-height:32px;">
+                  <span style="font-size:16px;font-weight:600;color:#409EFF">{{ calcAmountUsdt }}</span>
+                  <span style="color:#909399;font-size:12px;margin-left:4px">USDT (自动计算)</span>
+                </div>
+                <div style="color:#909399;font-size:12px;">= 本金 × {{ {1:'1%',2:'1.5%',3:'2%'}[editForm.risk_mode] || '1%' }} × {{ editForm.leverage || 0 }}x</div>
+              </template>
             </el-form-item>
           </el-col>
         </el-row>
@@ -288,6 +305,18 @@ export default {
   computed: {
     activeCount() { return this.list.filter(s => s.status === 1).length },
     exchangeCount() { return new Set(this.list.map(s => s.exchange).filter(Boolean)).size },
+    isRiskBasedSizing() {
+      // 编辑时判断当前策略是否开启了以损定仓
+      const cfg = this.editForm._config || {}
+      return !!cfg.risk_based_sizing
+    },
+    calcMaxLoss() {
+      const cap = Number(this.editForm.capital) || 0
+      const mode = Number(this.editForm.risk_mode) || 1
+      const pct = {1: 0.01, 2: 0.015, 3: 0.02}[mode] || 0.01
+      if (cap <= 0) return '0.00'
+      return (cap * pct).toFixed(2)
+    },
     calcAmountUsdt() {
       const cap = Number(this.editForm.capital) || 0
       const lev = Number(this.editForm.leverage) || 20
@@ -344,7 +373,8 @@ export default {
         risk_mode: row.risk_mode != null ? Number(row.risk_mode) : 1,
         min_confidence: row.min_confidence != null ? Number(row.min_confidence) : 50,
         cooldown_minutes: row.cooldown_minutes != null ? Number(row.cooldown_minutes) : 60,
-        status: row.status != null ? Number(row.status) : 1
+        status: row.status != null ? Number(row.status) : 1,
+        _config: row.config || {},
       }
       this.editVisible = true
     },

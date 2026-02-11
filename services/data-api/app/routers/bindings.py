@@ -26,6 +26,10 @@ def _binding_dict(b: StrategyBinding, user: User = None, tenant: Tenant = None, 
     risk_mode = int(b.risk_mode or 1)
     risk_label = StrategyBinding.RISK_MODE_LABELS.get(risk_mode, "稳健")
 
+    # 策略是否开启以损定仓
+    strat_config = strategy.get_config() if strategy else {}
+    risk_based = bool(strat_config.get("risk_based_sizing", False))
+
     return {
         "id": b.id,
         "user_id": b.user_id,
@@ -54,6 +58,7 @@ def _binding_dict(b: StrategyBinding, user: User = None, tenant: Tenant = None, 
         "point_card_total": (float(user.point_card_self or 0) + float(user.point_card_gift or 0)) if user else 0,
         "status": int(b.status or 1),
         "created_at": b.created_at.isoformat() if b.created_at else None,
+        "risk_based_sizing": risk_based,
     }
 
 

@@ -69,12 +69,18 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="下单金额(U)" width="110" align="right">
+        <el-table-column label="仓位模式" width="130" align="right">
           <template slot-scope="{row}">
-            <span v-if="row.amount_usdt > 0">{{ formatNum(row.amount_usdt) }}
-              <el-tooltip content="= 本金 × 风险比例 × 杠杆" placement="top"><i class="el-icon-info" style="color:#c0c4cc;font-size:12px;margin-left:2px"></i></el-tooltip>
-            </span>
-            <span v-else style="color:#909399">-</span>
+            <template v-if="row.risk_based_sizing">
+              <el-tag type="warning" size="mini">以损定仓</el-tag>
+              <div style="font-size:11px;color:#E6A23C">最大亏损 {{ formatMaxLoss(row) }}U</div>
+            </template>
+            <template v-else>
+              <span v-if="row.amount_usdt > 0">{{ formatNum(row.amount_usdt) }}
+                <el-tooltip content="= 本金 × 风险比例 × 杠杆" placement="top"><i class="el-icon-info" style="color:#c0c4cc;font-size:12px;margin-left:2px"></i></el-tooltip>
+              </span>
+              <span v-else style="color:#909399">-</span>
+            </template>
           </template>
         </el-table-column>
         <el-table-column label="累计盈亏" width="110" align="right">
@@ -138,8 +144,15 @@
         <el-descriptions-item label="杠杆">{{ detailRow.leverage || 20 }}X</el-descriptions-item>
         <el-descriptions-item label="风险档位">{{ detailRow.risk_mode_label || '稳健' }}（{{ detailRow.risk_mode === 3 ? '2%' : detailRow.risk_mode === 2 ? '1.5%' : '1%' }}）</el-descriptions-item>
         <el-descriptions-item label="单笔保证金">{{ detailRow.margin_per_trade > 0 ? formatNum(detailRow.margin_per_trade) + ' USDT' : '-' }}</el-descriptions-item>
-        <el-descriptions-item label="下单金额">{{ detailRow.amount_usdt > 0 ? formatNum(detailRow.amount_usdt) + ' USDT' : '-' }}
-          <span v-if="detailRow.amount_usdt > 0" style="color:#909399;font-size:12px"> (自动计算)</span>
+        <el-descriptions-item label="仓位模式">
+          <template v-if="detailRow.risk_based_sizing">
+            <el-tag type="warning" size="small">以损定仓</el-tag>
+            <span style="color:#909399;font-size:12px;margin-left:4px">每笔最大亏损 {{ formatMaxLoss(detailRow) }} USDT，仓位按止损距离自动调整</span>
+          </template>
+          <template v-else>
+            {{ detailRow.amount_usdt > 0 ? formatNum(detailRow.amount_usdt) + ' USDT' : '-' }}
+            <span v-if="detailRow.amount_usdt > 0" style="color:#909399;font-size:12px"> (= 本金×风险×杠杆)</span>
+          </template>
         </el-descriptions-item>
         <el-descriptions-item label="交易所">{{ (detailRow.exchange || '').toUpperCase() }}</el-descriptions-item>
         <el-descriptions-item label="点卡（自充/赠送）">{{ formatNum(detailRow.point_card_self) }} / {{ formatNum(detailRow.point_card_gift) }}</el-descriptions-item>
@@ -190,8 +203,16 @@
         </el-form-item>
         <el-form-item label="预估">
           <div class="preview-box">
-            <div>单笔保证金: <b>{{ calcMargin }} USDT</b></div>
-            <div>单笔仓位: <b>{{ calcAmount }} USDT</b></div>
+            <template v-if="editForm && editForm._risk_based_sizing">
+              <div>每笔最大亏损: <b style="color:#E6A23C">{{ calcMaxLoss }} USDT</b>
+                <el-tag type="warning" size="mini" style="margin-left:4px">以损定仓</el-tag>
+              </div>
+              <div style="color:#909399;font-size:12px">= 本金 × {{ {1:'1%',2:'1.5%',3:'2%'}[editForm.risk_mode] || '1%' }}，实际仓位按止损距离自动调整</div>
+            </template>
+            <template v-else>
+              <div>单笔保证金: <b>{{ calcMargin }} USDT</b></div>
+              <div>单笔仓位: <b>{{ calcAmount }} USDT</b></div>
+            </template>
           </div>
         </el-form-item>
       </el-form>
@@ -232,6 +253,11 @@ export default {
       const pct = RISK_PCT_MAP[this.editForm.risk_mode] || 0.01
       return (this.editForm.capital * pct).toFixed(2)
     },
+    calcMaxLoss() {
+      if (!this.editForm || !this.editForm.capital) return '0.00'
+      const pct = RISK_PCT_MAP[this.editForm.risk_mode] || 0.01
+      return (this.editForm.capital * pct).toFixed(2)
+    },
     calcAmount() {
       if (!this.editForm || !this.editForm.capital) return '0.00'
       const pct = RISK_PCT_MAP[this.editForm.risk_mode] || 0.01
@@ -244,6 +270,12 @@ export default {
   methods: {
     formatNum(v) {
       return v !== null && v !== undefined ? parseFloat(v).toFixed(2) : '0.00'
+    },
+    formatMaxLoss(row) {
+      const cap = Number(row.capital) || 0
+      const mode = Number(row.risk_mode) || 1
+      const pct = RISK_PCT_MAP[mode] || 0.01
+      return (cap * pct).toFixed(2)
     },
     formatTime(t) {
       return t ? t.replace('T', ' ').substring(0, 19) : '-'
@@ -267,6 +299,7 @@ export default {
         _user_email: row.user_email,
         _user_id: row.user_id,
         _strategy_name: row.strategy_name || row.strategy_code,
+        _risk_based_sizing: !!row.risk_based_sizing,
         capital: row.capital || 0,
         leverage: row.leverage || 20,
         risk_mode: row.risk_mode || 1,
