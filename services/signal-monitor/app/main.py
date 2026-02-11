@@ -662,9 +662,40 @@ def _check_pending_limit_orders_cycle():
                     log.info("限价单超时撤单",
                              key=pending_key, elapsed_min=f"{elapsed_minutes:.0f}",
                              max_min=max_wait_minutes)
-                    loop.run_until_complete(
+                    cancel_result = loop.run_until_complete(
                         trader.cancel_order(info["exchange_order_id"], info["symbol"])
                     )
+                    
+                    # ── 安全检查：撤单失败可能意味着刚刚成交 ──
+                    # 重新查一次订单状态，避免 "已成交但标记为过期" 的遗漏
+                    if cancel_result.status == OrderStatus.FAILED:
+                        recheck = loop.run_until_complete(
+                            trader.get_order(info["exchange_order_id"], info["symbol"])
+                        )
+                        if recheck.status in (OrderStatus.FILLED, OrderStatus.PARTIAL):
+                            log.warning("撤单失败但订单已成交，按成交处理",
+                                        key=pending_key, filled_price=recheck.filled_price)
+                            filled_price = recheck.filled_price or info["entry_price"]
+                            filled_qty = recheck.filled_quantity or 0
+                            # 按成交逻辑处理（写入 SL/TP）
+                            session = get_session()
+                            try:
+                                order_side = OrderSide.BUY if info["side"].upper() == "BUY" else OrderSide.SELL
+                                _write_sl_tp_to_position(
+                                    session, info["target"], info["symbol"], order_side,
+                                    filled_price, info["stop_loss"], info["take_profit"],
+                                    info["strategy_code"],
+                                )
+                                session.commit()
+                            finally:
+                                session.close()
+                            _db_update_pending_status(pending_key, "FILLED",
+                                                      filled_price=filled_price,
+                                                      filled_qty=filled_qty,
+                                                      filled_at=now)
+                            to_remove.append(pending_key)
+                            loop.run_until_complete(trader.close())
+                            continue  # 跳过后面的 EXPIRED 逻辑
                     
                     _db_update_pending_status(pending_key, "EXPIRED")
                     
@@ -1657,7 +1688,21 @@ async def _execute_signal_for_target(
         )
         
         if use_limit:
-            # ── 限价单：不会立即成交，追踪到 _pending_limit_orders ──
+            # ── 限价单：先检查是否下单成功 ──
+            limit_ok = order_result.status in (
+                OrderStatus.OPEN, OrderStatus.PENDING, OrderStatus.FILLED, OrderStatus.PARTIAL
+            )
+            if not limit_ok:
+                err = getattr(order_result, "error_message", None) or getattr(order_result, "error_code", None) or str(order_result.status)
+                log.warning("限价单下单失败", account_id=target.account_id,
+                            exchange=target.exchange, status=str(order_result.status), error=err)
+                await trader.close()
+                return {
+                    "account_id": target.account_id, "user_id": target.user_id,
+                    "success": False, "error": f"限价单下单失败: {err}",
+                }
+
+            # ── 限价单成功 → 追踪到 _pending_limit_orders ──
             strategy_code = signal.get("strategy") or signal.get("strategy_code") or ""
             pending_key = f"{strategy_code}:{symbol}"
             exchange_order_id = getattr(order_result, "exchange_order_id", None) or getattr(order_result, "order_id", None)
