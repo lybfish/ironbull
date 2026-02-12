@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 # ============================================================
 # IronBull 生产启动脚本
-# 用法：
-#   1. 复制 env.production.example 为 .env.production 并填入实际值
-#   2. chmod +x deploy/start.sh
-#   3. 所有服务：
-#      ./deploy/start.sh start   — 启动全部
-#      ./deploy/start.sh stop    — 停止全部
-#      ./deploy/start.sh restart — 重启全部
-#      ./deploy/start.sh status  — 查看状态
-#   4. 指定服务（可选，第二个参数起为服务名）：
-#      ./deploy/start.sh start data-api merchant-api
-#      ./deploy/start.sh stop signal-monitor
-#      ./deploy/start.sh restart data-api
-# 服务名：data-api | merchant-api | signal-monitor | monitor-daemon | execution-node | mt5-node
+# ============================================================
+# 端口分配规范：
+# +--------+------------------+--------------------------------+
+# | 端口   | 服务              | 说明                           |
+# +--------+------------------+--------------------------------+
+# | 8005   | data-provider    | 交易所数据提供者                 |
+# | 8010   | merchant-api     | 商家/商户管理 API               |
+# | 8020   | signal-monitor   | 信号监控服务 (原用 Flask，现改 uvicorn) |
+# | 8026   | data-api         | 数据 API (管理后台)             |
+# | 9101   | execution-node   | 币圈执行节点                    |
+# | 9102   | mt5-node         | MT5 节点 (Linux控制端)          |
+# | 9103   | 预留             | mt5.aigomsg.com 反向代理用     |
+# +--------+------------------+--------------------------------+
+# 注意：每个服务独占一个端口，互不干扰
 # ============================================================
 
 set -euo pipefail
@@ -36,11 +37,6 @@ fi
 
 export PYTHONPATH="$PROJECT_ROOT"
 mkdir -p "$PID_DIR" "$LOG_DIR"
-# 确保 pid 目录可写，否则 start/restart 会失败
-if ! [ -w "$PID_DIR" ]; then
-    echo "[!] Cannot write to $PID_DIR (permission denied). Fix: chown -R \$(whoami) $PROJECT_ROOT/tmp"
-    exit 1
-fi
 
 # 诊断：确认 python3 和关键模块可用
 echo "[✓] Running as: $(whoami) | HOME=$HOME | python3=$(command -v python3 || echo 'NOT FOUND')"
@@ -55,31 +51,29 @@ if ! python3 -c "import uvicorn" 2>/dev/null; then
     exit 1
 fi
 
-# ---- 服务定义（case 实现，兼容 Bash 3.x / macOS） ----
-ALL_SERVICES="data-provider data-api merchant-api signal-monitor monitor-daemon execution-node mt5-node"
+# ---- 服务定义 ----
+ALL_SERVICES="data-provider merchant-api signal-monitor data-api execution-node mt5-node"
 
 get_service_cmd() {
     case "$1" in
-        data-provider)  echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8005 --workers 1" ;;
-        data-api)       echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8026 --workers 2" ;;
-        merchant-api)   echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8010 --workers 2" ;;
-        signal-monitor) echo "python3 -m flask --app app.main run --host=0.0.0.0 --port=8020" ;;
-        monitor-daemon)   echo "python3 scripts/monitor_daemon.py" ;;
+        data-provider)    echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8005 --workers 1" ;;
+        merchant-api)     echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8010 --workers 2" ;;
+        signal-monitor)   echo "python3 -m uvicorn services.signal-monitor.app.main:app --host 0.0.0.0 --port 8020 --workers 1" ;;
+        data-api)         echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8026 --workers 2" ;;
         execution-node)   echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 9101 --workers 1" ;;
-        mt5-node)       echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 9102 --workers 1" ;;
+        mt5-node)         echo "python3 -m uvicorn nodes.mt5-node.app.main:app --host 0.0.0.0 --port 9102 --workers 1" ;;
         *)                echo "" ;;
     esac
 }
 
 get_service_dir() {
     case "$1" in
-        data-provider)  echo "$PROJECT_ROOT/services/data-provider" ;;
-        data-api)       echo "$PROJECT_ROOT/services/data-api" ;;
-        merchant-api)   echo "$PROJECT_ROOT/services/merchant-api" ;;
-        signal-monitor) echo "$PROJECT_ROOT/services/signal-monitor" ;;
-        monitor-daemon)   echo "$PROJECT_ROOT" ;;
+        data-provider)    echo "$PROJECT_ROOT/services/data-provider" ;;
+        merchant-api)     echo "$PROJECT_ROOT/services/merchant-api" ;;
+        signal-monitor)   echo "$PROJECT_ROOT/services/signal-monitor" ;;
+        data-api)         echo "$PROJECT_ROOT/services/data-api" ;;
         execution-node)   echo "$PROJECT_ROOT/services/execution-node" ;;
-        mt5-node)       echo "$PROJECT_ROOT/nodes/mt5-node" ;;
+        mt5-node)         echo "$PROJECT_ROOT/nodes/mt5-node" ;;
         *)                echo "" ;;
     esac
 }
