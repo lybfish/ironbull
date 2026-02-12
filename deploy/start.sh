@@ -58,7 +58,7 @@ get_service_cmd() {
     case "$1" in
         data-provider)    echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8005 --workers 1" ;;
         merchant-api)     echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8010 --workers 2" ;;
-        signal-monitor)   echo "python3 -m uvicorn services.signal-monitor.app.main:app --host 0.0.0.0 --port 8020 --workers 1" ;;
+        signal-monitor)   echo "python3 -m flask --app app.main run --host=0.0.0.0 --port=8020" ;;
         data-api)         echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8026 --workers 2" ;;
         execution-node)   echo "python3 -m uvicorn app.main:app --host 0.0.0.0 --port 9101 --workers 1" ;;
         mt5-node)         echo "python3 -m uvicorn nodes.mt5-node.app.main:app --host 0.0.0.0 --port 9102 --workers 1" ;;
