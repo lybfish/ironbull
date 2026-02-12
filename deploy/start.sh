@@ -91,10 +91,8 @@ start_service() {
         echo "  [skip] $name already running (pid=$(cat "$pid_file"))"
         return
     fi
-    # 进程已死或 pid 文件陈旧：删除以便本用户能写入新 pid（避免 root 部署留下的 pid 文件导致权限错误）
     rm -f "$pid_file" 2>/dev/null || true
 
-    # 日志文件过大时自动轮转（>200MB）
     if [ -f "$log_file" ]; then
         local log_size
         log_size=$(stat -f%z "$log_file" 2>/dev/null || stat -c%s "$log_file" 2>/dev/null || echo 0)
@@ -106,19 +104,20 @@ start_service() {
 
     echo "  [start] $name ..."
     cd "$dir"
+
+    # 导出所有 IRONBULL_ 环境变量，确保子进程能继承
+    export $(grep -E '^IRONBULL_' "$ENV_FILE" | xargs) 2>/dev/null || true
+
     nohup $cmd >> "$log_file" 2>&1 &
     local pid=$!
     echo $pid > "$pid_file"
 
-    # 等待 2 秒后验证进程是否真的存活（捕获秒退情况）
     sleep 2
     if kill -0 "$pid" 2>/dev/null; then
         echo "  [ok] $name started (pid=$pid, log=$log_file)"
     else
-        echo "  [FAIL] $name exited immediately (pid=$pid was not alive after 2s)"
-        echo "  --- last 15 lines of $log_file ---"
+        echo "  [FAIL] $name exited immediately"
         tail -15 "$log_file" 2>/dev/null || echo "  (no log output)"
-        echo "  ---"
         rm -f "$pid_file"
     fi
 }
