@@ -8,7 +8,7 @@
 # +--------+------------------+--------------------------------+
 # | 8005   | data-provider    | 交易所数据提供者                 |
 # | 8010   | merchant-api     | 商家/商户管理 API               |
-# | 8020   | signal-monitor   | 信号监控服务 (原用 Flask，现改 uvicorn) |
+# | 8020   | signal-monitor   | 信号监控服务 (Flask 应用)              |
 # | 8026   | data-api         | 数据 API (管理后台)             |
 # | 9101   | execution-node   | 币圈执行节点                    |
 # | 9102   | mt5-node         | MT5 节点 (Linux控制端)          |
